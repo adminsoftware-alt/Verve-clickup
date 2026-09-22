@@ -64,34 +64,35 @@ def nag_timesheets(current_admin: dict = Depends(get_current_admin_user)):
         users = db.collection("users").where("role", "in", ["Employee", "employee"]).stream()
         user_ids = [u.id for u in users]
         
-        # 2. Get today's time entries
-        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        tomorrow = today + timedelta(days=1)
-        
-        entries = db.collection("time_entries").where("date", ">=", today).where("date", "<", tomorrow).stream()
+        # 2. Get today's time entries from the correct 'timeEntries' collection
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        entries = db.collection("timeEntries").where("date", "==", today_str).stream()
         
         # 3. Calculate hours per user
-        user_hours = {uid: 0 for uid in user_ids}
+        user_hours = {uid: 0.0 for uid in user_ids}
         for entry in entries:
-            data = entry.to_dict()
-            uid = data.get("userId")
-            if uid in user_hours:
-                user_hours[uid] += data.get("duration", 0) / 3600  # assuming duration in seconds
+            data = entry.to_dict() or {}
+            owner_id = data.get("owner_id") or data.get("userId")
+            if owner_id in user_hours:
+                user_hours[owner_id] += float(data.get("hours_worked") or 0.0)
                 
         # 4. Create notifications for those < 8 hours
         nagged_count = 0
         batch = db.batch()
         for uid, hours in user_hours.items():
-            if hours < 8:
+            if hours < 8.0:
                 notif_id = str(uuid.uuid4())
                 notif_ref = db.collection("notifications").document(notif_id)
                 batch.set(notif_ref, {
                     "id": notif_id,
                     "userId": uid,
                     "title": "Missing Timesheet",
-                    "message": f"You have only logged {hours:.1f} hours today. Please complete your timesheet.",
-                    "type": "warning",
-                    "read": False,
+                    "message": f"You have logged {hours:.1f} of 8.0 required hours today. Please complete your timesheet.",
+                    "type": "TimesheetReminder",
+                    "entityType": "Timesheet",
+                    "entityId": today_str,
+                    "triggeredBy": str(current_admin.get("uid", "system")),
+                    "isRead": False,
                     "createdAt": datetime.now(timezone.utc)
                 })
                 nagged_count += 1

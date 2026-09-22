@@ -111,3 +111,56 @@ def test_completed_task_validation():
     assert update_succeed.json()["status"] == "Completed"
     assert update_succeed.json()["actualHours"] == 3.5
 
+def test_assignee_task_access_and_time_logging():
+    # Manager creates a task assigned to employee 'assigned_user_999'
+    manager_task_data = {
+        "title": "Manager Assigned Task",
+        "description": "Task for employee to work on",
+        "estimatedHours": 8,
+        "priority": "High",
+        "projectId": "proj_123",
+        "assignedUserId": "assigned_user_999",
+        "startDate": "2026-07-21",
+        "dueDate": "2026-07-25"
+    }
+    create_resp = client.post("/api/v1/tasks/", json=manager_task_data)
+    assert create_resp.status_code in [200, 201]
+    task_id = create_resp.json()["id"]
+
+    # Switch user to assigned_user_999
+    def override_assigned_user():
+        return {"uid": "assigned_user_999", "email": "employee@example.com"}
+    app.dependency_overrides[get_current_user] = override_assigned_user
+
+    try:
+        # Assigned employee should be able to view this task
+        get_resp = client.get(f"/api/v1/tasks/{task_id}")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["id"] == task_id
+        assert get_resp.json()["assignedUserId"] == "assigned_user_999"
+
+        # Assigned employee should appear in get_tasks
+        list_resp = client.get("/api/v1/tasks/")
+        assert list_resp.status_code == 200
+        assert any(t["id"] == task_id for t in list_resp.json())
+
+        # Assigned employee should be able to log time on this task
+        te_data = {
+            "task_id": task_id,
+            "date": "2026-07-22",
+            "hours_worked": 3.0,
+            "notes": "Worked 3 hours on manager task"
+        }
+        te_resp = client.post("/api/v1/time-entries/", json=te_data)
+        assert te_resp.status_code in [200, 201], f"Assignee failed to log time: {te_resp.text}"
+        te_id = te_resp.json()["id"]
+
+        # Assigned employee should be able to update their time entry
+        te_update = {"hours_worked": 4.5, "notes": "Updated to 4.5 hours"}
+        te_put_resp = client.put(f"/api/v1/time-entries/{te_id}", json=te_update)
+        assert te_put_resp.status_code == 200
+        assert te_put_resp.json()["hours_worked"] == 4.5
+    finally:
+        # Restore default test user
+        app.dependency_overrides[get_current_user] = override_get_current_user
+

@@ -227,7 +227,7 @@ const SortableRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSel
             <button 
               onClick={() => startTimer(task.id, task.title)} 
               title="Start Timer" 
-              className="btn-paper-icon"
+              className="premium-icon-btn"
             >
               <Play size={12} color="#4F46E5" />
             </button>
@@ -237,7 +237,7 @@ const SortableRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSel
             <button 
               onClick={() => pauseTimer(task.id)} 
               title="Pause Timer" 
-              className="btn-paper-icon"
+              className="premium-icon-btn"
             >
               <Pause size={12} color="#D97706" />
             </button>
@@ -247,7 +247,7 @@ const SortableRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSel
             <button 
               onClick={() => startTimer(task.id, task.title)} 
               title="Resume Timer" 
-              className="btn-paper-icon"
+              className="premium-icon-btn"
             >
               <Play size={12} color="#10B981" />
             </button>
@@ -261,14 +261,14 @@ const SortableRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSel
                   onTimeLogged();
                 }} 
                 title="Save & Log Time" 
-                className="btn-paper-icon"
+                className="premium-icon-btn"
               >
                 <CheckCircle2 size={12} color="#10B981" />
               </button>
               <button 
                 onClick={() => cancelTimer(task.id)} 
                 title="Cancel Timer" 
-                className="btn-paper-icon"
+                className="premium-icon-btn"
               >
                 <XCircle size={12} color="#EF4444" />
               </button>
@@ -279,7 +279,7 @@ const SortableRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSel
           <button 
             onClick={() => onLogTime(task.id)} 
             title="Log Time Manually" 
-            className="btn-paper-icon"
+            className="premium-icon-btn"
           >
             <Plus size={12} color="#4B5563" />
           </button>
@@ -288,7 +288,7 @@ const SortableRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSel
           <button 
             onClick={() => onStartFocus(task)} 
             title="Start Focus Sprint" 
-            className="btn-paper-icon"
+            className="premium-icon-btn"
           >
             <Target size={12} color="#DC2626" />
           </button>
@@ -297,7 +297,7 @@ const SortableRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSel
           <button 
             onClick={() => onDelete(task.id)} 
             title="Delete Task" 
-            className="btn-paper-icon"
+            className="premium-icon-btn"
           >
             <Trash2 size={12} color="#EF4444" />
           </button>
@@ -491,7 +491,7 @@ const StaticRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSelec
             <button 
               onClick={() => startTimer(task.id, task.title)} 
               title="Start Timer" 
-              className="btn-paper-icon"
+              className="premium-icon-btn"
             >
               <Play size={12} color="#4F46E5" />
             </button>
@@ -501,7 +501,7 @@ const StaticRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSelec
             <button 
               onClick={() => pauseTimer(task.id)} 
               title="Pause Timer" 
-              className="btn-paper-icon"
+              className="premium-icon-btn"
             >
               <Pause size={12} color="#D97706" />
             </button>
@@ -511,7 +511,7 @@ const StaticRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSelec
             <button 
               onClick={() => startTimer(task.id, task.title)} 
               title="Resume Timer" 
-              className="btn-paper-icon"
+              className="premium-icon-btn"
             >
               <Play size={12} color="#10B981" />
             </button>
@@ -525,14 +525,14 @@ const StaticRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSelec
                   onTimeLogged();
                 }} 
                 title="Save & Log Time" 
-                className="btn-paper-icon"
+                className="premium-icon-btn"
               >
                 <CheckCircle2 size={12} color="#10B981" />
               </button>
               <button 
                 onClick={() => cancelTimer(task.id)} 
                 title="Cancel Timer" 
-                className="btn-paper-icon"
+                className="premium-icon-btn"
               >
                 <XCircle size={12} color="#EF4444" />
               </button>
@@ -543,7 +543,7 @@ const StaticRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSelec
           <button 
             onClick={() => onLogTime(task.id)} 
             title="Log Time Manually" 
-            className="btn-paper-icon"
+            className="premium-icon-btn"
           >
             <Plus size={12} color="#4B5563" />
           </button>
@@ -552,7 +552,7 @@ const StaticRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSelec
           <button 
             onClick={() => onStartFocus(task)} 
             title="Start Focus Sprint" 
-            className="btn-paper-icon"
+            className="premium-icon-btn"
           >
             <Target size={12} color="#DC2626" />
           </button>
@@ -561,7 +561,7 @@ const StaticRow: React.FC<SortableRowProps> = ({ task, isSelected, onToggleSelec
           <button 
             onClick={() => onDelete(task.id)} 
             title="Delete Task" 
-            className="btn-paper-icon"
+            className="premium-icon-btn"
           >
             <Trash2 size={12} color="#EF4444" />
           </button>
@@ -1386,7 +1386,7 @@ export const Tasks: React.FC = () => {
           />
           <button 
             onClick={() => setShowForm(true)}
-            className="btn-paper btn-paper-primary"
+            className="premium-btn premium-btn-primary"
           >
             <Plus size={14} /> New Task
           </button>
@@ -2320,8 +2320,8 @@ export const Tasks: React.FC = () => {
                   })()}
                 </span>
                 <div style={{ display: 'flex', gap: '12px' }}>
-                  <button type="button" onClick={() => setLogTimeTaskId(null)} className="btn-paper">Close</button>
-                  <button type="submit" className="btn-paper btn-paper-primary">Save</button>
+                  <button type="button" onClick={() => setLogTimeTaskId(null)} className="premium-btn">Close</button>
+                  <button type="submit" className="premium-btn premium-btn-primary">Save</button>
                 </div>
               </div>
             </form>
@@ -2436,7 +2436,7 @@ export const Tasks: React.FC = () => {
                     setLogTimeTaskId(focusSession.taskId);
                     stopFocus();
                   }}
-                  className="btn-paper btn-paper-primary"
+                  className="premium-btn premium-btn-primary"
                   style={{ width: '100%', fontSize: '0.875rem', padding: '12px' }}
                 >
                   Log Sprint Time Now
@@ -2453,7 +2453,7 @@ export const Tasks: React.FC = () => {
                 {focusSession.isRunning ? (
                   <button
                     onClick={pauseFocus}
-                    className="btn-paper"
+                    className="premium-btn"
                     style={{ padding: '10px 24px', backgroundColor: '#F59E0B', color: '#111827', border: 'none' }}
                   >
                     Pause
@@ -2461,7 +2461,7 @@ export const Tasks: React.FC = () => {
                 ) : (
                   <button
                     onClick={resetFocus}
-                    className="btn-paper btn-paper-primary"
+                    className="premium-btn premium-btn-primary"
                     style={{ padding: '10px 24px' }}
                   >
                     Resume
@@ -2470,7 +2470,7 @@ export const Tasks: React.FC = () => {
                 
                 <button
                   onClick={stopFocus}
-                  className="btn-paper btn-paper-danger"
+                  className="premium-btn premium-btn-danger"
                   style={{ padding: '10px 24px' }}
                 >
                   Quit Session

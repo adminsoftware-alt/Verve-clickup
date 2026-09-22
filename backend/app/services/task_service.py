@@ -68,25 +68,55 @@ def create_task(user_id: str, task_in: TaskCreate) -> TaskInDB:
 
     return task
 
-def get_tasks(user_id: str) -> List[TaskInDB]:
+def get_tasks(user_id: str, is_admin: bool = False) -> List[TaskInDB]:
     db = _get_db()
-    docs = db.collection('tasks').where(filter=FieldFilter('userId', '==', user_id)).where(filter=FieldFilter('isArchived', '==', False)).stream()
+    if is_admin:
+        docs = db.collection('tasks').where(filter=FieldFilter('isArchived', '==', False)).stream()
+        tasks = []
+        for doc in docs:
+            data = doc.to_dict() or {}
+            data["id"] = doc.id
+            tasks.append(TaskInDB.model_validate(data))
+        return tasks
+
+    # Retrieve tasks created by user, directly assigned to user, or where user is in assignees
+    tasks_dict = {}
     
-    tasks = []
-    for doc in docs:
+    # 1. Created by user
+    for doc in db.collection('tasks').where(filter=FieldFilter('userId', '==', user_id)).where(filter=FieldFilter('isArchived', '==', False)).stream():
         data = doc.to_dict() or {}
         data["id"] = doc.id
-        tasks.append(TaskInDB.model_validate(data))
-    return tasks
+        tasks_dict[doc.id] = TaskInDB.model_validate(data)
 
-def get_task(user_id: str, task_id: str) -> Optional[TaskInDB]:
+    # 2. Assigned to user (assignedUserId)
+    for doc in db.collection('tasks').where(filter=FieldFilter('assignedUserId', '==', user_id)).where(filter=FieldFilter('isArchived', '==', False)).stream():
+        if doc.id not in tasks_dict:
+            data = doc.to_dict() or {}
+            data["id"] = doc.id
+            tasks_dict[doc.id] = TaskInDB.model_validate(data)
+
+    # 3. In assignees list
+    for doc in db.collection('tasks').where(filter=FieldFilter('assignees', 'array_contains', user_id)).where(filter=FieldFilter('isArchived', '==', False)).stream():
+        if doc.id not in tasks_dict:
+            data = doc.to_dict() or {}
+            data["id"] = doc.id
+            tasks_dict[doc.id] = TaskInDB.model_validate(data)
+
+    return list(tasks_dict.values())
+
+def get_task(user_id: str, task_id: str, is_admin: bool = False) -> Optional[TaskInDB]:
     db = _get_db()
     doc_ref = db.collection('tasks').document(task_id)
     doc = doc_ref.get()
     
     if doc.exists:
         data = doc.to_dict() or {}
-        if data.get('userId') == user_id and not data.get('isArchived', False):
+        assignees_list = data.get('assignees', [])
+        primary_assignee = data.get('assignedUserId')
+        is_owner = data.get('userId') == user_id
+        is_assignee = user_id in assignees_list or user_id == primary_assignee
+        
+        if (is_owner or is_assignee or is_admin) and not data.get('isArchived', False):
             data["id"] = doc.id
             return TaskInDB.model_validate(data)
     return None
@@ -155,15 +185,15 @@ def update_task(user_id: str, task_id: str, task_update: TaskUpdate) -> Optional
             
     return None
 
-def delete_task(user_id: str, task_id: str) -> bool:
+def delete_task(user_id: str, task_id: str, is_admin: bool = False) -> bool:
     db = _get_db()
     doc_ref = db.collection('tasks').document(task_id)
     doc = doc_ref.get()
     
     if doc.exists:
         data = doc.to_dict() or {}
-        if data.get('userId') == user_id and not data.get('isArchived', False):
-            from datetime import timezone, datetime
+        is_owner = data.get('userId') == user_id
+        if (is_owner or is_admin) and not data.get('isArchived', False):
             # Soft delete
             doc_ref.update({
                 'isArchived': True,
@@ -179,7 +209,12 @@ def toggle_task_star(user_id: str, task_id: str) -> Optional[TaskInDB]:
     
     if doc.exists:
         data = doc.to_dict() or {}
-        if data.get('userId') == user_id and not data.get('isArchived', False):
+        assignees_list = data.get('assignees', [])
+        primary_assignee = data.get('assignedUserId')
+        is_owner = data.get('userId') == user_id
+        is_assignee = user_id in assignees_list or user_id == primary_assignee
+        
+        if (is_owner or is_assignee) and not data.get('isArchived', False):
             current_starred = data.get('isStarred', False)
             doc_ref.update({
                 'isStarred': not current_starred,

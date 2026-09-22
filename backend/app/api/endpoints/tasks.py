@@ -11,7 +11,10 @@ router = APIRouter()
 @router.get("/", response_model=List[TaskResponse])
 def get_tasks(current_user: dict = Depends(get_current_user)):
     user_id = str(current_user.get("uid", ""))
-    return task_service.get_tasks(user_id)
+    from app.services.admin_service import admin_service
+    user_db = admin_service.get_user(user_id)
+    is_admin = bool(user_db and user_db.role == "Admin")
+    return task_service.get_tasks(user_id, is_admin=is_admin)
 
 @router.post("/", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 def create_task(task_in: TaskCreate, current_user: dict = Depends(get_current_user)):
@@ -37,7 +40,10 @@ def create_task(task_in: TaskCreate, current_user: dict = Depends(get_current_us
 @router.get("/{task_id}", response_model=TaskResponse)
 def get_task(task_id: str, current_user: dict = Depends(get_current_user)):
     user_id = str(current_user.get("uid", ""))
-    task = task_service.get_task(user_id, task_id)
+    from app.services.admin_service import admin_service
+    user_db = admin_service.get_user(user_id)
+    is_admin_or_mgr = bool(user_db and user_db.role in ["Admin", "Manager"])
+    task = task_service.get_task(user_id, task_id, is_admin=is_admin_or_mgr)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
@@ -68,7 +74,10 @@ def update_task(task_id: str, task_in: TaskUpdate, current_user: dict = Depends(
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(task_id: str, current_user: dict = Depends(get_current_user)):
     user_id = str(current_user.get("uid", ""))
-    success = task_service.delete_task(user_id, task_id)
+    from app.services.admin_service import admin_service
+    user_db = admin_service.get_user(user_id)
+    is_admin = bool(user_db and user_db.role == "Admin")
+    success = task_service.delete_task(user_id, task_id, is_admin=is_admin)
     if not success:
         raise HTTPException(status_code=404, detail="Task not found")
 

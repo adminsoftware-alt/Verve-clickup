@@ -1,0 +1,129 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to get current user data
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    // Helper function to check if user has admin role
+    function isAdmin() {
+      return isAuthenticated() && getUserData().role == 'Admin';
+    }
+
+    // Helper function to check if user has manager or admin role
+    function isManagerOrAdmin() {
+      return isAuthenticated() && getUserData().role in ['Admin', 'Manager'];
+    }
+
+    // USERS COLLECTION
+    match /users/{userId} {
+      // Authenticated users can view user directory
+      allow read: if isAuthenticated();
+      
+      // New user creation: can only register with 'Employee' role, not self-promote to Admin
+      allow create: if isAuthenticated() && (
+        request.auth.uid == userId &&
+        (!('role' in request.resource.data) || request.resource.data.role == 'Employee')
+      );
+      
+      // User update: users can update display name and photo, but NOT their own role (only Admin can change role)
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']))
+      );
+      
+      allow delete: if isAdmin();
+    }
+
+    // WORKSPACE HIERARCHY (Spaces, Folders, Lists)
+    match /spaces/{spaceId} {
+      allow read: if isAuthenticated();
+      allow write: if isManagerOrAdmin();
+    }
+
+    match /folders/{folderId} {
+      allow read: if isAuthenticated();
+      allow write: if isManagerOrAdmin();
+    }
+
+    match /lists/{listId} {
+      allow read: if isAuthenticated();
+      allow write: if isManagerOrAdmin();
+    }
+
+    // TASKS COLLECTION
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // TASK CHECKLISTS & ATTACHMENTS
+    match /taskChecklists/{checklistId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /taskAttachments/{attachmentId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // TIME ENTRIES COLLECTION
+    match /timeEntries/{entryId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.owner_id == request.auth.uid;
+      allow update, delete: if isAuthenticated() && (resource.data.owner_id == request.auth.uid || isAdmin());
+    }
+
+    // CHAT ROOMS & MESSAGES
+    match /chatRooms/{roomId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /messages/{messageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && (resource.data.senderId == request.auth.uid || isAdmin());
+    }
+
+    // LEAVE REQUESTS
+    match /leaveRequests/{leaveId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      // Employees cannot approve their own leaves; only Managers and Admins can update leave status
+      allow update: if isManagerOrAdmin();
+      allow delete: if isAdmin() || (resource.data.userId == request.auth.uid && resource.data.status == 'Pending');
+    }
+
+    // NOTIFICATIONS
+    match /notifications/{notifId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated();
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // AUDIT LOGS (Admin read-only, created by server)
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ORGANIZATION SETTINGS
+    match /organizationSettings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // USER PRESENCE
+    match /userPresence/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+  }
+}

@@ -22,7 +22,7 @@ export const requestNotificationPermission = async (token: string) => {
       
       if (currentToken) {
         // Send token to backend to save for this user
-        await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/notifications/token`, {
+        await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/notifications/token`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

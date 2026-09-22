@@ -121,6 +121,37 @@ def delete_time_entry(user_id: str, entry_id: str) -> bool:
             return True
     return False
 
+def update_time_entry(user_id: str, entry_id: str, entry_in: TimeEntryUpdate) -> Optional[TimeEntryInDB]:
+    db = _get_db()
+    doc_ref = db.collection('timeEntries').document(entry_id)
+    doc = doc_ref.get()
+    
+    if doc.exists:
+        data = doc.to_dict() or {}
+        if data.get('owner_id') == user_id:
+            task_id = data.get('task_id')
+            old_hours = data.get('hours_worked', 0.0)
+            
+            update_data = entry_in.model_dump(exclude_unset=True)
+            if 'date' in update_data and update_data['date'] is not None:
+                update_data['date'] = str(update_data['date'])
+                
+            update_data['updated_at'] = datetime.now(timezone.utc)
+            
+            # If hours changed, adjust actualHours on parent task
+            if 'hours_worked' in update_data and task_id:
+                diff = update_data['hours_worked'] - old_hours
+                if diff != 0:
+                    task_ref = db.collection('tasks').document(task_id)
+                    task_ref.update({'actualHours': Increment(diff)})
+                    
+            doc_ref.update(update_data)
+            updated_doc = doc_ref.get()
+            updated_data = updated_doc.to_dict() or {}
+            updated_data['id'] = doc_ref.id
+            return TimeEntryInDB(**updated_data)
+    return None
+
 def get_actual_hours_for_task(user_id: str, task_id: str) -> float:
     entries = get_time_entries_for_task(user_id, task_id)
     return sum(e.hours_worked for e in entries)

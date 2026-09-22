@@ -74,7 +74,7 @@ const SpacePageView: React.FC<{ spaceId: string }> = ({ spaceId }) => {
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "16px" }}>
           {space.folders.map(folder => (
-            <div key={folder.id} onClick={() => navigate(`/spaces/${spaceId}/folders/${folder.id}`)}
+            <div key={folder.id} onClick={() => navigate(`/folders/${folder.id}`)}
               style={{ backgroundColor: "white", border: "1px solid #E5E7EB", borderRadius: "12px", padding: "20px", cursor: "pointer" }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = "#6366F1"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(99,102,241,0.12)"; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = "#E5E7EB"; e.currentTarget.style.boxShadow = "none"; }}>

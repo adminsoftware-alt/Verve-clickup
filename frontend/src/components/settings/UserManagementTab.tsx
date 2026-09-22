@@ -24,7 +24,7 @@ export const UserManagementTab: React.FC = () => {
   const fetchUsers = async () => {
     try {
       const token = await user?.getIdToken();
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/admin/users`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/admin/users`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!res.ok) throw new Error('Failed to fetch users');
@@ -40,7 +40,7 @@ export const UserManagementTab: React.FC = () => {
   const handleRoleChange = async (uid: string, newRole: string) => {
     try {
       const token = await user?.getIdToken();
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/admin/users/${uid}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/admin/users/${uid}`, {
         method: 'PUT',
         headers: { 
           'Authorization': `Bearer ${token}`,

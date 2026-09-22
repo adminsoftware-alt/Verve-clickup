@@ -273,14 +273,14 @@ export const Settings: React.FC = () => {
           <div style={{ display: 'flex', gap: '12px' }}>
             <button 
               onClick={handleResetLocalData}
-              className="btn-paper btn-paper-danger"
+              className="premium-btn premium-btn-danger"
               style={{ flex: 1 }}
             >
               <Trash2 size={14} /> Clear All Local Data
             </button>
             <button 
               onClick={handleLoadDemoData}
-              className="btn-paper"
+              className="premium-btn"
               style={{ flex: 1, backgroundColor: '#3B82F6', color: 'white', border: 'none' }}
             >
               <Sparkles size={14} /> Load Demo Data
@@ -293,7 +293,7 @@ export const Settings: React.FC = () => {
           <button 
             onClick={handleSave}
             disabled={saving}
-            className="btn-paper btn-paper-primary"
+            className="premium-btn premium-btn-primary"
             style={{ padding: '10px 24px' }}
           >
             {saving ? 'Saving...' : 'Save Settings'}

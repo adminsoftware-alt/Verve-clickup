@@ -38,17 +38,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const userSnap = await getDoc(userRef);
           
           if (!userSnap.exists()) {
-            const pendingRole = localStorage.getItem('pendingUserRole') || 'Employee';
+            const defaultRole = 'Employee';
             const newUser = {
               displayName: u.displayName || u.email?.split('@')[0] || 'User',
               email: u.email,
-              role: pendingRole,
+              role: defaultRole,
               createdAt: serverTimestamp(),
               lastLogin: serverTimestamp()
             };
             await setDoc(userRef, newUser);
-            setRole(pendingRole);
-            localStorage.removeItem('pendingUserRole');
+            setRole(defaultRole);
           } else {
             // Update last login
             const userData = userSnap.data();

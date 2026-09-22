@@ -41,3 +41,10 @@ Thumbs.db
 
 # Markdown notes
 *.md
+
+# Task attachments (v2)
+backend/uploads/
+
+# Internal Verve documents (kept local; the repo is public)
+SOP - *.docx
+docs/Timetriq-vs-ClickUp-review.html

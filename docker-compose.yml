@@ -1,0 +1,26 @@
+# Local development database for the v2 work hierarchy.
+#   docker compose up -d db
+# Then in backend/.env:
+#   DATABASE_URL=postgresql+psycopg://timetriq:timetriq_dev@localhost:5433/timetriq
+# These credentials are for local development only.
+services:
+  db:
+    image: postgres:17
+    container_name: timetriq-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: timetriq
+      POSTGRES_PASSWORD: timetriq_dev
+      POSTGRES_DB: timetriq
+    ports:
+      - "5433:5432"
+    volumes:
+      - timetriq-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U timetriq -d timetriq"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  timetriq-pgdata:

@@ -9,13 +9,20 @@ import {
   Bell, ChevronDown, MessageSquare,
   Activity, Briefcase, Plus, X, Users
 } from 'lucide-react';
-import { WorkspaceSidebar } from './workspace/WorkspaceSidebar';
+import { SpacesSidebar } from '../work/SpacesSidebar';
+import { MyTasksNav } from '../work/MyTasksNav';
+import { FavoritesNav } from '../work/Favorites';
+import { GlobalSearch, SearchButton } from '../work/GlobalSearch';
+import { RunningTimerChip } from '../work/RunningTimer';
 import { StatusSelector } from './StatusSelector';
+import { FEATURES } from '../config/features';
+import { HeaderInboxBell } from '../work/InboxPages';
 import { presenceService, type UserPresence } from '../services/presenceService';
 
 export const Layout: React.FC = () => {
   const { logout, hasRole } = useAuth();
   const location = useLocation();
+  const isLocationPage = /^\/((s|f|l)\/|my-tasks|dashboards|timesheets|inbox|replies|assigned-comments|reminders|people|all-tasks|forms|planner)/.test(location.pathname);
   const { timers, stopTimer, getLiveElapsedSeconds, focusSession, stopFocus } = useTimer();
   const { notifications, unreadCount, markAsRead, markAllAsRead, clearAll } = useNotifications();
   
@@ -81,13 +88,13 @@ export const Layout: React.FC = () => {
 
   const baseNavItems = [
     { name: 'Dashboard', path: '/', icon: <LayoutDashboard size={18} /> },
-    { name: 'My Tasks', path: '/tasks', icon: <CheckSquare size={18} /> },
-    { name: 'Chat', path: '/chat', icon: <MessageSquare size={18} /> },
-    { name: 'Time Tracking', path: '/time-entries', icon: <Clock size={18} /> },
-    { name: 'Calendar', path: '/calendar', icon: <Calendar size={18} /> },
-    { name: hasRole(['Admin']) ? 'Teams' : 'My Team', path: '/teams', icon: <Users size={18} /> },
-    { name: 'Reports', path: '/reports', icon: <BarChart2 size={18} /> },
-    { name: 'Workload', path: '/workload', icon: <Activity size={18} /> },
+    ...(FEATURES.legacyTasks ? [{ name: 'My Tasks', path: '/tasks', icon: <CheckSquare size={18} /> }] : []),
+    ...(FEATURES.chat ? [{ name: 'Chat', path: '/chat', icon: <MessageSquare size={18} /> }] : []),
+    ...(FEATURES.legacyTimeTracking ? [{ name: 'Time Tracking', path: '/time-entries', icon: <Clock size={18} /> }] : []),
+    ...(FEATURES.legacyCalendar ? [{ name: 'Calendar', path: '/calendar', icon: <Calendar size={18} /> }] : []),
+    ...(FEATURES.legacyTeams ? [{ name: hasRole(['Admin']) ? 'Teams' : 'My Team', path: '/teams', icon: <Users size={18} /> }] : []),
+    ...(FEATURES.legacyReports ? [{ name: 'Reports', path: '/reports', icon: <BarChart2 size={18} /> }] : []),
+    ...(FEATURES.legacyWorkload ? [{ name: 'Workload', path: '/workload', icon: <Activity size={18} /> }] : []),
   ];
 
   const adminManagerNavItems: any[] = [
@@ -101,28 +108,32 @@ export const Layout: React.FC = () => {
   ];
 
   const renderNavGroup = (items: typeof mainNavItems) => (
-    <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+    <nav style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
       {items.map((item) => {
         const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
         return (
           <Link 
             key={item.name} 
             to={item.path} 
+            className="premium-icon-btn"
             style={{ 
               display: 'flex', 
               alignItems: 'center', 
-              gap: 'var(--spacing-3)', 
-              padding: '8px 12px', 
-              borderRadius: 'var(--radius-md)',
+              gap: '12px', 
+              padding: '10px 14px', 
+              borderRadius: '12px',
               textDecoration: 'none',
-              color: isActive ? 'var(--color-sidebar-text-active)' : 'var(--color-sidebar-text)',
-              backgroundColor: isActive ? 'var(--color-sidebar-active-bg)' : 'transparent',
-              fontWeight: isActive ? 500 : 400,
-              fontSize: '0.875rem',
-              transition: 'var(--transition-fast)'
+              color: isActive ? '#111827' : '#4B5563',
+              backgroundColor: isActive ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
+              fontWeight: isActive ? 600 : 500,
+              fontSize: '0.9rem',
+              width: '100%',
+              justifyContent: 'flex-start',
+              border: isActive ? '1px solid rgba(0,0,0,0.04)' : '1px solid transparent',
+              boxShadow: isActive ? '0 1px 2px rgba(0,0,0,0.02)' : 'none'
             }}
           >
-            <span style={{ color: isActive ? '#FFFFFF' : 'var(--color-sidebar-text)', display: 'flex' }}>
+            <span style={{ color: isActive ? '#4F46E5' : '#6B7280', display: 'flex' }}>
               {item.icon}
             </span>
             {item.name}
@@ -133,81 +144,89 @@ export const Layout: React.FC = () => {
   );
 
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: 'var(--color-background)', overflow: 'hidden' }}>
+    <div style={{ 
+      display: 'flex', 
+      height: '100vh', 
+      background: 'linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%)', 
+      overflow: 'hidden' 
+    }}>
       
-      {/* Sidebar (Dark Theme) */}
-      <aside style={{ 
-        width: '220px', 
-        backgroundColor: 'var(--color-sidebar-bg)', 
-        borderRight: `1px solid var(--color-sidebar-border)`,
+      {/* Sidebar (Premium Glass Theme) */}
+      <aside className="glass-panel no-print" style={{ 
+        width: '240px', 
+        borderRight: '1px solid rgba(255,255,255,0.4)',
         display: 'flex',
         flexDirection: 'column',
-        padding: 'var(--spacing-6) var(--spacing-4)',
+        padding: '24px 16px',
         zIndex: 10,
         overflowY: 'auto'
       }}>
         {/* Logo Area */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-3)', padding: '0 var(--spacing-2)', marginBottom: 'var(--spacing-6)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0 8px', marginBottom: '32px' }}>
           <div style={{ display: 'flex' }}>
-            <img src="/timetriq%20logo.png" alt="Timetriq" style={{ width: '28px', height: '28px', objectFit: 'contain' }} />
+            <img src="/timetriq%20logo.png" alt="Timetriq" style={{ width: '32px', height: '32px', objectFit: 'contain', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' }} />
           </div>
           <div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--color-sidebar-text-active)', lineHeight: 1.2 }}>Timetriq</div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--color-sidebar-text)', fontWeight: 500 }}>Work Intelligence Platform</div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#111827', lineHeight: 1.2, letterSpacing: '-0.02em' }}>Timetriq</div>
+            <div style={{ fontSize: '0.7rem', color: '#6B7280', fontWeight: 500 }}>Work Intelligence</div>
           </div>
         </div>
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 'var(--spacing-6)' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {renderNavGroup(mainNavItems)}
 
-          <WorkspaceSidebar />
+          <MyTasksNav />
+          <FavoritesNav />
 
-          <div>
-            <div style={{ fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-sidebar-text)', letterSpacing: '0.05em', marginBottom: '8px', paddingLeft: '12px' }}>
-              Settings
+          <SpacesSidebar />
+
+          {FEATURES.sidebarSettings && (
+            <div>
+              <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', color: '#9CA3AF', letterSpacing: '0.05em', marginBottom: '8px', paddingLeft: '14px' }}>
+                Settings
+              </div>
+              {renderNavGroup(settingsItems)}
             </div>
-            {renderNavGroup(settingsItems)}
-          </div>
+          )}
         </div>
 
         {/* Bottom Sidebar Actions */}
-        <div style={{ marginTop: 'auto', paddingTop: 'var(--spacing-6)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)' }}>
-          {/* Workspace Switcher */}
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'space-between',
-            padding: '8px 12px', 
-            backgroundColor: 'var(--color-sidebar-surface)', 
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--color-sidebar-border)',
-            cursor: 'pointer'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '24px', height: '24px', borderRadius: '4px', backgroundColor: 'var(--color-primary)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700 }}>
-                T
+        {FEATURES.sidebarWorkspaceCard && (
+          <div style={{ marginTop: 'auto', paddingTop: 'var(--spacing-6)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)' }}>
+            {/* Workspace Switcher */}
+            <div className="premium-btn" style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'space-between',
+              padding: '10px 14px', 
+              borderRadius: '12px',
+              width: '100%'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#4F46E5', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 700, boxShadow: '0 2px 4px rgba(79, 70, 229, 0.3)' }}>
+                  T
+                </div>
+                <div style={{ textAlign: 'left' }}>
+                  <div style={{ fontSize: '0.65rem', color: '#6B7280', fontWeight: 500 }}>Workspace</div>
+                  <div style={{ fontSize: '0.85rem', color: '#111827', fontWeight: 600 }}>Timetriq Team</div>
+                </div>
               </div>
-              <div>
-                <div style={{ fontSize: '0.65rem', color: 'var(--color-sidebar-text)' }}>Workspace</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--color-sidebar-text-active)', fontWeight: 500 }}>Timetriq Team</div>
               </div>
-            </div>
-            </div>
-        </div>
+          </div>
+        )}
       </aside>
 
       {/* Main Content Area */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         
         {/* Top Header */}
-        <header style={{ 
+        <header className="glass-panel no-print" style={{ 
           height: '64px', 
-          backgroundColor: 'var(--color-surface)', 
-          borderBottom: '1px solid var(--color-border)',
+          borderBottom: '1px solid rgba(255,255,255,0.5)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0 var(--spacing-6)',
+          padding: '0 24px',
           zIndex: 5
         }}>
           {/* Left: Clock / Date */}
@@ -441,24 +460,30 @@ export const Layout: React.FC = () => {
               </div>
             )}
 
-            <Link to="/tasks?new=true" style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              backgroundColor: 'var(--color-primary)',
-              color: 'white',
-              border: 'none',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              fontSize: '0.8125rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              textDecoration: 'none',
-              boxShadow: 'var(--shadow-sm)'
-            }}>
-              <Plus size={14} /> New Task
-            </Link>
+            {FEATURES.legacyTasks && (
+              <Link to="/tasks?new=true" style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                backgroundColor: 'var(--color-primary)',
+                color: 'white',
+                border: 'none',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '0.8125rem',
+                fontWeight: 500,
+                cursor: 'pointer',
+                textDecoration: 'none',
+                boxShadow: 'var(--shadow-sm)'
+              }}>
+                <Plus size={14} /> New Task
+              </Link>
+            )}
 
+            <SearchButton />
+            <RunningTimerChip />
+
+{FEATURES.leave && (
             <Link to="/teams?tab=leave" style={{
               display: 'flex',
               alignItems: 'center',
@@ -475,9 +500,11 @@ export const Layout: React.FC = () => {
             }}>
               <Plus size={14} /> Request Leave
             </Link>
+            )}
 
             <div style={{ width: '1px', height: '24px', backgroundColor: 'var(--color-border)', margin: '0 8px' }}></div>
 
+            {FEATURES.legacyNotifications ? (
             <div style={{ position: 'relative' }} ref={notificationsRef}>
               <div 
                 style={{ cursor: 'pointer', padding: '4px' }} 
@@ -544,8 +571,9 @@ export const Layout: React.FC = () => {
                 </div>
               )}
             </div>
-            
-            <StatusSelector />
+            ) : FEATURES.headerBell ? <HeaderInboxBell /> : null}
+
+            {FEATURES.availabilityStatus && <StatusSelector />}
 
             {/* User Account Dropdown */}
             <div style={{ position: 'relative' }} ref={profileMenuRef}>
@@ -640,9 +668,12 @@ export const Layout: React.FC = () => {
           </div>
         </header>
 
-        {/* Page Content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--spacing-8)' }}>
+        {/* Page Content: Space/Folder/List pages fill the pane and scroll internally */}
+        <div style={isLocationPage
+          ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }
+          : { flex: 1, overflowY: 'auto', padding: 'var(--spacing-8)' }}>
           <Outlet />
+          <GlobalSearch />
         </div>
       </main>
     </div>

@@ -179,7 +179,7 @@ export const Projects: React.FC = () => {
                 style={{ border: 'none', outline: 'none', width: '100%', fontSize: '0.875rem', backgroundColor: 'transparent' }} 
               />
             </div>
-            <button className="btn-paper btn-paper-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button className="premium-btn premium-btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Plus size={16} /> New Task
             </button>
           </div>
@@ -191,7 +191,7 @@ export const Projects: React.FC = () => {
               <ListIcon size={48} color="#D1D5DB" style={{ marginBottom: '16px' }} />
               <p style={{ fontSize: '1rem', fontWeight: 500, margin: '0 0 8px 0', color: '#374151' }}>No tasks found in {selectedName}</p>
               <p style={{ fontSize: '0.875rem', margin: '0 0 16px 0' }}>Create a new task to get started.</p>
-              <button className="btn-paper btn-paper-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button className="premium-btn premium-btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Plus size={16} /> New Task
               </button>
             </div>
