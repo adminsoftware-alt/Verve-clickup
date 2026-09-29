@@ -154,6 +154,9 @@ def create(db: Session, opened: Opened, kind: LocationKind, data: s.CustomFieldI
     if not opened.level.at_least(PermissionLevel.edit):
         raise Forbidden("You need edit access here to create custom fields")
     obj = opened.obj
+    from app.services.work import space_admin
+
+    space_admin.require(db, obj.id if kind == LocationKind.space else obj.space_id, "custom_fields")
     if any(f.name.lower() == data.name.lower() for f in available(db, obj)):
         raise Invalid(f"A field called {data.name} already exists here")
     ftype = FieldType(data.type)
@@ -298,6 +301,18 @@ def clean_value(db: Session, field: CustomField, task: Task, value: Any) -> Any:
         if any(v not in members for v in value):
             raise Invalid("Everyone must be a member of the workspace")
         return list(dict.fromkeys(value))
+    if t == FieldType.location:
+        # {address, lat, lng}: the address is free text; the point is what the Map view shows.
+        if not isinstance(value, dict):
+            raise Invalid("Expected a place: address, lat and lng")
+        address = str(value.get("address") or "").strip()[:300]
+        lat, lng = value.get("lat"), value.get("lng")
+        for n in (lat, lng):
+            if isinstance(n, bool) or not isinstance(n, (int, float)) or not math.isfinite(n):
+                raise Invalid("A place needs a latitude and longitude")
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            raise Invalid("That latitude or longitude is out of range")
+        return {"address": address or f"{lat:.5f}, {lng:.5f}", "lat": round(float(lat), 6), "lng": round(float(lng), 6)}
     raise Invalid("Unknown field type")
 
 

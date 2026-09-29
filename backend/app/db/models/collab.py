@@ -86,6 +86,9 @@ class Notification(Base):
     snoozed_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     saved: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Sent outside the app: an instant email (or included in a digest), and a push to the person's devices.
+    emailed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 Index("ix_notifications_inbox", Notification.__table__.c.user_id, Notification.__table__.c.workspace_id, Notification.__table__.c.created_at)

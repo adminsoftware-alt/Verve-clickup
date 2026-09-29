@@ -81,6 +81,8 @@ class Task(TimestampMixin, Base):
     recurrence_next_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
     # The earlier occurrence this task was created from.
     recurs_from_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    # Sprint points (the Sprint Points ClickApp).
+    points: Mapped[Optional[float]] = mapped_column(Float)
 
 
 class TaskGroup(TimestampMixin, Base):
@@ -162,6 +164,9 @@ class TaskType(TimestampMixin, Base):
     name_plural: Mapped[Optional[str]] = mapped_column(String(40))
     icon: Mapped[str] = mapped_column(String(32), nullable=False, default="circle")
     color: Mapped[str] = mapped_column(String(7), nullable=False, default="#6366f1")
+    # A type called "Adhoc Task" means something to whoever named it and nothing to the person
+    # meeting it three months later.
+    description: Mapped[Optional[str]] = mapped_column(String(200))
     is_milestone: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
     orderindex: Mapped[float] = mapped_column(Float, nullable=False, default=0)
 
@@ -170,7 +175,7 @@ class Favorite(Base):
     """Something a person starred to keep at the top of their sidebar."""
 
     __tablename__ = "favorites"
-    __table_args__ = (CheckConstraint("kind IN ('space', 'folder', 'list', 'task', 'dashboard', 'view')", name="kind"),)
+    __table_args__ = (CheckConstraint("kind IN ('space', 'folder', 'list', 'task', 'dashboard', 'view', 'goal')", name="kind"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)

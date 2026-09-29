@@ -112,6 +112,24 @@ def test_assigned_comments_and_reactions(api, org):
     assert api.delete(f"/comments/{c['id']}", "member").status_code == 204  # full access may delete
 
 
+def test_sharing_something_tells_the_person_it_was_shared_with(api, org):
+    # A List shared with someone lands in their Inbox, pointing at the List itself.
+    ok(api.post(f"/lists/{org['list']['id']}/shares", "owner", {"user_id": "member2", "level": "edit"}), 201)
+    item = next(i for i in inbox(api, org, "member2") if i["kind"] == "shared")
+    assert item["data"]["what"] == "list" and item["data"]["name"] == "Payroll" and item["data"]["level"] == "edit"
+    assert item["data"]["id"] == str(org["list"]["id"]) and item["actor"]["id"] == "owner"
+
+    # Sharing with a Team tells everyone in it, and says which Team.
+    team = ok(api.post(f"/workspaces/{org['ws']}/teams", "owner", {"name": "Ops", "member_ids": ["member"]}), 201)
+    ok(api.post(f"/spaces/{org['space']['id']}/shares", "owner", {"team_id": team["id"], "level": "view"}), 201)
+    theirs = next(i for i in inbox(api, org, "member") if i["kind"] == "shared")
+    assert (theirs["data"]["what"], theirs["data"]["team"], theirs["data"]["level"]) == ("space", "Ops", "view")
+
+    # Nobody is told they shared something with themselves.
+    ok(api.post(f"/lists/{org['list']['id']}/shares", "owner", {"user_id": "owner", "level": "full"}), 201)
+    assert not [i for i in inbox(api, org, "owner") if i["kind"] == "shared"]
+
+
 def test_commenting_needs_comment_access(api, org):
     private = ok(api.post(f"/spaces/{org['space']['id']}/lists", "owner", {"name": "Board", "is_private": True}), 201)
     t = ok(api.post(f"/lists/{private['id']}/tasks", "owner", {"name": "Secret"}), 201)

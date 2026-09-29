@@ -26,6 +26,12 @@ DEFAULT_NAMES = {
     ViewType.timeline: "Timeline",
     ViewType.activity: "Activity",
     ViewType.form: "Form",
+    ViewType.doc: "Doc",
+    ViewType.whiteboard: "Whiteboard",
+    ViewType.mind_map: "Mind map",
+    ViewType.map: "Map",
+    ViewType.chat: "Chat",
+    ViewType.embed: "Embed",
 }
 
 

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Archive, Bell, BellOff, Check, CheckCheck, Clock, Inbox as InboxIcon, MessageSquare, Plus, Settings, Trash2, UserCheck, X } from 'lucide-react';
 import { useWork } from './WorkContext';
+import { disablePush, enablePush, outboundApi, type Delivery } from './outboundApi';
 import { collabApi, type CommentWithTask, type InboxItem, type InboxTab, type NotificationSetting, type Reminder } from './collabApi';
 import { Avatar, Portal, StatusDot } from './ui';
 import { TaskPanel } from './TaskPanel';
@@ -16,6 +17,11 @@ const ago = (iso: string) => {
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+
+const dayRange = (from: string, to: string) => {
+  const f = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return from === to ? f(from) : `${f(from)} – ${f(to)}`;
 };
 
 /** What happened, in words: "assigned you", "mentioned you", … */
@@ -35,6 +41,18 @@ function describe(item: InboxItem): string {
     case 'custom_field': return d.cleared ? `cleared ${d.field}` : `set ${d.field}`;
     case 'reminder': return 'Reminder';
     case 'automation': return `Automation: ${d.rule ?? 'a rule ran'}`;
+    case 'leave_request': return `asked for ${d.type} leave, ${dayRange(d.from, d.to)} (${d.days} day${d.days === 1 ? '' : 's'})`;
+    case 'leave_decision': return `${d.status === 'approved' ? 'approved' : 'declined'} your ${d.type} leave, ${dayRange(d.from, d.to)}${d.note ? `: “${d.note}”` : ''}`;
+    case 'escalation': return `Escalation: ${d.message || d.rule || 'this task needs attention'}`;
+    case 'timesheet_reminder': return `Timesheet reminder: ${Math.round(d.tracked / 360) / 10}h logged so far this week, of ${Math.round(d.expected / 360) / 10}h. Please fill it in.`;
+    case 'space_join_request': return `asked to join the ${d.space} Space${d.message ? `: “${d.message}”` : ''}`;
+    case 'space_join_decision': return d.status === 'approved' ? `let you into the ${d.space} Space` : `declined your request to join ${d.space}`;
+    case 'chat_mention': return `mentioned you in ${d.view ?? 'a chat'}: “${d.body ?? ''}”`;
+    case 'shared': {
+      const what = d.what === 'list' ? 'List' : d.what === 'space' ? 'Space' : d.what === 'folder' ? 'Folder' : 'task';
+      const level = d.level === 'full' ? 'full access' : d.level === 'edit' ? 'edit access' : d.level === 'comment' ? 'comment access' : 'view access';
+      return `shared the ${what} “${d.name ?? 'untitled'}” with ${d.team ? `your Team ${d.team}` : 'you'} (${level})`;
+    }
     default: return item.kind.replace(/_/g, ' ');
   }
 }
@@ -85,9 +103,23 @@ export const InboxPage: React.FC = () => {
     await load();
     inboxChanged();
   };
+  const navigate = useNavigate();
   const open = (item: InboxItem) => {
     if (!item.read) act(item.id, { read: true });
     if (item.task) setOpenTask(item.task.id);
+    else if (item.kind.startsWith('leave_')) navigate('/leave');
+    else if (item.kind === 'timesheet_reminder') navigate('/timesheets');
+    else if (item.kind === 'space_join_request') navigate('/all-spaces');
+    else if (item.kind === 'space_join_decision' && item.data.space_id) navigate(`/s/${item.data.space_id}`);
+    else if (item.kind === 'shared' && item.data.id) {
+      // Open the very thing that was shared.
+      const seg = item.data.what === 'space' ? 's' : item.data.what === 'folder' ? 'f' : 'l';
+      navigate(`/${seg}/${item.data.id}`);
+    }
+    else if (item.kind === 'chat_mention' && item.data.location_id) {
+      const seg = item.data.location_kind === 'space' ? 's' : item.data.location_kind === 'folder' ? 'f' : 'l';
+      navigate(`/${seg}/${item.data.location_id}?v=${item.data.view_id}`);
+    }
   };
 
   return (
@@ -102,9 +134,9 @@ export const InboxPage: React.FC = () => {
     </>}>
       <nav className="flex gap-5 border-b border-gray-200 bg-white px-6" aria-label="Inbox tabs">
         {TABS.map((t) => (
-          <button key={t.key} type="button" onClick={() => setTab(t.key)} className={`-mb-px flex items-center gap-1.5 border-b-2 py-2.5 text-sm ${tab === t.key ? 'border-indigo-600 font-medium text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
+          <button key={t.key} type="button" onClick={() => setTab(t.key)} className={`-mb-px flex items-center gap-1.5 border-b-2 py-2.5 text-sm ${tab === t.key ? 'border-brand-600 font-medium text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
             {t.label}
-            {t.key !== 'cleared' && counts[t.key as 'primary'] > 0 && <span className="rounded-full bg-indigo-100 px-1.5 text-[11px] font-semibold text-indigo-700">{counts[t.key as 'primary']}</span>}
+            {t.key !== 'cleared' && counts[t.key as 'primary'] > 0 && <span className="rounded-full bg-brand-100 px-1.5 text-[11px] font-semibold text-brand-700">{counts[t.key as 'primary']}</span>}
           </button>
         ))}
       </nav>
@@ -116,8 +148,8 @@ export const InboxPage: React.FC = () => {
         {items === null ? <li className="px-4 py-6 text-center text-sm text-gray-400">Loading…</li>
           : items.length === 0 ? <li className="px-4 py-10 text-center text-sm text-gray-400">{tab === 'primary' ? "You're all caught up." : 'Nothing here.'}</li>
           : items.map((item) => (
-            <li key={item.id} className={`group relative flex items-start gap-3 px-4 py-3 ${item.read ? '' : 'bg-indigo-50/40'}`}>
-              <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${item.read ? 'bg-transparent' : 'bg-indigo-600'}`} />
+            <li key={item.id} className={`group relative flex items-start gap-3 px-4 py-3 ${item.read ? '' : 'bg-brand-50/40'}`}>
+              <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${item.read ? 'bg-transparent' : 'bg-brand-600'}`} />
               {item.actor ? <Avatar user={item.actor} size={28} /> : <span className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-700"><Bell size={14} /></span>}
               <button type="button" onClick={() => open(item)} className="min-w-0 flex-1 text-left">
                 {item.task && (
@@ -164,21 +196,81 @@ const NotificationSettings: React.FC<{ onClose: () => void }> = ({ onClose }) =>
   return (
     <Portal>
       <div className="fixed inset-0 z-[115] flex items-center justify-center bg-black/30" onMouseDown={onClose}>
-        <div role="dialog" aria-label="Notification settings" onMouseDown={(e) => e.stopPropagation()} className="w-[26rem] max-w-[calc(100vw-2rem)] rounded-xl bg-white p-5 shadow-xl">
+        <div role="dialog" aria-label="Notification settings" onMouseDown={(e) => e.stopPropagation()} className="max-h-[90vh] w-[30rem] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl bg-white p-5 shadow-xl">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="font-semibold text-gray-900">Notification settings</h3>
             <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </div>
-          <p className="mb-2 text-xs text-gray-500">Choose what reaches your Inbox. You're never notified about your own changes.</p>
+          <DeliverySettings />
+          <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-gray-400">What reaches your Inbox</p>
+          <div className="max-h-64 overflow-y-auto">
           {!rows ? <p className="text-sm text-gray-400">Loading…</p> : rows.map((r) => (
             <label key={r.kind} className="flex items-center justify-between border-t border-gray-100 py-2 text-sm text-gray-800">
               {r.label}
               <input type="checkbox" checked={r.enabled} onChange={(e) => toggle(r.kind, e.target.checked)} aria-label={r.label} />
             </label>
           ))}
+          </div>
+          <p className="mt-2 text-xs text-gray-400">You're never notified about your own changes.</p>
         </div>
       </div>
     </Portal>
+  );
+};
+
+/** How updates reach you outside the app: email, this device, WhatsApp. */
+const DeliverySettings: React.FC = () => {
+  const { workspace } = useWork();
+  const [d, setD] = useState<Delivery | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [pushState, setPushState] = useState<string>(() => (typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'));
+  useEffect(() => { if (workspace) outboundApi.delivery(workspace.id).then(setD).catch(() => undefined); }, [workspace]);
+  if (!d || !workspace) return null;
+  const save = async (body: Parameters<typeof outboundApi.saveDelivery>[1]) => {
+    setMsg(null);
+    try { setD(await outboundApi.saveDelivery(workspace.id, body)); } catch (e) { setMsg((e as Error).message); }
+  };
+  const push = async () => {
+    setMsg(null);
+    try {
+      const out = await enablePush(workspace.id);
+      setPushState(out === 'on' ? 'granted' : out);
+      if (out === 'on') { await outboundApi.pushTest(workspace.id); setD(await outboundApi.delivery(workspace.id)); setMsg('Notifications are on for this device.'); }
+      else setMsg(out === 'denied' ? 'The browser blocked notifications. Allow them in the site settings and try again.' : "This browser can't show notifications.");
+    } catch (e) { setMsg((e as Error).message); }
+  };
+  const sel = 'rounded-md border border-gray-300 px-2 py-1 text-sm';
+  return (
+    <section aria-label="Outside the app" className="space-y-2 rounded-lg bg-gray-50 p-3 text-sm">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Outside the app</p>
+      <label className="flex items-center justify-between gap-2">Email
+        <select aria-label="Email notifications" value={d.email_notifications} onChange={(e) => save({ email_notifications: e.target.value as Delivery['email_notifications'] })} className={sel}>
+          <option value="daily">A daily summary</option><option value="instant">Each update, right away</option><option value="off">Never</option>
+        </select>
+      </label>
+      {d.email_notifications === 'daily' && (
+        <label className="flex items-center justify-between gap-2 text-gray-600">Summary at
+          <select aria-label="Summary time" value={d.digest_hour} onChange={(e) => save({ digest_hour: Number(e.target.value) })} className={sel}>
+            {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+          </select>
+        </label>
+      )}
+      <label className="flex items-center justify-between gap-2">Weekly team digest (managers and leads)
+        <input type="checkbox" checked={d.weekly_team_digest} onChange={(e) => save({ weekly_team_digest: e.target.checked })} />
+      </label>
+      <label className="flex items-center justify-between gap-2">WhatsApp{d.phone ? ` (${d.phone})` : ' (add your mobile to your profile)'}
+        <input type="checkbox" aria-label="WhatsApp" checked={d.whatsapp_opt_in} disabled={!d.phone} onChange={(e) => save({ whatsapp_opt_in: e.target.checked })} />
+      </label>
+      <div className="flex items-center justify-between gap-2">
+        <span>This device{d.devices ? ` · ${d.devices} device${d.devices === 1 ? '' : 's'} on` : ''}</span>
+        {pushState === 'granted' && d.devices
+          ? <button type="button" onClick={async () => { await disablePush(workspace.id); setD(await outboundApi.delivery(workspace.id)); }} className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-white">Turn off here</button>
+          : <button type="button" onClick={push} className="rounded-md bg-brand-600 px-2 py-1 text-xs font-medium text-white hover:bg-brand-700">Turn on notifications</button>}
+      </div>
+      {!d.channels.email && <p className="text-xs text-amber-700">Email isn't set up on the server yet, so no emails go out.</p>}
+      {!d.channels.whatsapp && d.whatsapp_opt_in && <p className="text-xs text-amber-700">WhatsApp isn't connected on the server yet.</p>}
+      {msg && <p className="text-xs text-gray-700" role="status">{msg}</p>}
+    </section>
   );
 };
 
@@ -247,11 +339,11 @@ export const RemindersPage: React.FC = () => {
   const now = Date.now();
   return (
     <Page icon={<Bell size={18} />} title="Reminders" actions={
-      <button type="button" onClick={() => setAdding(true)} className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"><Plus size={14} /> Reminder</button>
+      <button type="button" onClick={() => setAdding(true)} className="flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"><Plus size={14} /> Reminder</button>
     }>
       <nav className="flex gap-5 border-b border-gray-200 bg-white px-6">
         {(['upcoming', 'done'] as const).map((s) => (
-          <button key={s} type="button" onClick={() => setState(s)} className={`-mb-px border-b-2 py-2.5 text-sm ${state === s ? 'border-indigo-600 font-medium text-gray-900' : 'border-transparent text-gray-500'}`}>{s === 'upcoming' ? 'Upcoming' : 'Done'}</button>
+          <button key={s} type="button" onClick={() => setState(s)} className={`-mb-px border-b-2 py-2.5 text-sm ${state === s ? 'border-brand-600 font-medium text-gray-900' : 'border-transparent text-gray-500'}`}>{s === 'upcoming' ? 'Upcoming' : 'Done'}</button>
         ))}
       </nav>
       <ul className="mx-6 my-4 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white" aria-label="Reminders">
@@ -268,7 +360,7 @@ export const RemindersPage: React.FC = () => {
               }} />
               <div className="min-w-0 flex-1">
                 <p className={`truncate text-sm ${r.done ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{r.title}</p>
-                {r.task && <button type="button" onClick={() => setOpenTask(r.task!.id)} className="text-xs text-indigo-600 hover:underline">Open task</button>}
+                {r.task && <button type="button" onClick={() => setOpenTask(r.task!.id)} className="text-xs text-brand-600 hover:underline">Open task</button>}
               </div>
               <span className={`shrink-0 text-xs ${due && !r.done ? 'font-medium text-red-600' : 'text-gray-500'}`}>
                 {new Date(r.remind_at).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
@@ -299,10 +391,11 @@ export function useInboxCount(): number {
   return count;
 }
 
-export const InboxLink: React.FC<{ className: string }> = ({ className }) => {
+export const InboxLink: React.FC<{ className: string; leading?: React.ReactNode }> = ({ className, leading }) => {
   const count = useInboxCount();
   return (
     <Link to="/inbox" className={className}>
+      {leading}
       <InboxIcon size={16} className="shrink-0 text-gray-500" />
       <span className="flex-1 font-medium">Inbox</span>
       {count > 0 && <span className="rounded-full bg-red-500 px-1.5 text-[11px] font-semibold text-white">{count > 99 ? '99+' : count}</span>}

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, GripVertical, Search, X } from 'lucide-react';
 import { useWork } from '../WorkContext';
 import { useMyTasks } from '../MyTasksContext';
@@ -47,7 +48,7 @@ function layout(items: Item[]): Placed[] {
 }
 
 /** ClickUp's Planner: drag your tasks into time slots, next to the meetings in your calendars. */
-export const PlannerPage: React.FC = () => {
+export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
   const { workspace, listName, refresh: refreshTree } = useWork();
   const { tasks, refresh: refreshMine } = useMyTasks();
   const [mode, setMode] = useState<Mode>(() => { try { return (localStorage.getItem(KEY) as Mode) || 'week'; } catch { return 'week'; } });
@@ -58,6 +59,16 @@ export const PlannerPage: React.FC = () => {
   const [openTask, setOpenTask] = useState<string | null>(null);
   const [newBlock, setNewBlock] = useState<{ start: Date } | null>(null);
   const [showCalendars, setShowCalendars] = useState(false);
+  // Back from signing in to Google or Outlook: say how it went, and show the calendars.
+  const [params, setParams] = useSearchParams();
+  const [calendarNote, setCalendarNote] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    const done = params.get('calendar'), failed = params.get('calendar_error');
+    if (!done && !failed) return;
+    setCalendarNote(failed ? { ok: false, text: failed } : { ok: true, text: 'Calendar connected — your tasks and time blocks are syncing both ways.' });
+    setShowCalendars(true);
+    setParams({}, { replace: true });
+  }, [params, setParams]);
   const [drag, setDrag] = useState<{ id: string; start: Date; end: Date } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -179,9 +190,17 @@ export const PlannerPage: React.FC = () => {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
+      {calendarNote && (
+        <div role="status" className={`flex items-center gap-2 px-6 py-1.5 text-sm ${calendarNote.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'}`}>
+          {calendarNote.text}
+          <button type="button" onClick={() => setCalendarNote(null)} className="ml-auto text-xs underline">Dismiss</button>
+        </div>
+      )}
       <header className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-6 py-3">
-        <CalendarDays size={18} className="text-indigo-600" />
-        <h1 className="mr-3 text-base font-semibold text-gray-900">Planner</h1>
+        {/* Inside My Tasks the page already says where you are, so the Planner keeps only its
+            own controls. */}
+        {!embedded && <CalendarDays size={18} className="text-brand-600" />}
+        {!embedded && <h1 className="mr-3 text-base font-semibold text-gray-900">Planner</h1>}
         <button type="button" onClick={() => setAnchor(startOfDay(new Date()))} className="rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50">Today</button>
         <button type="button" title="Previous" onClick={() => setAnchor(addDays(anchor, mode === 'week' ? -7 : -1))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={16} /></button>
         <button type="button" title="Next" onClick={() => setAnchor(addDays(anchor, mode === 'week' ? 7 : 1))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={16} /></button>
@@ -211,14 +230,14 @@ export const PlannerPage: React.FC = () => {
             {tray.map((t) => (
               <li key={t.id} draggable aria-label={`Plan ${t.name}`}
                 onDragStart={(e) => { e.dataTransfer.setData('application/x-timetriq-task', t.id); e.dataTransfer.effectAllowed = 'copy'; }}
-                className="group flex cursor-grab items-start gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm hover:border-indigo-300">
+                className="group flex cursor-grab items-start gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm hover:border-brand-300">
                 <GripVertical size={13} className="mt-0.5 shrink-0 text-gray-300 group-hover:text-gray-500" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5"><StatusDot status={t.status} size={10} /><span className="truncate text-gray-800">{t.name}</span></div>
                   <div className="mt-0.5 flex items-center gap-2 text-xs text-gray-400">
                     <span className="truncate">{listName(t.list_id)}</span>
                     {t.due_date && <span className={t.is_overdue ? 'text-red-600' : ''}>{formatDue(t.due_date)}</span>}
-                    {blockedTaskIds.has(t.id) && <span className="text-indigo-600">planned</span>}
+                    {blockedTaskIds.has(t.id) && <span className="text-brand-600">planned</span>}
                   </div>
                 </div>
                 <PriorityFlag priority={t.priority} withLabel={false} />
@@ -231,8 +250,14 @@ export const PlannerPage: React.FC = () => {
           <div className="flex border-b border-gray-200 pl-14">
             {days.map((d) => (
               <div key={d.getTime()} className="min-w-0 flex-1 border-l border-gray-100 px-2 py-1.5">
-                <div className={`text-xs ${sameDay(d, now) ? 'font-semibold text-indigo-700' : 'text-gray-500'}`}>{d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}</div>
+                <div className={`text-xs ${sameDay(d, now) ? 'font-semibold text-brand-700' : 'text-gray-500'}`}>{d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}</div>
                 <div className="text-[11px] text-gray-400">{planned(d) ? `${Math.round(planned(d) / 36e5 * 10) / 10}h planned` : ' '}</div>
+                {(data?.days_off ?? []).filter((o) => o.day === `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`).map((o, i) => (
+                  <div key={`off-${i}`} aria-label={`${o.kind === 'holiday' ? 'Holiday' : 'On leave'}: ${o.label}`}
+                    className={`mt-0.5 truncate rounded px-1.5 text-[11px] ${o.kind === 'holiday' ? 'bg-violet-100 text-violet-800' : 'bg-amber-100 text-amber-800'} ${o.pending ? 'opacity-60' : ''}`}>
+                    {o.label}{o.part !== 'full' ? ' (half)' : ''}{o.pending ? ' · requested' : ''}
+                  </div>
+                ))}
                 {allDayFor(d).map((ev, i) => (
                   <div key={i} title={ev.title} className="mt-0.5 truncate rounded px-1.5 text-[11px] text-white" style={{ backgroundColor: ev.color }}>{ev.title}</div>
                 ))}
@@ -280,7 +305,7 @@ export const PlannerPage: React.FC = () => {
                           <div key={it.id} role="button" tabIndex={0} aria-label={`Time block: ${it.title}`} title={`${it.title}\n${time}`}
                             onPointerDown={(e) => startDrag(e, b, 'move')}
                             onKeyDown={(e) => { if (e.key === 'Enter' && b.task_id) setOpenTask(b.task_id); if (e.key === 'Delete' && workspace) act(() => planningApi.removeBlock(workspace.id, b.id)); }}
-                            className={`group absolute z-10 cursor-grab touch-none select-none overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] text-white shadow-sm ${drag?.id === b.id ? 'opacity-80 ring-2 ring-indigo-300' : ''}`}
+                            className={`group absolute z-10 cursor-grab touch-none select-none overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] text-white shadow-sm ${drag?.id === b.id ? 'opacity-80 ring-2 ring-brand-300' : ''}`}
                             style={{ ...style, backgroundColor: b.task ? '#4f46e5' : '#7c3aed' }}>
                             <div className="flex items-center gap-1">
                               {b.task && <StatusDot status={b.task.status} size={9} />}

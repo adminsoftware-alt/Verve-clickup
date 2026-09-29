@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
-import { AlarmClock, BarChart3, CheckCircle2, Clock, FileText, Globe, Hash, LineChart, ListChecks, MessagesSquare, PieChart, Table2, Timer, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AlarmClock, BarChart3, BatteryMedium, CheckCircle2, Clock, FileText, Flag, Gauge, Globe, Hash, LineChart, ListChecks, MessagesSquare, PieChart, Table2, Target, Timer, UserCheck, X } from 'lucide-react';
+import { GoalPicker, SprintFolderPicker } from './goalPickers';
 import { Portal } from '../ui';
+import { useWork } from '../WorkContext';
+import { workApi, type CustomField } from '../api';
 import { dashApi, type Card, type CardConfig, type CardType, type GroupBy, type Period } from './api';
 import { CARD_TYPES } from './cards';
 import { FiltersEditor, SourcePicker } from './pickers';
@@ -10,6 +13,9 @@ const ICONS: Record<CardType, React.ReactNode> = {
   time_report: <Clock size={18} />, timesheet: <Timer size={18} />, portfolio: <Table2 size={18} />, notes: <FileText size={18} />,
   behind: <AlarmClock size={18} />, completed: <CheckCircle2 size={18} />, line: <LineChart size={18} />,
   discussion: <MessagesSquare size={18} />, embed: <Globe size={18} />,
+  worked_on: <UserCheck size={18} />, battery: <BatteryMedium size={18} />, goal: <Target size={18} />, sprint: <Flag size={18} />,
+  variance: <Gauge size={18} />, plan: <CheckCircle2 size={18} />,
+  capacity: <Gauge size={18} />,
 };
 
 export const DEFAULT_CONFIG: CardConfig = {
@@ -21,9 +27,9 @@ export const DEFAULT_CONFIG: CardConfig = {
 const configFor = (type: CardType): CardConfig => ({
   ...DEFAULT_CONFIG,
   // Time is often tracked on subtasks, so time cards include them by default.
-  include_subtasks: type === 'time_report' || type === 'timesheet' || type === 'portfolio',
+  include_subtasks: type === 'time_report' || type === 'timesheet' || type === 'portfolio' || type === 'capacity',
   // A line chart is a trend, so it starts on a date grouping.
-  group_by: type === 'line' ? 'created_date' : DEFAULT_CONFIG.group_by,
+  group_by: type === 'line' ? 'created_date' : type === 'battery' ? 'status_group' : type === 'worked_on' ? 'assignee' : DEFAULT_CONFIG.group_by,
   period: type === 'line' ? { preset: 'last_30_days' } : DEFAULT_CONFIG.period,
 });
 
@@ -37,6 +43,36 @@ const PRESETS: [Period['preset'], string][] = [
   ['this_year', 'This year'], ['custom', 'Custom range'],
 ];
 const WIDTHS: [number, string][] = [[3, 'Quarter'], [4, 'Third'], [6, 'Half'], [8, 'Two thirds'], [12, 'Full width']];
+
+/** Which field types make sense to slice by, and which to add up. */
+const GROUPABLE = ['dropdown', 'labels', 'checkbox', 'people', 'text', 'date'];
+const ADDABLE = ['number', 'money', 'rating', 'progress'];
+
+/** The custom fields defined anywhere in this workspace, offered alongside the built-ins.
+ *  Defining "Review month" and then not being able to chart it is why nobody fills them in. */
+function useCustomFields() {
+  const { hierarchy } = useWork();
+  const spaces = hierarchy?.spaces;
+  const [fields, setFields] = useState<CustomField[]>([]);
+  useEffect(() => {
+    let live = true;
+    Promise.all((spaces ?? []).map((sp) => workApi.fields('space', sp.id, true).catch(() => [] as CustomField[])))
+      .then((lists) => {
+        if (!live) return;
+        const seen = new Map<string, CustomField>();
+        for (const found of lists) for (const f of found) if (!seen.has(f.id)) seen.set(f.id, f);
+        setFields([...seen.values()]);
+      });
+    return () => { live = false; };
+  }, [spaces]);
+  return fields;
+}
+
+const FieldOptions: React.FC<{ fields: CustomField[]; kinds: string[]; label: string }> = ({ fields, kinds, label }) => {
+  const usable = fields.filter((f) => kinds.includes(f.type));
+  if (!usable.length) return null;
+  return <optgroup label={label}>{usable.map((f) => <option key={f.id} value={`custom:${f.id}`}>{f.name}</option>)}</optgroup>;
+};
 
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <label className="block text-xs font-medium text-gray-600">
@@ -68,6 +104,7 @@ export const CardEditor: React.FC<{
   onClose: () => void;
   onSaved: (card: Card) => void;
 }> = ({ dashboardId, card, onClose, onSaved }) => {
+  const customFields = useCustomFields();
   const [type, setType] = useState<CardType | null>(card?.type ?? null);
   const [title, setTitle] = useState(card?.title ?? '');
   const [config, setConfig] = useState<CardConfig>(card ? { ...DEFAULT_CONFIG, ...card.config } : DEFAULT_CONFIG);
@@ -102,8 +139,8 @@ export const CardEditor: React.FC<{
     }
   };
 
-  const isTime = type === 'time_report' || type === 'timesheet';
-  const usesData = type !== null && type !== 'notes' && type !== 'discussion' && type !== 'embed';
+  const isTime = type === 'time_report' || type === 'timesheet' || type === 'capacity';
+  const usesData = type !== null && !['notes', 'discussion', 'embed', 'goal', 'sprint'].includes(type);
 
   return (
     <Portal>
@@ -123,8 +160,8 @@ export const CardEditor: React.FC<{
           {!type ? (
             <div className="grid grid-cols-1 gap-2 overflow-y-auto p-5 sm:grid-cols-2">
               {CARD_TYPES.map((c) => (
-                <button key={c.type} type="button" onClick={() => pick(c.type)} className="flex items-start gap-3 rounded-lg border border-gray-200 p-3 text-left hover:border-indigo-300 hover:bg-indigo-50/40">
-                  <span className="mt-0.5 text-indigo-600">{ICONS[c.type]}</span>
+                <button key={c.type} type="button" onClick={() => pick(c.type)} className="flex items-start gap-3 rounded-lg border border-gray-200 p-3 text-left hover:border-brand-300 hover:bg-brand-50/40">
+                  <span className="mt-0.5 text-brand-600">{ICONS[c.type]}</span>
                   <span>
                     <span className="block text-sm font-medium text-gray-900">{c.label}</span>
                     <span className="block text-xs text-gray-500">{c.hint}</span>
@@ -148,6 +185,7 @@ export const CardEditor: React.FC<{
                   <Field label="Measure">
                     <select value={config.measure} onChange={(e) => { const m = e.target.value as CardConfig['measure']; setConfig((c) => ({ ...c, measure: m, fn: m === 'tasks' ? 'count' : c.fn === 'count' ? 'sum' : c.fn })); }} className={selectClass}>
                       <option value="tasks">Number of tasks</option><option value="time_estimate">Time estimate</option><option value="time_tracked">Time tracked</option>
+                      <FieldOptions fields={customFields} kinds={ADDABLE} label="Custom fields" />
                     </select>
                   </Field>
                   <Field label="Calculation">
@@ -166,12 +204,14 @@ export const CardEditor: React.FC<{
                   <Field label={type === 'pie' ? 'Slice by' : 'X-axis'}>
                     <select value={config.group_by} onChange={(e) => set('group_by', e.target.value as GroupBy)} className={selectClass}>
                       {CATEGORY_GROUPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      <FieldOptions fields={customFields} kinds={GROUPABLE} label="Custom fields" />
                       {type === 'bar' && <optgroup label="Over time">{DATE_GROUPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</optgroup>}
                     </select>
                   </Field>
                   <Field label={type === 'pie' ? 'Measure' : 'Y-axis'}>
                     <select value={config.measure} onChange={(e) => set('measure', e.target.value as CardConfig['measure'])} className={selectClass}>
                       <option value="tasks">Number of tasks</option><option value="time_estimate">Time estimate</option><option value="time_tracked">Time tracked</option>
+                      <FieldOptions fields={customFields} kinds={ADDABLE} label="Custom fields" />
                     </select>
                   </Field>
                   {type === 'pie' && (
@@ -222,7 +262,9 @@ export const CardEditor: React.FC<{
                 </div>
               )}
 
-              {(isTime || type === 'completed') && <PeriodEditor value={config.period} onChange={(p) => set('period', p)} />}
+              {(isTime || type === 'completed' || type === 'worked_on') && <PeriodEditor value={config.period} onChange={(p) => set('period', p)} />}
+              {type === 'goal' && <Field label="Goals to show"><GoalPicker value={config.goal_ids ?? []} onChange={(v) => set('goal_ids', v)} /></Field>}
+              {type === 'sprint' && <Field label="Sprint Folder"><SprintFolderPicker value={config.folder_id ?? null} onChange={(v) => set('folder_id', v)} /></Field>}
               {type === 'time_report' && (
                 <div className="grid grid-cols-3 gap-3">
                   <Field label="Group by">
@@ -263,7 +305,7 @@ export const CardEditor: React.FC<{
                     <SourcePicker value={config.sources} onChange={(v) => set('sources', v)} />
                     <div className="mt-2 flex flex-wrap gap-4 text-sm text-gray-700">
                       <label className="flex items-center gap-1.5"><input type="checkbox" checked={config.include_subtasks} onChange={(e) => set('include_subtasks', e.target.checked)} /> Include subtasks</label>
-                      {!isTime && type !== 'portfolio' && type !== 'behind' && type !== 'completed' && (
+                      {!isTime && !['portfolio', 'behind', 'completed', 'battery', 'worked_on'].includes(type) && (
                         <label className="flex items-center gap-1.5"><input type="checkbox" checked={config.include_closed} onChange={(e) => set('include_closed', e.target.checked)} /> Include closed tasks</label>
                       )}
                     </div>
@@ -286,7 +328,7 @@ export const CardEditor: React.FC<{
             {!card && type ? <button type="button" onClick={() => setType(null)} className="text-sm text-gray-500 hover:underline">← Card types</button> : <span />}
             <div className="flex gap-2">
               <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-              <button type="submit" disabled={!type || busy} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+              <button type="submit" disabled={!type || busy} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
                 {card ? 'Save card' : 'Add card'}
               </button>
             </div>

@@ -56,9 +56,77 @@ def test_new_space_gets_the_default_statuses(api, space):
     assert statuses["inherited"] is False
 
 
-def test_guests_cannot_create_spaces(api, workspace):
-    r = api.post(f"/workspaces/{workspace['id']}/spaces", "guest", {"name": "Nope"})
-    assert r.status_code == 403
+def test_who_may_add_spaces_folders_and_lists(api, workspace, space):
+    """Spaces are the admins'; Folders and Lists are the managers'; tasks are everyone's.
+
+    The shape of the work is decided by the people who run the place and the people who lead a
+    Team. Everyone else works inside it -- which is what tasks, comments and time are for.
+    """
+    ws = workspace["id"]
+    assert api.post(f"/workspaces/{ws}/spaces", "guest", {"name": "Nope"}).status_code == 403
+    refused = api.post(f"/workspaces/{ws}/spaces", "member", {"name": "Mine"})
+    assert refused.status_code == 403 and "Only admins" in refused.json()["detail"]
+    ok(api.post(f"/workspaces/{ws}/spaces", "admin", {"name": "Admin's"}), 201)
+
+    # An ordinary member adds neither a Folder nor a List -- but works inside both.
+    no_folder = api.post(f"/spaces/{space['id']}/folders", "member", {"name": "Mine"})
+    assert no_folder.status_code == 403 and "managers" in no_folder.json()["detail"]
+    folder = ok(api.post(f"/spaces/{space['id']}/folders", "owner", {"name": "Monthly Review"}), 201)
+    no_list = api.post(f"/folders/{folder['id']}/lists", "member", {"name": "Mine to run"})
+    assert no_list.status_code == 403 and "managers" in no_list.json()["detail"]
+    lst = ok(api.post(f"/folders/{folder['id']}/lists", "owner", {"name": "Monthly"}), 201)
+    ok(api.post(f"/lists/{lst['id']}/tasks", "member", {"name": "A job"}), 201)
+
+    # Leading a Team makes someone a manager: Folders and Lists become theirs, Spaces do not.
+    team = ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Audit", "member_ids": ["member"]}), 201)
+    ok(api.put(f"/teams/{team['id']}/members", "owner", {"user_ids": ["member"], "lead_ids": ["member"]}))
+    ok(api.post(f"/spaces/{space['id']}/folders", "member", {"name": "Audit work"}), 201)
+    ok(api.post(f"/spaces/{space['id']}/lists", "member", {"name": "Audit list"}), 201)
+    assert api.post(f"/workspaces/{ws}/spaces", "member", {"name": "Audit space"}).status_code == 403
+
+
+def test_work_given_to_a_team_is_only_that_team_s(api, workspace, space):
+    ws = workspace["id"]
+    dev = ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Dev", "member_ids": ["member"]}), 201)
+    hr = ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "HR", "member_ids": ["admin"]}), 201)
+    folder = ok(api.post(f"/spaces/{space['id']}/folders", "owner", {"name": "Monthly Review"}), 201)
+    dev_list = ok(api.post(f"/folders/{folder['id']}/lists", "owner", {"name": "PMS - Dev"}), 201)
+    hr_list = ok(api.post(f"/folders/{folder['id']}/lists", "owner", {"name": "PMS - HR"}), 201)
+
+    # Before anyone is given it, both Lists are the whole workspace's.
+    assert {"PMS - Dev", "PMS - HR"} <= {l["name"] for l in hierarchy(api, workspace, "member")["spaces"][0]["folders"][0]["lists"]}
+
+    out = ok(api.put(f"/lists/{dev_list['id']}/team", "owner", {"team_id": dev["id"]}))
+    assert out["team"]["name"] == "Dev"
+    ok(api.put(f"/lists/{hr_list['id']}/team", "owner", {"team_id": hr["id"]}))
+
+    # The Dev person sees their own List and not HR's; the HR person the other way round.
+    mine = hierarchy(api, workspace, "member")["spaces"][0]["folders"][0]["lists"]
+    names = [l["name"] for l in mine]
+    assert "PMS - Dev" in names and "PMS - HR" not in names
+    assert next(l for l in mine if l["name"] == "PMS - Dev")["team"]["name"] == "Dev"
+    assert api.get(f"/lists/{hr_list['id']}/tasks", "member").status_code == 404
+    ok(api.get(f"/lists/{dev_list['id']}/tasks", "member"))
+
+    # Owners and admins run the place, so they still see everything.
+    for boss in ("owner", "admin"):
+        seen = {l["name"] for l in hierarchy(api, workspace, boss)["spaces"][0]["folders"][0]["lists"]}
+        assert {"PMS - Dev", "PMS - HR"} <= seen
+
+    # A whole Space can belong to a Team too, and then nothing inside it shows to others.
+    theirs = ok(api.post(f"/workspaces/{ws}/spaces", "owner", {"name": "Dev Space"}), 201)
+    ok(api.post(f"/spaces/{theirs['id']}/lists", "owner", {"name": "Sprint"}), 201)
+    ok(api.put(f"/spaces/{theirs['id']}/team", "owner", {"team_id": dev["id"]}))
+    assert "Dev Space" in {sp["name"] for sp in hierarchy(api, workspace, "member")["spaces"]}
+    ok(api.get("/workspaces", "outsider2"))
+    ok(api.post(f"/workspaces/{ws}/members", "owner", {"email": "outsider2@example.com", "role": "member"}), 201)
+    assert "Dev Space" not in {sp["name"] for sp in hierarchy(api, workspace, "outsider2")["spaces"]}
+
+    # Giving it back opens it up again.
+    ok(api.put(f"/lists/{hr_list['id']}/team", "owner", {"team_id": None}))
+    assert "PMS - HR" in {l["name"] for l in hierarchy(api, workspace, "member")["spaces"][0]["folders"][0]["lists"]}
+    # A member can't hand work to a Team they don't lead.
+    assert api.put(f"/lists/{dev_list['id']}/team", "member", {"team_id": hr["id"]}).status_code in (403, 404)
 
 
 def test_a_new_folder_starts_with_one_list(api, workspace, space):
@@ -158,17 +226,61 @@ def test_view_access_can_read_but_not_edit(api, space, folderless_list):
 
 
 def test_edit_access_cannot_archive_or_delete(api, space, folderless_list):
+    """Edit access shapes the work inside a List; it does not dispose of the List."""
     ok(api.post(f"/lists/{folderless_list['id']}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
-    ok(api.patch(f"/lists/{folderless_list['id']}", "member", {"name": "Renamed"}))
+    ok(api.patch(f"/lists/{folderless_list['id']}", "member", {"description": "GST filings for October"}))
+    # The name is what everyone else navigates by, so it went to admins with Delete.
+    assert api.patch(f"/lists/{folderless_list['id']}", "member", {"name": "Renamed"}).status_code == 403
     assert api.patch(f"/lists/{folderless_list['id']}", "member", {"archived": True}).status_code == 403
     assert api.delete(f"/lists/{folderless_list['id']}", "member").status_code == 403
 
 
-def test_sharing_cannot_escalate_beyond_your_own_level(api, space, folderless_list):
+def test_sharing_cannot_escalate_beyond_your_own_level(api, workspace, space, folderless_list):
+    """Nobody hands out more than they hold -- and only managers hand out a List at all."""
+    ws = workspace["id"]
+    # An ordinary member shares nothing above a task, whatever access they were given.
     ok(api.post(f"/lists/{folderless_list['id']}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
+    refused = api.post(f"/lists/{folderless_list['id']}/shares", "member", {"user_id": "guest", "level": "view"})
+    assert refused.status_code == 403 and "managers" in refused.json()["detail"]
+
+    # Leading a Team makes them a manager, and then their own level is the ceiling.
+    team = ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Audit", "member_ids": ["member"]}), 201)
+    ok(api.put(f"/teams/{team['id']}/members", "owner", {"user_ids": ["member"], "lead_ids": ["member"]}))
     r = api.post(f"/lists/{folderless_list['id']}/shares", "member", {"user_id": "guest", "level": "full"})
     assert r.status_code == 403
     ok(api.post(f"/lists/{folderless_list['id']}/shares", "member", {"user_id": "guest", "level": "edit"}), 201)
+
+
+def test_only_admins_share_a_space(api, space):
+    """A Space is a part of the firm, so handing one out is an admin's to do."""
+    refused = api.post(f"/spaces/{space['id']}/shares", "member", {"user_id": "guest", "level": "view"})
+    assert refused.status_code == 403 and "admins" in refused.json()["detail"]
+    ok(api.post(f"/spaces/{space['id']}/shares", "owner", {"user_id": "member", "level": "view"}), 201)
+
+
+def test_renaming_and_deleting_are_an_admins_to_do(api, space, folderless_list):
+    """Everyone who can see a public Space resolves to full access on it.
+
+    That is ClickUp's model and we keep it -- it is what makes shared work shared. But it means
+    the Delete on a Space menu was live for every intern, and a Space takes its Folders, its Lists
+    and every task with it when it goes. So the two that cannot be undone by the next person to
+    look -- the name everybody navigates by, and the deletion -- are admin work. Everything else
+    an employee could already do, they still can.
+    """
+    assert api.get(f"/spaces/{space['id']}", "member").json()["permission_level"] == "full"
+
+    for path in (f"/spaces/{space['id']}", f"/lists/{folderless_list['id']}"):
+        refused = api.patch(path, "member", {"name": "Renamed by an employee"})
+        assert refused.status_code == 403 and "admins" in refused.json()["detail"]
+        gone = api.delete(path, "member")
+        assert gone.status_code == 403 and "admins" in gone.json()["detail"]
+
+    # The rest of the same call is still theirs: a colour or a description costs nothing if wrong.
+    ok(api.patch(f"/spaces/{space['id']}", "member", {"color": "#0ea5e9"}))
+
+    ok(api.patch(f"/spaces/{space['id']}", "owner", {"name": "Renamed by an admin"}))
+    assert api.get(f"/spaces/{space['id']}", "owner").json()["name"] == "Renamed by an admin"
+    assert api.delete(f"/lists/{folderless_list['id']}", "owner").status_code == 204
 
 
 def test_making_something_private_keeps_the_person_who_did_it(api, workspace, space):

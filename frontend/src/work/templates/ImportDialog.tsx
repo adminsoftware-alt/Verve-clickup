@@ -102,7 +102,7 @@ export const ImportDialog: React.FC<{ listId: string; listName: string; fields: 
         <div role="dialog" aria-label="Import tasks" onMouseDown={(e) => e.stopPropagation()}
           className="flex max-h-[88vh] w-[48rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white p-5 shadow-xl">
           <div className="mb-3 flex items-center gap-2">
-            <FileUp size={17} className="text-indigo-600" />
+            <FileUp size={17} className="text-brand-600" />
             <h3 className="font-semibold text-gray-900">Import tasks into {listName}</h3>
             <button type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </div>
@@ -124,10 +124,10 @@ export const ImportDialog: React.FC<{ listId: string; listName: string; fields: 
                   <ul className="mt-1 space-y-0.5 text-xs text-amber-800">{result.warnings.map((w, i) => <li key={`w${i}`}>Row {lineOf(w.row)}: {w.message}</li>)}</ul>
                 </>
               )}
-              <div className="mt-4 flex justify-end"><button type="button" onClick={onClose} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white">Done</button></div>
+              <div className="mt-4 flex justify-end"><button type="button" onClick={onClose} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white">Done</button></div>
             </div>
           ) : !rows ? (
-            <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-300 px-6 py-10 text-center hover:border-indigo-300 hover:bg-indigo-50/30">
+            <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-300 px-6 py-10 text-center hover:border-brand-300 hover:bg-brand-50/30">
               <FileUp size={28} className="text-gray-400" />
               <span className="text-sm font-medium text-gray-700">Choose a CSV file</span>
               <span className="text-xs text-gray-500">Export from Excel or Google Sheets as “CSV”. The first row must be the column headings.</span>
@@ -170,7 +170,7 @@ export const ImportDialog: React.FC<{ listId: string; listName: string; fields: 
               {error && <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
               <div className="mt-4 flex justify-end gap-2">
                 <button type="button" onClick={() => setRows(null)} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Choose another file</button>
-                <button type="button" disabled={!hasName || busy} onClick={run} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+                <button type="button" disabled={!hasName || busy} onClick={run} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
                   {busy ? 'Importing…' : `Import ${body.length} task${body.length === 1 ? '' : 's'}`}
                 </button>
               </div>

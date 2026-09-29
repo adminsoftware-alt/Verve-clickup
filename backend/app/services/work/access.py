@@ -2,7 +2,7 @@
 
 import uuid
 from dataclasses import dataclass
-from typing import Dict, Generic, List, Optional, TypeVar
+from typing import Dict, Generic, List, Optional, Set, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -17,11 +17,42 @@ from app.db.models import (
     TaskList,
     Team,
     TeamMember,
+    User,
+    Workspace,
     WorkspaceMember,
     WorkspaceRole,
 )
 from app.services.work.errors import Forbidden, NotFound
 from app.services.work.permissions import Node, ShareKey, resolve_level
+
+
+def email_domain(email: str) -> str:
+    return email.rsplit("@", 1)[-1].strip().lower()
+
+
+def sign_in_problem(workspace: Workspace, role: WorkspaceRole, user: User) -> Optional[str]:
+    """Why this person may not use the workspace under its sign-in rules, or None."""
+    domains = [d.lower().lstrip("@") for d in (workspace.allowed_email_domains or [])]
+    if domains and not (role == WorkspaceRole.guest and workspace.allow_outside_guests):
+        if email_domain(user.email) not in domains:
+            return "This workspace only allows accounts from " + ", ".join("@" + d for d in domains) + "."
+    if user.auth_uid is None:
+        return None  # not signed in yet; checked on their first sign-in
+    if workspace.require_google_sign_in and user.last_sign_in_provider != "google.com":
+        return "This workspace requires signing in with Google. Sign out and sign in with your Google account."
+    if workspace.require_two_step and not user.last_second_factor:
+        return "This workspace requires two-step verification. Sign in again and complete the second step."
+    return None
+
+
+def access_problem(db: Session, member: WorkspaceMember) -> Optional[str]:
+    """Why a member can't open the workspace right now (turned off, or breaking a sign-in rule), or None."""
+    if member.deactivated_at is not None:
+        return "Your access to this workspace has been turned off. Ask an admin if this is a mistake."
+    workspace, user = db.get(Workspace, member.workspace_id), db.get(User, member.user_id)
+    if workspace is None or user is None:
+        return None
+    return sign_in_problem(workspace, member.role, user)
 
 
 class Access:
@@ -34,12 +65,16 @@ class Access:
         self.role = role
         self._shares: Optional[Dict[ShareKey, PermissionLevel]] = None
         self._team_shares: Optional[Dict[ShareKey, PermissionLevel]] = None
+        self._my_teams: Optional[Set[uuid.UUID]] = None
 
     @classmethod
     def for_workspace(cls, db: Session, user_id: str, workspace_id: uuid.UUID) -> "Access":
         member = db.get(WorkspaceMember, (workspace_id, user_id))
         if member is None:
             raise NotFound("Workspace not found")
+        problem = access_problem(db, member)
+        if problem:
+            raise Forbidden(problem)
         return cls(db, user_id, workspace_id, member.role)
 
     @property
@@ -61,15 +96,34 @@ class Access:
                 .join(Team, Team.id == TeamMember.team_id)
                 .where(TeamMember.user_id == self.user_id, Team.workspace_id == self.workspace_id)
             )
-            for share in self.db.scalars(select(Share).where(Share.team_id.in_(my_teams))):
+            from app.services.work import team_tree
+
+            # Being in a sub-team counts as being in every Team above it.
+            teams = team_tree.ancestors(self.db, list(self.db.scalars(my_teams)))
+            for share in self.db.scalars(select(Share).where(Share.team_id.in_(teams))):
                 key = share_key(share)
                 current = self._team_shares.get(key)
                 if current is None or share.level.rank > current.rank:
                     self._team_shares[key] = share.level
         return self._team_shares
 
+    @property
+    def my_teams(self) -> Set[uuid.UUID]:
+        """The Teams this person is in, counting every Team above the ones they are in."""
+        if self._my_teams is None:
+            from app.services.work import team_tree
+
+            mine = list(
+                self.db.scalars(
+                    select(TeamMember.team_id).join(Team, Team.id == TeamMember.team_id)
+                    .where(TeamMember.user_id == self.user_id, Team.workspace_id == self.workspace_id)
+                )
+            )
+            self._my_teams = set(team_tree.ancestors(self.db, mine)) if mine else set()
+        return self._my_teams
+
     def level(self, chain: List[Node]) -> Optional[PermissionLevel]:
-        return resolve_level(chain, self.user_id, self.role, self.shares, self.team_shares)
+        return resolve_level(chain, self.user_id, self.role, self.shares, self.team_shares, self.my_teams)
 
     def require(self, chain: List[Node], minimum: PermissionLevel, what: str) -> PermissionLevel:
         level = self.level(chain)
@@ -95,15 +149,15 @@ def share_key(share: Share) -> ShareKey:
 
 
 def space_node(space: Space) -> Node:
-    return Node(LocationKind.space, space.id, space.created_by, space.is_private)
+    return Node(LocationKind.space, space.id, space.created_by, space.is_private, space.team_id)
 
 
 def folder_node(folder: Folder) -> Node:
-    return Node(LocationKind.folder, folder.id, folder.created_by, folder.is_private)
+    return Node(LocationKind.folder, folder.id, folder.created_by, folder.is_private, folder.team_id)
 
 
 def list_node(lst: TaskList) -> Node:
-    return Node(LocationKind.list, lst.id, lst.created_by, lst.is_private)
+    return Node(LocationKind.list, lst.id, lst.created_by, lst.is_private, lst.team_id)
 
 
 def task_node(task: Task) -> Node:
@@ -200,6 +254,23 @@ def open_list(db: Session, user_id: str, list_id: uuid.UUID, minimum: Permission
     return Opened(lst, access, level)
 
 
+def best_task_level(db: Session, access: Access, task: Task) -> Optional[PermissionLevel]:
+    """The caller's level on a task through its home List or any other List it was added to."""
+    from app.db.models import TaskListLink
+
+    ancestry = task_ancestry(db, task)
+    best = access.level(ancestry + chain_for_list(db, db.get(TaskList, task.list_id)))
+    root_id = task.top_level_parent_id or task.id
+    for list_id in db.scalars(select(TaskListLink.list_id).where(TaskListLink.task_id == root_id)):
+        extra = db.get(TaskList, list_id)
+        if extra is None or extra.archived_at is not None:
+            continue
+        level = access.level(ancestry + chain_for_list(db, extra))
+        if level is not None and (best is None or level.rank > best.rank):
+            best = level
+    return best
+
+
 def open_task(db: Session, user_id: str, task_id: uuid.UUID, minimum: PermissionLevel) -> Opened[Task]:
     task = db.get(Task, task_id)
     if task is None:
@@ -209,5 +280,9 @@ def open_task(db: Session, user_id: str, task_id: uuid.UUID, minimum: Permission
     space = db.get(Space, lst.space_id)
     assert space is not None
     access = Access.for_workspace(db, user_id, space.workspace_id)
-    level = access.require(chain_for_task(db, task), minimum, "Task")
+    level = best_task_level(db, access, task)
+    if level is None:
+        raise NotFound("Task not found")
+    if not level.at_least(minimum):
+        raise Forbidden(f"You need {minimum.value} access to do this")
     return Opened(task, access, level)

@@ -3,6 +3,8 @@ import { AtSign, Check, CornerDownRight, MessageSquare, MoreHorizontal, Pencil, 
 import { useWork, useMe } from '../WorkContext';
 import { collabApi, type Activity, type Comment } from '../collabApi';
 import { Avatar, Menu, formatDuration } from '../ui';
+import { notify } from '../../components/notify';
+import { ask } from '../../components/ask';
 
 const EMOJIS = ['👍', '✅', '🎉', '❤️', '😄', '👀'];
 
@@ -39,6 +41,10 @@ export function describeActivity(a: Activity, name: (id: string) => string): str
     case 'archived': return d.to ? 'archived this task' : 'restored this task';
     case 'parent_id': return d.to ? 'made it a subtask' : 'made it a standalone task';
     case 'moved': return `moved it from ${d.from} to ${d.to}`;
+    case 'points': return d.to != null ? `set sprint points to ${d.to}` : 'removed the sprint points';
+    case 'list_added': return `also added it to ${d.list}`;
+    case 'list_removed': return `took it out of ${d.list}`;
+    case 'sprint_rollover': return `rolled it over from ${d.from} to ${d.to}`;
     case 'checklist': return `added checklist “${d.name}”`;
     case 'attachment': return `attached ${d.filename}`;
     default: return a.kind.replace(/_/g, ' ');
@@ -53,7 +59,7 @@ const Body: React.FC<{ comment: Comment }> = ({ comment }) => {
   return (
     <p className="whitespace-pre-wrap break-words text-sm text-gray-800">
       {comment.body.split(pattern).map((part, i) => (names.some((n) => part === `@${n}`)
-        ? <span key={i} className="rounded bg-indigo-50 px-0.5 font-medium text-indigo-700">{part}</span>
+        ? <span key={i} className="rounded bg-brand-50 px-0.5 font-medium text-brand-700">{part}</span>
         : <React.Fragment key={i}>{part}</React.Fragment>))}
     </p>
   );
@@ -110,7 +116,7 @@ const Composer: React.FC<{
   };
 
   return (
-    <div className="relative rounded-lg border border-gray-200 bg-white focus-within:border-indigo-400">
+    <div className="relative rounded-lg border border-gray-200 bg-white focus-within:border-brand-400">
       <textarea
         ref={box}
         autoFocus={autoFocus}
@@ -149,7 +155,7 @@ const Composer: React.FC<{
           </label>
         )}
         {onCancel && <button type="button" onClick={onCancel} className={`${allowAssign ? '' : 'ml-auto '}rounded px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-100`}>Cancel</button>}
-        <button type="button" onClick={send} disabled={!text.trim() || busy} className={`${allowAssign || onCancel ? '' : 'ml-auto '}rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-40`}>
+        <button type="button" onClick={send} disabled={!text.trim() || busy} className={`${allowAssign || onCancel ? '' : 'ml-auto '}rounded-md bg-brand-600 px-3 py-1 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-40`}>
           {assignee ? 'Assign comment' : 'Comment'}
         </button>
       </div>
@@ -163,7 +169,7 @@ const CommentCard: React.FC<{
   const [replying, setReplying] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
-  const run = (action: Promise<unknown>) => action.then(onChanged).catch((e) => window.alert(e.message));
+  const run = (action: Promise<unknown>) => action.then(onChanged).catch((e) => notify.error(e));
   const one = (c: Comment, isReply: boolean) => (
     <div key={c.id} className={`group ${isReply ? 'ml-7 mt-2' : ''}`} aria-label={isReply ? 'Reply' : 'Comment'}>
       <div className="flex items-center gap-2">
@@ -174,16 +180,16 @@ const CommentCard: React.FC<{
           <span className="ml-auto hidden group-hover:inline">
             <Menu align="right" label="Comment actions" items={[
               ...(c.user?.id === me ? [{ label: 'Edit', icon: <Pencil size={14} />, onClick: () => { setDraft(c.body); setEditing(true); } }] : []),
-              { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: () => window.confirm('Delete this comment?') && run(collabApi.deleteComment(c.id)) },
+              { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: async () => await ask.confirm({ danger: true, title: 'Delete this comment?' }) && run(collabApi.deleteComment(c.id)) },
             ]} trigger={<span className="rounded p-0.5 text-gray-400 hover:bg-gray-100"><MoreHorizontal size={14} /></span>} />
           </span>
         )}
       </div>
       {editing && c.id === comment.id ? (
         <div className="mt-1 pl-7">
-          <textarea aria-label="Edit comment" value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} className="w-full rounded border border-indigo-300 px-2 py-1 text-sm" />
+          <textarea aria-label="Edit comment" value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} className="w-full rounded border border-brand-300 px-2 py-1 text-sm" />
           <div className="mt-1 flex gap-2">
-            <button type="button" onClick={() => { run(collabApi.updateComment(c.id, { body: draft })); setEditing(false); }} className="rounded bg-indigo-600 px-2 py-0.5 text-xs text-white">Save</button>
+            <button type="button" onClick={() => { run(collabApi.updateComment(c.id, { body: draft })); setEditing(false); }} className="rounded bg-brand-600 px-2 py-0.5 text-xs text-white">Save</button>
             <button type="button" onClick={() => setEditing(false)} className="text-xs text-gray-500">Cancel</button>
           </div>
         </div>
@@ -199,7 +205,7 @@ const CommentCard: React.FC<{
       <div className="mt-1 flex flex-wrap items-center gap-1 pl-7">
         {c.reactions.map((r) => (
           <button key={r.emoji} type="button" title={r.users.join(', ')} onClick={() => run(collabApi.react(c.id, r.emoji))}
-            className={`rounded-full border px-1.5 py-px text-xs ${r.mine ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200'}`}>{r.emoji} {r.count}</button>
+            className={`rounded-full border px-1.5 py-px text-xs ${r.mine ? 'border-brand-300 bg-brand-50' : 'border-gray-200'}`}>{r.emoji} {r.count}</button>
         ))}
         {canComment && (
           <span className="hidden gap-0.5 group-hover:inline-flex">
@@ -208,7 +214,7 @@ const CommentCard: React.FC<{
           </span>
         )}
         {!isReply && canComment && (
-          <button type="button" onClick={() => setReplying(true)} className="rounded px-1 text-xs text-gray-500 hover:text-indigo-600">Reply</button>
+          <button type="button" onClick={() => setReplying(true)} className="rounded px-1 text-xs text-gray-500 hover:text-brand-600">Reply</button>
         )}
       </div>
     </div>
@@ -224,7 +230,7 @@ const CommentCard: React.FC<{
         </div>
       )}
       {replies.length > 0 && !replying && canComment && (
-        <button type="button" onClick={() => setReplying(true)} className="ml-7 mt-1 flex items-center gap-1 text-xs text-gray-500 hover:text-indigo-600"><CornerDownRight size={12} /> Reply in thread</button>
+        <button type="button" onClick={() => setReplying(true)} className="ml-7 mt-1 flex items-center gap-1 text-xs text-gray-500 hover:text-brand-600"><CornerDownRight size={12} /> Reply in thread</button>
       )}
     </div>
   );
@@ -232,7 +238,7 @@ const CommentCard: React.FC<{
 
 /** The right-hand column of a task: comments and history, oldest first, as in ClickUp. */
 export const TaskFeed: React.FC<{ taskId: string; canComment: boolean; refreshKey: number; onChanged: () => void }> = ({ taskId, canComment, refreshKey, onChanged }) => {
-  const { members } = useWork();
+  const { allMembers: members } = useWork();
   const [comments, setComments] = useState<Comment[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [show, setShow] = useState<'all' | 'comments'>('all');
@@ -257,7 +263,7 @@ export const TaskFeed: React.FC<{ taskId: string; canComment: boolean; refreshKe
     <div className="flex h-full min-h-0 flex-col bg-gray-50/80">
       <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-2.5">
         <MessageSquare size={15} className="text-gray-500" />
-        <h3 className="text-sm font-semibold text-gray-800">Activity</h3>
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Activity</h3>
         <select aria-label="Show" value={show} onChange={(e) => setShow(e.target.value as 'all' | 'comments')} className="ml-auto rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs text-gray-600">
           <option value="all">Comments and history</option><option value="comments">Comments only</option>
         </select>

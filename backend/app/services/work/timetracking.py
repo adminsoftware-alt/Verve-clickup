@@ -38,6 +38,13 @@ def _now() -> datetime:
 def _require_tracking(opened: Opened[Task]) -> None:
     if not opened.level.at_least(PermissionLevel.edit):
         raise Forbidden("You need edit access to a task to track time on it")
+    from app.db.models import TaskList
+    from app.services.work import space_admin
+
+    db = Session.object_session(opened.obj)
+    lst = db.get(TaskList, opened.obj.list_id) if db is not None else None
+    if lst is not None:
+        space_admin.require(db, lst.space_id, "time_tracking")
 
 
 def tags_for(db: Session, entry_ids: Sequence[uuid.UUID]) -> Dict[uuid.UUID, list]:

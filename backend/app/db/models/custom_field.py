@@ -28,6 +28,7 @@ class FieldType(str, enum.Enum):
     rating = "rating"
     progress = "progress"  # 0-100, set by hand
     people = "people"
+    location = "location"  # {address, lat, lng}; shown on the Map view
 
 
 class CustomField(TimestampMixin, Base):

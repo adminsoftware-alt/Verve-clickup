@@ -80,6 +80,7 @@ def _snap_task(db: Session, task: Task, opts: s.TemplateSave, base: datetime, co
         "tags": list(db.scalars(select(Tag.name).join(TaskTag, TaskTag.tag_id == Tag.id).where(TaskTag.task_id == task.id))),
         "group": None,
         "recurrence": task.recurrence if opts.include_dates else None,
+        "points": task.points,
     }
     if task.group_id:
         group = db.get(TaskGroup, task.group_id)
@@ -163,6 +164,45 @@ def _snap_folder(db: Session, folder: Folder, opts: s.TemplateSave, base: dateti
     }
 
 
+def snapshot_space(db: Session, space: Space, opts: s.TemplateSave, base: Optional[datetime] = None,
+                   count: Optional[_Counter] = None) -> Dict[str, Any]:
+    """A whole Space: its statuses, tags, ClickApps, groups, fields, Folders and folderless Lists."""
+    base = base or _today()
+    count = count or _Counter()
+    setup = _own_setup(db, space, "space_id")
+    setup["statuses"] = [
+        {"name": st.name, "color": st.color, "group": st.group.value}
+        for st in db.scalars(select(Status).where(Status.space_id == space.id).order_by(Status.orderindex))
+    ]
+    return {
+        "name": space.name,
+        "description": space.description,
+        "color": space.color,
+        "icon": space.icon,
+        "is_private": space.is_private,
+        "clickapps": dict(space.clickapps or {}),
+        **setup,
+        "tags": [
+            {"name": t.name, "fg_color": t.fg_color, "bg_color": t.bg_color}
+            for t in db.scalars(select(Tag).where(Tag.space_id == space.id).order_by(Tag.name))
+        ],
+        "folders": [
+            {**_snap_folder(db, f, opts, base, count), "sprint_settings": f.sprint_settings}
+            for f in db.scalars(
+                select(Folder).where(Folder.space_id == space.id, Folder.parent_folder_id.is_(None), Folder.archived_at.is_(None))
+                .order_by(Folder.orderindex)
+            )
+        ],
+        "lists": [
+            _snap_list(db, lst, opts, base, count)
+            for lst in db.scalars(
+                select(TaskList).where(TaskList.space_id == space.id, TaskList.folder_id.is_(None), TaskList.archived_at.is_(None))
+                .order_by(TaskList.orderindex)
+            )
+        ],
+    }
+
+
 def save(db: Session, user_id: str, kind: TemplateKind, source_id: uuid.UUID, data: s.TemplateSave) -> Template:
     """Anyone who can see something can save it as a template."""
     base = _today()
@@ -173,6 +213,11 @@ def save(db: Session, user_id: str, kind: TemplateKind, source_id: uuid.UUID, da
     elif kind == TemplateKind.list:
         opened = open_list(db, user_id, source_id, VIEW)
         snapshot = _snap_list(db, opened.obj, data, base, count)
+    elif kind == TemplateKind.space:
+        opened = open_space(db, user_id, source_id, VIEW)
+        if opened.obj.personal_owner_id is not None:
+            raise Invalid("Your personal Space can't be saved as a template")
+        snapshot = snapshot_space(db, opened.obj, data, base, count)
     else:
         opened = open_folder(db, user_id, source_id, VIEW)
         snapshot = _snap_folder(db, opened.obj, data, base, count)
@@ -313,7 +358,11 @@ class _Builder:
             start_date=start,
             due_date=due,
         )
-        task = task_service.create_task(self.db, self.opened, data)
+        # Assignees come from the saved template, not from someone picking names now, so they're taken as
+        # written even where the new List hasn't been shared with them yet.
+        task = task_service.create_task(self.db, self.opened, data, check_assignee_access=False)
+        if snap.get("points") is not None:
+            task.points = snap["points"]
         if snap.get("recurrence"):
             try:
                 recurrence.set_rule(task, s.Recurrence.model_validate(snap["recurrence"]))
@@ -394,6 +443,38 @@ def _build_folder(db: Session, access: Access, space: Space, parent: Optional[Fo
     return folder
 
 
+def build_space(db: Session, access: Access, snap: Dict[str, Any], name: Optional[str], base: Optional[datetime] = None) -> Space:
+    """Create a new Space from a Space snapshot (a template, or a copy of another Space)."""
+    from app.services.work import space_admin
+
+    base = base or _today()
+    space = hierarchy.create_space(db, access, s.SpaceCreate(
+        name=(name or snap["name"])[:100], description=snap.get("description"), color=snap.get("color"),
+        icon=snap.get("icon"), is_private=bool(snap.get("is_private")),
+    ))
+    space_admin.set_clickapps(space, snap.get("clickapps") or {})
+    for t in snap.get("tags", []):
+        db.add(Tag(space_id=space.id, name=t["name"][:64], fg_color=t["fg_color"], bg_color=t["bg_color"]))
+    db.flush()
+    if snap.get("statuses"):
+        # The new Space has no tasks yet, so its starter statuses can simply be replaced.
+        for st in db.scalars(select(Status).where(Status.space_id == space.id)):
+            db.delete(st)
+        db.flush()
+        for i, x in enumerate(snap["statuses"]):
+            db.add(Status(space_id=space.id, name=x["name"], color=x["color"], group=StatusGroup(x["group"]), orderindex=i))
+        db.flush()
+    fmap = _setup(db, access, space, "space_id", {**snap, "statuses": None})
+    for sub in snap.get("folders", []):
+        folder = _build_folder(db, access, space, None, sub, None, fmap, base)
+        if sub.get("sprint_settings"):
+            folder.sprint_settings = sub["sprint_settings"]
+    for lst in snap.get("lists", []):
+        _build_list(db, access, space, None, lst, None, fmap, base)
+    db.flush()
+    return space
+
+
 def apply(db: Session, user_id: str, template_id: uuid.UUID, data: s.TemplateApply) -> s.TemplateApplied:
     t, _ = _open(db, user_id, template_id)
     root = t.data.get("root", {})
@@ -421,6 +502,9 @@ def apply(db: Session, user_id: str, template_id: uuid.UUID, data: s.TemplateApp
                 raise Forbidden("You need full access to create Lists here")
             lst = _build_list(db, opened_s.access, opened_s.obj, None, root, data.name, {}, base)
         result = s.TemplateApplied(kind="list", id=lst.id)
+    elif t.kind == TemplateKind.space:
+        space = build_space(db, Access.for_workspace(db, user_id, t.workspace_id), root, data.name, base)
+        result = s.TemplateApplied(kind="space", id=space.id)
     else:
         if data.space_id is None:
             raise Invalid("Choose a Space for the new Folder")

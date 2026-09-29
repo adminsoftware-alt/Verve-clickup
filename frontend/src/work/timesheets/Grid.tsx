@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
-import { CalendarDays, ChevronDown, ChevronRight, DollarSign, ExternalLink, MoreHorizontal, MoveRight, Pencil, Play, Plus, Tag as TagIcon, Trash2 } from 'lucide-react';
+import { CalendarDays, ChevronDown, ChevronRight, Clock, DollarSign, ExternalLink, MoreHorizontal, MoveRight, Pencil, Play, Plus, Tag as TagIcon, Trash2 } from 'lucide-react';
 import { Menu, StatusDot, formatDuration, parseDuration } from '../ui';
 import { isoDay, type EntryUpdate, type SheetEntry, type SheetRow, type TimeTag, type Timesheet } from './api';
 import { Popover, TaskPicker, dayLabel, hours } from './pieces';
+import { CellCard, DayCard, HoverCard } from './Hover';
+import { AddPeriod } from './AddPeriod';
+import { ask } from '../../components/ask';
 
 export interface EntryActions {
   onUpdate: (entry: SheetEntry, body: EntryUpdate) => Promise<void>;
@@ -13,26 +16,34 @@ export interface EntryActions {
 
 const COLS = 'minmax(340px,2.8fr) repeat(7, minmax(84px,1fr)) minmax(110px,1fr)';
 
-/** The day header: date, total, and tracked-vs-capacity bar with a breakdown on hover. */
+/** The day header: date, total, and tracked-vs-capacity bar, with the full breakdown on hover. */
 const DayHead: React.FC<{ iso: string; tracked: number; billable: number; capacity: number; today: boolean }> = ({ iso, tracked, billable, capacity, today }) => {
   const over = tracked > capacity;
   const pct = capacity ? Math.min(100, (100 * tracked) / capacity) : tracked ? 100 : 0;
-  const tip = [
-    `Capacity: ${hours(capacity)}`, `Tracked: ${hours(tracked)}`, `Billable: ${hours(billable)}`, `Non-billable: ${hours(tracked - billable)}`,
-    over ? `Over capacity: ${hours(tracked - capacity)}` : `Remaining: ${hours(capacity - tracked)}`,
-  ].join('\n');
+  const long = new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
   return (
-    <div className={`border-l border-gray-100 px-2.5 py-3 ${today ? 'bg-indigo-50/40' : ''}`} title={tip}>
-      <div className={`text-xs ${today ? 'font-medium text-indigo-700' : 'text-gray-500'}`}>{dayLabel(iso)}</div>
+    <HoverCard
+      className={`border-l border-gray-100 px-2.5 py-3 ${today ? 'bg-brand-50/40' : ''}`}
+      card={<DayCard title={long} capacity={capacity} tracked={tracked} billable={billable} />}
+    >
+      <div className={`text-xs ${today ? 'font-medium text-brand-700' : 'text-gray-500'}`}>{dayLabel(iso)}</div>
       <div className="mt-0.5 text-base text-gray-900">{hours(tracked)}</div>
       <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-gray-200">
-        <div className={`h-full rounded-full ${over ? 'bg-red-500' : 'bg-indigo-500'}`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full ${over ? 'bg-red-500' : 'bg-brand-500'}`} style={{ width: `${pct}%` }} />
       </div>
-    </div>
+    </HoverCard>
   );
 };
 
-const Cell: React.FC<{ seconds: number; editable: boolean; muted: boolean; onSave: (seconds: number) => Promise<void>; label: string }> = ({ seconds, editable, muted, onSave, label }) => {
+const Cell: React.FC<{
+  seconds: number; editable: boolean; muted: boolean; onSave: (seconds: number) => Promise<void>; label: string;
+  /** Shown on hover: which entries this cell adds up. */
+  card?: React.ReactNode;
+  /** The day and task this cell stands for, so a period can be logged against them. */
+  day: string;
+  taskName: string;
+  onAddPeriod: (started: string, ended: string, note: string | null) => Promise<void>;
+}> = ({ seconds, editable, muted, onSave, label, card, day, taskName, onAddPeriod }) => {
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const commit = async () => {
@@ -44,10 +55,10 @@ const Cell: React.FC<{ seconds: number; editable: boolean; muted: boolean; onSav
     setError(false);
     if (value !== seconds) await onSave(value);
   };
-  const base = `flex h-full items-center justify-end border-l border-gray-100 px-3 text-sm ${muted ? 'bg-gray-50' : ''}`;
+  const base = `flex h-full items-center justify-end border-l border-gray-100 text-sm ${muted ? 'bg-gray-50' : ''}`;
   if (draft !== null) {
     return (
-      <div className={base}>
+      <div className={`${base} px-3`}>
         <input
           autoFocus
           aria-label={label}
@@ -56,34 +67,65 @@ const Cell: React.FC<{ seconds: number; editable: boolean; muted: boolean; onSav
           onBlur={commit}
           onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') { setDraft(null); setError(false); } }}
           placeholder="e.g. 1h 30m"
-          className={`w-full rounded border px-1.5 py-1 text-right text-sm focus:outline-none ${error ? 'border-red-400' : 'border-indigo-400'}`}
+          className={`w-full rounded border px-1.5 py-1 text-right text-sm focus:outline-none ${error ? 'border-red-400' : 'border-brand-400'}`}
         />
       </div>
     );
   }
-  return (
+  const button = (
     <button
       type="button"
       aria-label={label}
       disabled={!editable}
       onClick={() => setDraft(seconds ? formatDuration(seconds) : '')}
-      className={`${base} w-full ${editable ? 'hover:bg-indigo-50/60' : 'cursor-default'}`}
+      className={`flex h-full min-w-0 flex-1 items-center justify-end pr-3 ${editable ? 'hover:text-brand-700' : 'cursor-default'}`}
     >
       {seconds ? <span className="text-gray-900">{formatDuration(seconds)}</span> : <span className="text-gray-300">—</span>}
     </button>
   );
+  // The clock sits on the cell rather than inside its editor: a popover opened from the editor
+  // dies the moment the editor's input loses focus to it, and nobody finds a control they have
+  // to start typing to see.
+  const cell = (
+    <div className={`${base} group/cell w-full pl-1`}>
+      {editable && (
+        <Popover
+          width={280}
+          align="left"
+          trigger={(open, active) => (
+            <button
+              type="button"
+              title="Log a specific period, e.g. 6pm to 7pm"
+              aria-label={`Log a specific period for ${label}`}
+              onClick={open}
+              className={`shrink-0 rounded p-1 text-gray-400 hover:bg-brand-50 hover:text-brand-600 ${active ? '' : 'opacity-0 group-hover/cell:opacity-100 focus:opacity-100'}`}
+            >
+              <Clock size={14} />
+            </button>
+          )}
+        >
+          {(close) => <AddPeriod day={day} taskName={taskName} onAdd={onAddPeriod} onDone={close} />}
+        </Popover>
+      )}
+      {button}
+    </div>
+  );
+  // Only a cell with something in it has anything to say.
+  return card && seconds ? <HoverCard className="h-full" card={card}>{cell}</HoverCard> : cell;
 };
 
 export const Grid: React.FC<{
   sheet: Timesheet;
   editable: boolean;
   onCell: (taskId: string, dayIndex: number, seconds: number) => Promise<void>;
+  /** One entry at a stated period, as against a duration ending at the moment of typing. */
+  onAddPeriod: (taskId: string, started: string, ended: string, note: string | null) => Promise<void>;
   onDeleteRow: (row: SheetRow) => void;
   onOpenTask: (taskId: string) => void;
   onStartTimer?: (taskId: string) => void;
   onAddTask: (taskId: string) => Promise<void>;
   actions: EntryActions;
-}> = ({ sheet, editable, onCell, onDeleteRow, onOpenTask, onStartTimer, onAddTask, actions }) => {
+}> = ({ sheet, editable, onCell, onAddPeriod, onDeleteRow, onOpenTask, onStartTimer, onAddTask, actions }) => {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const today = isoDay(new Date());
   const toggle = (id: string) => setOpen((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -100,7 +142,7 @@ export const Grid: React.FC<{
             <div className="text-xs text-gray-500">Total</div>
             <div className="mt-0.5 text-base text-gray-900">{hours(sheet.total_seconds)}</div>
             <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-gray-200">
-              {(() => { const cap = sheet.capacity_per_day.reduce((a, b) => a + b, 0); const over = sheet.total_seconds > cap; return <div className={`h-full rounded-full ${over ? 'bg-red-500' : 'bg-indigo-500'}`} style={{ width: `${cap ? Math.min(100, (100 * sheet.total_seconds) / cap) : 0}%` }} />; })()}
+              {(() => { const cap = sheet.capacity_per_day.reduce((a, b) => a + b, 0); const over = sheet.total_seconds > cap; return <div className={`h-full rounded-full ${over ? 'bg-red-500' : 'bg-brand-500'}`} style={{ width: `${cap ? Math.min(100, (100 * sheet.total_seconds) / cap) : 0}%` }} />; })()}
             </div>
           </div>
         </div>
@@ -146,6 +188,17 @@ export const Grid: React.FC<{
                     muted={sheet.capacity_per_day[i] === 0}
                     label={`${row.task.name} on ${dayLabel(sheet.days[i])}`}
                     onSave={(value) => onCell(row.task.id, i, value)}
+                    day={sheet.days[i]}
+                    taskName={row.task.name}
+                    onAddPeriod={(started, ended, note) => onAddPeriod(row.task.id, started, ended, note)}
+                    card={(
+                      <CellCard
+                        task={row.task.name}
+                        title={new Date(`${sheet.days[i]}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+                        entries={row.entries.filter((e) => e.day === i)}
+                        total={sec}
+                      />
+                    )}
                   />
                 ))}
                 <div className="flex items-center justify-end gap-2 border-l border-gray-100 px-3">
@@ -179,7 +232,7 @@ export const Grid: React.FC<{
             <Popover
               width={340}
               trigger={(openPicker) => (
-                <button type="button" onClick={openPicker} className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+                <button type="button" onClick={openPicker} className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700">
                   <Plus size={15} /> Add task
                 </button>
               )}
@@ -220,7 +273,7 @@ export const EntryDetails: React.FC<{ entry: SheetEntry; editable: boolean; acti
           defaultValue={entry.description ?? ''}
           onBlur={(e) => { setEditing(false); if ((e.target.value || null) !== entry.description) actions.onUpdate(entry, { description: e.target.value || null }); }}
           onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-          className="min-w-40 flex-1 rounded border border-indigo-300 px-1.5 py-0.5 text-sm focus:outline-none"
+          className="min-w-40 flex-1 rounded border border-brand-300 px-1.5 py-0.5 text-sm focus:outline-none"
         />
       ) : (
         <button type="button" disabled={!editable || entry.running} onClick={() => setEditing(true)} className="truncate text-left text-gray-700 hover:underline disabled:no-underline">
@@ -255,7 +308,7 @@ export const TagPicker: React.FC<{ entry: SheetEntry; actions: EntryActions }> =
             onSubmit={async (e) => { e.preventDefault(); if (!name.trim()) return; const tag = await actions.onCreateTag(name.trim()); setName(''); await actions.onUpdate(entry, { tag_ids: [...chosen, tag.id] }); }}
           >
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New tag" className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-0.5 text-xs" />
-            <button type="submit" className="rounded bg-indigo-600 px-2 text-xs text-white">Add</button>
+            <button type="submit" className="rounded bg-brand-600 px-2 text-xs text-white">Add</button>
           </form>
         </div>
       )}
@@ -288,7 +341,7 @@ export const EntryMenu: React.FC<{ entry: SheetEntry; actions: EntryActions }> =
         <ul className="text-sm">
           <li><button type="button" onClick={() => setMode('date')} className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-gray-50"><CalendarDays size={14} /> Change date</button></li>
           <li><button type="button" onClick={() => setMode('task')} className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-gray-50"><MoveRight size={14} /> Move to task</button></li>
-          <li><button type="button" onClick={() => { close(); const v = window.prompt('Duration (e.g. 1h 30m)', formatDuration(entry.duration_seconds)); const s = v ? parseDuration(v) : null; if (s) actions.onUpdate(entry, { duration_seconds: s }); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-gray-50"><Pencil size={14} /> Change duration</button></li>
+          <li><button type="button" onClick={async () => { close(); const v = await ask.prompt('Duration (e.g. 1h 30m)', formatDuration(entry.duration_seconds)); const s = v ? parseDuration(v) : null; if (s) actions.onUpdate(entry, { duration_seconds: s }); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-gray-50"><Pencil size={14} /> Change duration</button></li>
           <li><button type="button" onClick={() => { close(); actions.onDelete(entry); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-red-600 hover:bg-red-50"><Trash2 size={14} /> Delete entry</button></li>
         </ul>
       )}

@@ -1,33 +1,170 @@
 import React, { useState } from 'react';
-import { ArrowDown, ArrowUp, Archive, Clock3, DollarSign, Tag as TagIcon } from 'lucide-react';
+import {
+  ArrowDown, ArrowUp, Archive, CalendarDays, Circle, Clock3, DollarSign, Flag, FolderTree, Hourglass, Tag as TagIcon,
+  User,
+} from 'lucide-react';
+import { FEATURES } from '../../config/features';
 import { formatDuration, parseDuration } from '../ui';
-import { type SheetEntry, type SheetQuery, type TimeTag, type Timesheet } from './api';
+import { PROGRESS_COLUMNS } from '../views/grouping';
+import { TwoStepFilter, type FilterField } from '../views/TwoStepFilter';
+import { TRACKED_OPS, type SheetQuery, type SheetEntry, type SheetRow, type TimeTag, type Timesheet } from './api';
 import { EntryDetails, EntryMenu, type EntryActions } from './Grid';
 import { Popover, dayLabel, hours } from './pieces';
 
 // --- filters -------------------------------------------------------------------------------------
 
 const chip = (active: boolean) =>
-  `flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm ${active ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`;
+  `flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm ${active ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`;
 
-export const FilterBar: React.FC<{ query: SheetQuery; onChange: (q: SheetQuery) => void; tags: TimeTag[] }> = ({ query, onChange, tags }) => {
+export const FilterBar: React.FC<{
+  query: SheetQuery; onChange: (q: SheetQuery) => void; tags: TimeTag[];
+  /** The rows in the week, which is where the statuses actually in use come from. */
+  rows?: SheetRow[];
+}> = ({ query, onChange, tags, rows = [] }) => {
   const set = (patch: Partial<SheetQuery>) => onChange({ ...query, ...patch });
-  const [amount, setAmount] = useState(query.trackedSeconds != null ? String(query.trackedSeconds / 3600) : '');
+  const [amount, setAmount] = useState(query.trackedSeconds != null ? formatDuration(query.trackedSeconds) : '');
   const billableLabel = query.billable === 'billable' ? 'Billable' : query.billable === 'non_billable' ? 'Non-billable' : 'Billable status';
   const selectedTags = new Set(query.tagIds ?? []);
-  const sortLabel = query.sort === 'name' ? 'Task name' : 'Date added';
+  const sortLabel = 'Task name';
+  // What the dropdown can narrow. The people, Lists and tags on offer are read off the week in
+  // front of you -- a filter that lists something not on screen is one that cannot change
+  // anything. Status, priority and the date shapes are fixed, because they mean the same thing
+  // whether or not this particular week happens to contain one.
+  const lists = new Map<string, string>();
+  const people = new Map<string, string>();
+  const onTasks = new Map<string, string>();
+  rows.forEach((r) => {
+    if (r.task.list_id && r.task.location) lists.set(r.task.list_id, r.task.location.split(' / ').slice(-1)[0]);
+    r.task.assignees?.forEach((u) => people.set(u.id, u.display_name || u.email));
+    r.task.tags?.forEach((t) => onTasks.set(t.toLowerCase(), t));
+  });
+
+  const MULTI = ['statuses', 'lists', 'priorities', 'assignees', 'taskTags'];
+  const fields: FilterField[] = [
+    {
+      key: 'statuses',
+      label: 'Status',
+      Icon: Circle,
+      options: PROGRESS_COLUMNS.map((c) => ({ value: c.key, label: c.name, color: c.color })),
+      selected: query.statuses ?? [],
+    },
+    {
+      key: 'priorities',
+      label: 'Priority',
+      Icon: Flag,
+      options: [
+        { value: '1', label: 'Urgent', color: '#ef4444' },
+        { value: '2', label: 'High', color: '#f97316' },
+        { value: '3', label: 'Normal', color: '#0ea5e9' },
+        { value: '4', label: 'Low', color: '#9ca3af' },
+        { value: '0', label: 'No priority', color: '#d1d5db' },
+      ],
+      selected: query.priorities ?? [],
+    },
+    {
+      key: 'assignees',
+      label: 'Assignee',
+      Icon: User,
+      options: [{ value: 'none', label: 'Nobody' }, ...[...people].map(([value, label]) => ({ value, label }))],
+      selected: query.assignees ?? [],
+    },
+    {
+      key: 'due',
+      label: 'Due date',
+      Icon: CalendarDays,
+      single: true,
+      options: [
+        { value: 'overdue', label: 'Overdue' },
+        { value: 'today', label: 'Due today' },
+        { value: 'this_week', label: 'Due in the next 7 days' },
+        { value: 'set', label: 'Has a due date' },
+        { value: 'none', label: 'No due date' },
+      ],
+      selected: query.due ? [query.due] : [],
+    },
+    {
+      key: 'estimate',
+      label: 'Time estimate',
+      Icon: Hourglass,
+      single: true,
+      options: [{ value: 'set', label: 'Has an estimate' }, { value: 'missing', label: 'No estimate' }],
+      selected: query.estimate ? [query.estimate] : [],
+    },
+    {
+      key: 'scheduled',
+      label: 'Scheduled',
+      Icon: CalendarDays,
+      single: true,
+      options: [{ value: 'yes', label: 'Has a start or due date' }, { value: 'no', label: 'Unscheduled' }],
+      selected: query.scheduled ? [query.scheduled] : [],
+    },
+    ...(onTasks.size > 0 ? [{
+      key: 'taskTags',
+      label: 'Tags',
+      Icon: TagIcon,
+      options: [...onTasks].map(([value, label]) => ({ value, label })),
+      selected: query.taskTags ?? [],
+    }] : []),
+    ...(lists.size > 1 ? [{
+      key: 'lists',
+      label: 'List',
+      Icon: FolderTree,
+      options: [...lists].map(([value, label]) => ({ value, label })),
+      selected: query.lists ?? [],
+    }] : []),
+    {
+      key: 'includeArchived',
+      label: 'Archived tasks',
+      Icon: Archive,
+      single: true,
+      options: [{ value: 'yes', label: 'Include archived tasks' }],
+      selected: query.includeArchived ? ['yes'] : [],
+    },
+  ];
+
+  const pick = (field: FilterField, value: string) => {
+    if (field.key === 'includeArchived') { set({ includeArchived: !query.includeArchived }); return; }
+    if (!MULTI.includes(field.key)) {
+      // Picking the value already set clears it, so one field never needs a Clear of its own.
+      const on = (query as Record<string, unknown>)[field.key] === value;
+      set({ [field.key]: on ? null : value } as Partial<SheetQuery>);
+      return;
+    }
+    const on = ((query as Record<string, string[] | undefined>)[field.key] ?? []);
+    const next = on.includes(value) ? on.filter((x) => x !== value) : [...on, value];
+    set({ [field.key]: next.length ? next : undefined } as Partial<SheetQuery>);
+  };
+  const clear = (field: FilterField) => {
+    if (field.key === 'includeArchived') { set({ includeArchived: false }); return; }
+    set({ [field.key]: MULTI.includes(field.key) ? undefined : null } as Partial<SheetQuery>);
+  };
+
   return (
     <div className="flex flex-wrap items-center gap-2">
+      <TwoStepFilter
+        fields={fields}
+        onToggle={pick}
+        onClear={clear}
+        onClearAll={() => set({
+          statuses: undefined, lists: undefined, priorities: undefined, assignees: undefined, taskTags: undefined,
+          due: null, estimate: null, scheduled: null, includeArchived: false,
+        })}
+      />
+
+      {FEATURES.timesheetBillableAndTagChips && (
       <Popover width={200} trigger={(open) => <button type="button" onClick={open} className={chip(!!query.billable && query.billable !== 'all')}><DollarSign size={13} /> {billableLabel}</button>}>
         {(close) => (
           <ul className="text-sm">
             {([['all', 'Billable and non-billable'], ['billable', 'Billable'], ['non_billable', 'Non-billable']] as const).map(([v, l]) => (
-              <li key={v}><button type="button" onClick={() => { set({ billable: v }); close(); }} className={`w-full rounded px-2 py-1.5 text-left hover:bg-gray-50 ${(query.billable ?? 'all') === v ? 'font-medium text-indigo-700' : ''}`}>{l}</button></li>
+              <li key={v}><button type="button" onClick={() => { set({ billable: v }); close(); }} className={`w-full rounded px-2 py-1.5 text-left hover:bg-gray-50 ${(query.billable ?? 'all') === v ? 'font-medium text-brand-700' : ''}`}>{l}</button></li>
             ))}
           </ul>
         )}
       </Popover>
 
+      )}
+
+      {FEATURES.timesheetBillableAndTagChips && (
       <Popover width={220} trigger={(open) => <button type="button" onClick={open} className={chip(selectedTags.size > 0)}><TagIcon size={13} /> {selectedTags.size ? `Tag (${selectedTags.size})` : 'Tag'}</button>}>
         {() => (
           <div>
@@ -45,37 +182,50 @@ export const FilterBar: React.FC<{ query: SheetQuery; onChange: (q: SheetQuery) 
         )}
       </Popover>
 
-      <Popover width={240} trigger={(open) => (
+      )}
+
+      <Popover width={280} trigger={(open) => (
         <button type="button" onClick={open} className={chip(!!query.trackedOp)}>
-          <Clock3 size={13} /> {query.trackedOp ? `Tracked ${query.trackedOp === 'gt' ? '>' : '<'} ${hours(query.trackedSeconds ?? 0)}` : 'Tracked time'}
+          <Clock3 size={13} /> {query.trackedOp
+            ? `Tracked ${TRACKED_OPS.find((o) => o.value === query.trackedOp)?.short ?? ''} ${hours(query.trackedSeconds ?? 0)}`
+            : 'Tracked time'}
         </button>
       )}>
         {(close) => (
-          <form className="space-y-2 text-sm" onSubmit={(e) => {
+          <form className="text-sm" onSubmit={(e) => {
             e.preventDefault();
             const secs = parseDuration(amount);
-            set(secs == null ? { trackedOp: null, trackedSeconds: null } : { trackedOp: query.trackedOp ?? 'gt', trackedSeconds: secs });
+            set(secs == null ? { trackedOp: null, trackedSeconds: null } : { trackedOp: query.trackedOp ?? 'gte', trackedSeconds: secs });
             close();
           }}>
-            <p className="text-xs text-gray-500">Show tasks whose tracked time this week is…</p>
-            <div className="flex gap-2">
-              <select aria-label="Comparison" value={query.trackedOp ?? 'gt'} onChange={(e) => set({ trackedOp: e.target.value as 'gt' | 'lt', trackedSeconds: query.trackedSeconds ?? null })} className="rounded border border-gray-300 px-1.5 py-1">
-                <option value="gt">more than</option><option value="lt">less than</option>
-              </select>
-              <input aria-label="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 2h" className="w-20 rounded border border-gray-300 px-2 py-1" />
-            </div>
-            <div className="flex justify-between">
-              <button type="button" onClick={() => { setAmount(''); set({ trackedOp: null, trackedSeconds: null }); close(); }} className="text-xs text-gray-500 hover:underline">Clear</button>
-              <button type="submit" className="rounded bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white">Apply</button>
+            <p className="mb-1.5 text-xs text-gray-500">Show tasks whose tracked time this week is</p>
+            {/* The comparison is named in full rather than as a symbol: "gt" and ">" both need
+                decoding, and this control is used once in a while, not every day. */}
+            <select
+              aria-label="Comparison"
+              value={query.trackedOp ?? 'gte'}
+              onChange={(e) => set({ trackedOp: e.target.value as SheetQuery['trackedOp'], trackedSeconds: query.trackedSeconds ?? null })}
+              className="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-[13px] text-gray-800"
+            >
+              {TRACKED_OPS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <input
+              aria-label="Amount"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0h"
+              className="mt-2 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] text-gray-800 placeholder:text-gray-400"
+            />
+            <p className="mt-1 text-[11px] text-gray-400">Hours and minutes, e.g. 2h, 45m, 1h 30m.</p>
+            <div className="mt-2.5 flex items-center justify-between border-t border-gray-100 pt-2">
+              <button type="button" onClick={() => { setAmount(''); set({ trackedOp: null, trackedSeconds: null }); close(); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
+              <button type="submit" className="rounded-md bg-brand-600 px-3 py-1 text-xs font-medium text-white hover:bg-brand-700">Apply</button>
             </div>
           </form>
         )}
       </Popover>
 
-      <button type="button" aria-pressed={!!query.includeArchived} onClick={() => set({ includeArchived: !query.includeArchived })} className={chip(!!query.includeArchived)}>
-        <Archive size={13} /> Archived tasks
-      </button>
-
+      {FEATURES.timesheetSortChip && (
       <Popover width={200} trigger={(open) => (
         <button type="button" onClick={open} className={chip(false)} title="Sort">
           {query.descending ? <ArrowDown size={13} /> : <ArrowUp size={13} />} {sortLabel}
@@ -83,21 +233,22 @@ export const FilterBar: React.FC<{ query: SheetQuery; onChange: (q: SheetQuery) 
       )}>
         {(close) => (
           <ul className="text-sm">
-            {([['date_added', 'Date added'], ['name', 'Task name']] as const).map(([v, l]) => (
+            {([['name', 'Task name']] as const).map(([v, l]) => (
               <li key={v}>
                 <button
                   type="button"
                   // Picking the current sort again reverses it, as in ClickUp.
-                  onClick={() => { set((query.sort ?? 'date_added') === v ? { descending: !query.descending } : { sort: v, descending: false }); close(); }}
-                  className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-gray-50 ${(query.sort ?? 'date_added') === v ? 'font-medium text-indigo-700' : ''}`}
+                  onClick={() => { set((query.sort ?? 'name') === v ? { descending: !query.descending } : { sort: v, descending: false }); close(); }}
+                  className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-gray-50 ${(query.sort ?? 'name') === v ? 'font-medium text-brand-700' : ''}`}
                 >
-                  {l}{(query.sort ?? 'date_added') === v && (query.descending ? <ArrowDown size={13} /> : <ArrowUp size={13} />)}
+                  {l}{(query.sort ?? 'name') === v && (query.descending ? <ArrowDown size={13} /> : <ArrowUp size={13} />)}
                 </button>
               </li>
             ))}
           </ul>
         )}
       </Popover>
+      )}
     </div>
   );
 };
@@ -123,7 +274,7 @@ const TimeInput: React.FC<{ iso: string; disabled: boolean; label: string; onSav
       d.setHours(h, m, 0, 0);
       onSave(d.toISOString());
     }}
-    className="w-[5.5rem] rounded border border-transparent px-1 py-0.5 text-sm hover:border-gray-200 focus:border-indigo-400 focus:outline-none disabled:bg-transparent"
+    className="w-[5.5rem] rounded border border-transparent px-1 py-0.5 text-sm hover:border-gray-200 focus:border-brand-400 focus:outline-none disabled:bg-transparent"
   />
 );
 
@@ -189,7 +340,7 @@ const DurationInput: React.FC<{ entry: SheetEntry; editable: boolean; onSave: (s
         if (secs !== entry.duration_seconds) onSave(secs);
       }}
       onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-      className={`w-full rounded border px-1.5 py-0.5 text-right text-sm focus:outline-none ${bad ? 'border-red-400' : 'border-transparent hover:border-gray-200 focus:border-indigo-400'}`}
+      className={`w-full rounded border px-1.5 py-0.5 text-right text-sm focus:outline-none ${bad ? 'border-red-400' : 'border-transparent hover:border-gray-200 focus:border-brand-400'}`}
     />
   );
 };

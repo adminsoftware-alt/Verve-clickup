@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Flag } from 'lucide-react';
-import type { Status, UserRef } from './api';
+import { API_V2, type Status, type UserRef } from './api';
 
 // --- people ------------------------------------------------------------------
 
@@ -10,7 +10,9 @@ const AVATAR_COLORS = ['#7c3aed', '#db2777', '#ea580c', '#16a34a', '#0891b2', '#
 export function initials(user: UserRef): string {
   const source = user.display_name || user.email.split('@')[0];
   const parts = source.split(/[\s._-]+/).filter(Boolean);
-  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '?';
+  // First name and last name, as in ClickUp: "Harish Kandi" -> HK. One name gives its first two letters.
+  const last = parts.length > 1 ? parts[parts.length - 1] : '';
+  return ((parts[0]?.[0] ?? '') + (last[0] ?? parts[0]?.[1] ?? '')).toUpperCase() || '?';
 }
 
 function colorFor(id: string): string {
@@ -19,7 +21,10 @@ function colorFor(id: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-export const Avatar: React.FC<{ user: UserRef; size?: number }> = ({ user, size = 24 }) => (
+export const Avatar: React.FC<{ user: UserRef; size?: number }> = ({ user, size = 24 }) => (user.avatar ? (
+  <img src={`${API_V2}/${user.avatar}`} alt="" title={user.display_name || user.email}
+    className="inline-block shrink-0 rounded-full object-cover ring-2 ring-white" style={{ width: size, height: size }} />
+) : (
   <span
     title={user.display_name || user.email}
     className="inline-flex items-center justify-center rounded-full font-semibold text-white ring-2 ring-white shrink-0"
@@ -27,7 +32,7 @@ export const Avatar: React.FC<{ user: UserRef; size?: number }> = ({ user, size 
   >
     {initials(user)}
   </span>
-);
+));
 
 export const AvatarStack: React.FC<{ users: UserRef[]; max?: number }> = ({ users, max = 3 }) => {
   if (users.length === 0) return <span className="text-gray-300 text-xs">—</span>;
@@ -97,13 +102,23 @@ export function formatDuration(seconds: number | null | undefined): string {
   return `${seconds}s`;
 }
 
-/** Reads "1h 30m", "1.5h", "90m", "45 min", "1:30" or a bare number of hours. */
+/**
+ * Reads a length of time the way people write one:
+ *   "1h 30m", "90m", "45 min", "2h"  -> exactly that
+ *   "1:30" and "1.30"                -> 1 hour 30 minutes
+ *   "4.6"                            -> 4 hours 6 minutes (the part after the dot is minutes)
+ *   "1"                              -> 1 hour
+ */
 export function parseDuration(text: string): number | null {
   const value = text.trim().toLowerCase();
   if (!value) return null;
-  const clock = value.match(/^(\d+):(\d{1,2})$/);
-  if (clock) return Number(clock[1]) * 3600 + Number(clock[2]) * 60;
-  if (/^\d+(\.\d+)?$/.test(value)) return Math.round(Number(value) * 3600);
+  const clock = value.match(/^(\d+)[:.](\d{1,2})$/);
+  if (clock) {
+    const minutes = Number(clock[2]);
+    if (minutes > 59) return null;
+    return Number(clock[1]) * 3600 + minutes * 60;
+  }
+  if (/^\d+$/.test(value)) return Number(value) * 3600;  // a bare number is hours
   let total = 0;
   let matched = false;
   for (const [, amount, unit] of value.matchAll(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hours?|m|min|mins|minutes?|s|sec|secs|seconds?)\b/g)) {
@@ -165,15 +180,20 @@ export const Menu: React.FC<{
   trigger: React.ReactNode;
   items: MenuItem[];
   align?: 'left' | 'right';
+  /** How the trigger sits in its parent. A cell wants the whole width; a toolbar button does not. */
+  triggerClassName?: string;
+  /** Wider than the default where the labels are longer, e.g. a List's own status names.
+   *  'trigger' matches the control it hangs off, which is what a form field wants. */
+  width?: number | 'trigger';
   label?: string;
   onOpenChange?: (open: boolean) => void;
-}> = ({ trigger, items, align = 'left', label, onOpenChange }) => {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+}> = ({ trigger, items, align = 'left', label, onOpenChange, triggerClassName = 'inline-flex', width = MENU_WIDTH }) => {
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const triggerRef = useRef<HTMLSpanElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const open = pos !== null;
 
-  const setOpen = (next: { top: number; left: number } | null) => {
+  const setOpen = (next: { top: number; left: number; width: number } | null) => {
     setPos(next);
     onOpenChange?.(next !== null);
   };
@@ -181,12 +201,15 @@ export const Menu: React.FC<{
   const toggle = () => {
     if (open || !triggerRef.current) { setOpen(null); return; }
     const rect = triggerRef.current.getBoundingClientRect();
+    // A list that belongs to a form field lines up with the field; anything else keeps its own
+    // width, because a toolbar button is not as wide as its longest menu entry.
+    const w = width === 'trigger' ? Math.max(rect.width, 170) : width;
     const height = items.length * MENU_ITEM_HEIGHT + 8;
-    let left = align === 'right' ? rect.right - MENU_WIDTH : rect.left;
-    left = Math.max(8, Math.min(left, window.innerWidth - MENU_WIDTH - 8));
+    let left = align === 'right' ? rect.right - w : rect.left;
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
     const below = rect.bottom + 4;
     const top = below + height > window.innerHeight - 8 ? Math.max(8, rect.top - height - 4) : below;
-    setOpen({ top, left });
+    setOpen({ top, left, width: w });
   };
 
   useEffect(() => {
@@ -217,7 +240,7 @@ export const Menu: React.FC<{
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="inline-flex"
+        className={triggerClassName}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(); }}
       >
         {trigger}
@@ -227,7 +250,7 @@ export const Menu: React.FC<{
           <div
             ref={popoverRef}
             role="menu"
-            style={{ position: 'fixed', top: pos.top, left: pos.left, width: MENU_WIDTH }}
+            style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
             className="z-[200] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
           >
             {items.map((item) => (
@@ -256,11 +279,14 @@ export const NameDialog: React.FC<{
   initial?: string;
   confirmLabel?: string;
   withPrivate?: boolean;
-  onSubmit: (name: string, isPrivate: boolean) => Promise<void> | void;
+  /** People who can be handed the thing being created, with a note about what that means. */
+  assignTo?: { people: { id: string; name: string }[]; note: string };
+  onSubmit: (name: string, isPrivate: boolean, assignees: string[]) => Promise<void> | void;
   onClose: () => void;
-}> = ({ title, initial = '', confirmLabel = 'Create', withPrivate = false, onSubmit, onClose }) => {
+}> = ({ title, initial = '', confirmLabel = 'Create', withPrivate = false, assignTo, onSubmit, onClose }) => {
   const [name, setName] = useState(initial);
   const [isPrivate, setIsPrivate] = useState(false);
+  const [assignees, setAssignees] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submit = async (e: React.FormEvent) => {
@@ -268,7 +294,7 @@ export const NameDialog: React.FC<{
     if (!name.trim()) return;
     setBusy(true);
     try {
-      await onSubmit(name.trim(), isPrivate);
+      await onSubmit(name.trim(), isPrivate, assignees);
       onClose();
     } catch (err) {
       setError((err as Error).message);
@@ -292,9 +318,26 @@ export const NameDialog: React.FC<{
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={100}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
           placeholder="Name"
         />
+        {assignTo && assignTo.people.length > 0 && (
+          <label className="mt-3 block text-sm text-gray-700">
+            Assign to
+            <select
+              multiple
+              size={Math.min(5, Math.max(3, assignTo.people.length))}
+              value={assignees}
+              onChange={(e) => setAssignees([...e.target.selectedOptions].map((o) => o.value))}
+              className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500"
+            >
+              {assignTo.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <span className="mt-1 block text-xs text-gray-500">
+              {assignees.length ? assignTo.note : 'Optional \u2014 leave empty to keep it for everyone here.'}
+            </span>
+          </label>
+        )}
         {withPrivate && (
           <label className="mt-3 flex items-center gap-2 text-sm text-gray-600">
             <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} />
@@ -304,7 +347,7 @@ export const NameDialog: React.FC<{
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-          <button type="submit" disabled={busy || !name.trim()} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+          <button type="submit" disabled={busy || !name.trim()} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
             {confirmLabel}
           </button>
         </div>

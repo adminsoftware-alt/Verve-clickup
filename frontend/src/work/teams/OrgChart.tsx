@@ -73,7 +73,7 @@ export const OrgChart: React.FC<{ people?: Person[]; embedded?: boolean }> = ({ 
           <span className="w-12 text-center text-xs text-gray-500">{Math.round(zoom * 100)}%</span>
           <button type="button" title="Zoom in" onClick={() => setZoom((z) => Math.min(1.5, z + 0.1))} className="p-1.5 text-gray-500 hover:bg-gray-50"><Plus size={14} /></button>
         </span>
-        <button type="button" onClick={() => setCollapsed(new Set())} className="text-xs text-indigo-600 hover:underline">Expand all</button>
+        <button type="button" onClick={() => setCollapsed(new Set())} className="text-xs text-brand-600 hover:underline">Expand all</button>
         {unmanaged > 1 && <span className="text-xs text-gray-400">{unmanaged} people have no reporting manager set — set it in their profile.</span>}
       </div>
       <div className="overflow-auto rounded-xl border border-gray-200 bg-white p-6" aria-label="Org chart">

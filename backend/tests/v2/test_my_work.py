@@ -30,8 +30,10 @@ def test_my_tasks_spans_spaces_and_skips_closed_unless_asked(api, workspace, fol
 
 
 def test_my_tasks_hides_tasks_i_can_no_longer_open(api, workspace, space):
-    private = ok(api.post(f"/spaces/{space['id']}/lists", "owner", {"name": "Board only", "is_private": True}), 201)
-    new_task(api, private["id"], name="secret", assignees=["member"])
+    lst = ok(api.post(f"/spaces/{space['id']}/lists", "owner", {"name": "Board only"}), 201)
+    new_task(api, lst["id"], name="secret", assignees=["member"])
+    assert names(ok(api.get(f"/workspaces/{workspace['id']}/my-tasks", "member"))) == ["secret"]
+    ok(api.patch(f"/lists/{lst['id']}", "owner", {"is_private": True}))  # shut out of the List afterwards
     assert names(ok(api.get(f"/workspaces/{workspace['id']}/my-tasks", "member"))) == []
 
 

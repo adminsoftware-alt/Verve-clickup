@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { BarChart3, CheckSquare, ChevronDown, ChevronRight, Eye, Folder, List as ListIcon, Star, X } from 'lucide-react';
+import { BarChart3, CheckSquare, ChevronDown, ChevronRight, Eye, Folder, List as ListIcon, Star, X, Target } from 'lucide-react';
 import { workApi, type Favorite, type FavoriteKind } from './api';
 import { useWork } from './WorkContext';
 
@@ -52,16 +52,18 @@ export const FavoriteStar: React.FC<{ kind: FavoriteKind; id: string; className?
 const hrefOf = (f: Favorite): string => {
   if (f.kind === 'task') return `/l/${f.list_id}?task=${f.target_id}`;
   if (f.kind === 'dashboard') return `/dashboards/${f.target_id}`;
+  if (f.kind === 'goal') return `/goals/${f.target_id}`;
   const seg = f.location_kind === 'space' ? 's' : f.location_kind === 'folder' ? 'f' : 'l';
   return f.kind === 'view' ? `/${seg}/${f.location_id}?v=${f.target_id}` : `/${seg}/${f.location_id}`;
 };
 const iconOf = (f: Favorite) => ({
-  space: <span className="flex h-4 w-4 items-center justify-center rounded bg-indigo-600 text-[9px] font-bold text-white">{f.name[0]?.toUpperCase()}</span>,
+  space: <span className="flex h-4 w-4 items-center justify-center rounded bg-brand-600 text-[9px] font-bold text-white">{f.name[0]?.toUpperCase()}</span>,
   folder: <Folder size={15} className="text-gray-500" />,
   list: <ListIcon size={15} className="text-gray-500" />,
   task: <CheckSquare size={15} className="text-gray-500" />,
   dashboard: <BarChart3 size={15} className="text-gray-500" />,
   view: <Eye size={15} className="text-gray-500" />,
+  goal: <Target size={15} className="text-gray-500" />,
 }[f.kind]);
 
 /** The sidebar's Favourites section; hidden until you star something. Drag to reorder. */
@@ -92,7 +94,7 @@ export const FavoritesNav: React.FC = () => {
               ids.splice(ids.indexOf(f.id), 0, from);
               reorder(ids);
             }}
-            className={`group flex items-center gap-2 rounded-lg py-1 pl-6 pr-1 text-sm ${active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-black/5'}`}>
+            className={`group flex items-center gap-2 rounded-lg py-1 pl-6 pr-1 text-sm ${active ? 'bg-brand-50 text-brand-700' : 'text-gray-700 hover:bg-black/5'}`}>
             {iconOf(f)}
             <Link to={href} className="min-w-0 flex-1 truncate text-inherit no-underline">{f.name}</Link>
             <button type="button" title="Remove from Favourites" onClick={() => toggle(f.kind, f.target_id)} className="rounded p-0.5 text-gray-300 opacity-0 hover:text-gray-600 group-hover:opacity-100"><X size={12} /></button>

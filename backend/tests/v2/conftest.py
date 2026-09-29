@@ -20,6 +20,7 @@ from app.api.deps import get_current_user
 from app.core.config import settings
 
 settings.REPORTS_SCHEDULER_ENABLED = False  # tests call reports.run_due directly
+settings.REQUIRE_TASK_DETAILS = False  # test_tasks.py covers the rule; the rest create bare tasks
 from app.db import session as db_session
 from app.db.base import Base
 from app.main import app
@@ -90,7 +91,7 @@ class Api:
         self.client = client
 
     def _call(self, method: str, path: str, as_user: str, **kwargs) -> Any:
-        headers = {"X-Test-User": as_user}
+        headers = {"X-Test-User": as_user, **kwargs.pop("headers", {})}
         return self.client.request(method, f"/api/v2{path}", headers=headers, **kwargs)
 
     def get(self, path: str, as_user: str, **kw):
@@ -111,7 +112,12 @@ class Api:
 
 def _token_from_header(request: Request) -> dict:
     uid = request.headers.get("X-Test-User", "anonymous")
-    return {"uid": uid, "email": f"{uid}@example.com", "name": uid.title()}
+    token = {"uid": uid, "email": request.headers.get("X-Test-Email", f"{uid}@example.com"), "name": uid.title()}
+    if request.headers.get("X-Test-Provider"):
+        token["firebase"] = {"sign_in_provider": request.headers["X-Test-Provider"]}
+        if request.headers.get("X-Test-Second-Factor"):
+            token["firebase"]["sign_in_second_factor"] = request.headers["X-Test-Second-Factor"]
+    return token
 
 
 @pytest.fixture

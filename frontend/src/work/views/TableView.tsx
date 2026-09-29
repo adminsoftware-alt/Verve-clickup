@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Download, FileSpreadsheet, Maximize2, Plus } from 'lucide-react';
+import { Check, ChevronDown, Download, FileSpreadsheet, Maximize2, Plus } from 'lucide-react';
 import { exportTasks, taskRows } from './exportTasks';
+import { ExportMenu } from './ExportMenu';
 import { workApi, type CustomField, type Status, type Task, type TaskInput, type UserRef } from '../api';
-import { PRIORITIES, StatusDot, formatDuration, fromDateInput, parseDuration, toDateInput } from '../ui';
+import { DateField } from '../DateField';
+import { Menu, PRIORITIES, StatusDot, formatDuration, parseDuration, toDateInput } from '../ui';
 import { useWork } from '../WorkContext';
 import { FieldEditor, fieldApplies, fieldIcon, valueText } from '../fields/FieldValue';
 
@@ -11,13 +13,57 @@ export const TABLE_COLUMNS: { key: string; label: string; width: number }[] = [
   { key: 'status', label: 'Status', width: 140 },
   { key: 'assignee', label: 'Assignees', width: 150 },
   { key: 'priority', label: 'Priority', width: 110 },
-  { key: 'start_date', label: 'Start date', width: 130 },
-  { key: 'due_date', label: 'Due date', width: 130 },
+  { key: 'start_date', label: 'Start date', width: 155 },
+  { key: 'due_date', label: 'Due date', width: 155 },
   { key: 'time_estimate', label: 'Time estimate', width: 110 },
   { key: 'time_tracked', label: 'Time tracked', width: 110 },
   { key: 'tags', label: 'Tags', width: 150 },
-  { key: 'list', label: 'List', width: 150 },
+  { key: 'list', label: 'List', width: 230 },
 ];
+
+/**
+ * A cell you choose a value in, drawn by us rather than by the operating system.
+ *
+ * It reads as a plain cell until you point at it, so a table of two hundred rows is not two
+ * hundred boxes; the border and the caret arrive on hover, which is when they mean something.
+ */
+const PickCell: React.FC<{
+  label: string;
+  current: React.ReactNode;
+  disabled?: boolean;
+  items: { key: string; label: string; icon: React.ReactNode; on: boolean; onPick: () => void }[];
+  onOpen?: () => void;
+}> = ({ label, current, disabled, items, onOpen }) => {
+  if (disabled) return <span className="flex items-center gap-1.5 px-1 text-sm">{current}</span>;
+  return (
+    <Menu
+      align="left"
+      label={label}
+      width={220}
+      triggerClassName="flex w-full min-w-0"
+      onOpenChange={(open) => open && onOpen?.()}
+      items={items.map((i) => ({
+        label: i.label,
+        icon: (
+          <span className="flex items-center gap-1.5">
+            {i.on ? <Check size={12} className="text-teal-600" /> : <span className="w-3" />}
+            {i.icon}
+          </span>
+        ),
+        onClick: i.onPick,
+      }))}
+      trigger={
+        <span
+          className="group/pick flex w-full items-center gap-1.5 rounded-md border border-transparent px-1 py-0.5 text-sm hover:border-gray-200 hover:bg-white"
+          title={label}
+        >
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">{current}</span>
+          <ChevronDown size={12} className="shrink-0 text-gray-300 group-hover/pick:text-gray-500" />
+        </span>
+      }
+    />
+  );
+};
 
 // The Assignees column reuses the People field editor.
 const ASSIGNEES: CustomField = { id: 'assignees', name: 'Assignees', type: 'people', config: {}, location: 'list', location_id: '', orderindex: 0 };
@@ -154,46 +200,80 @@ export const TableView: React.FC<{
     );
   };
 
-  const cellBase = 'border-b border-r border-gray-100 px-1.5 py-1 align-middle';
-  const input = 'w-full min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-gray-200 focus:border-indigo-400 focus:bg-white focus:outline-none disabled:hover:border-transparent';
+  // overflow-hidden matters: with a fixed table layout, anything wider than its column spills
+  // over the one beside it instead of being cut off at the border.
+  const cellBase = 'overflow-hidden border-b border-r border-gray-100 px-1.5 py-1 align-middle';
+  const input = 'w-full min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-gray-200 focus:border-brand-400 focus:bg-white focus:outline-none disabled:hover:border-transparent';
 
   const cell = (t: Task, key: string): React.ReactNode => {
     const ok = canEdit(t);
     switch (key) {
       case 'status': {
-        const options = statusesFor(t);
+        const options = statusesFor(t) ?? [t.status];
         return (
-          <span className="flex items-center gap-1.5">
-            <StatusDot status={t.status} size={12} />
-            <select aria-label={`Status of ${t.name}`} disabled={!ok && t.permission_level !== 'comment'} value={t.status.id}
-              onFocus={() => loadStatuses(t)} onMouseDown={() => loadStatuses(t)}
-              onChange={(e) => { const st = options?.find((x) => x.id === e.target.value); update(t, { status_id: e.target.value }, st ? { status: st } : undefined); }}
-              className={`${input} uppercase`}>
-              {(options ?? [t.status]).map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
-            </select>
-          </span>
+          <PickCell
+            label={`Status of ${t.name}`}
+            disabled={!ok && t.permission_level !== 'comment'}
+            onOpen={() => loadStatuses(t)}
+            current={
+              <>
+                <StatusDot status={t.status} size={12} />
+                <span className="truncate text-[13px] uppercase tracking-wide text-gray-700">{t.status.name}</span>
+              </>
+            }
+            items={options.map((st) => ({
+              key: st.id,
+              label: st.name,
+              icon: <StatusDot status={st} size={11} />,
+              on: st.id === t.status.id,
+              onPick: () => update(t, { status_id: st.id }, { status: st }),
+            }))}
+          />
         );
       }
       case 'assignee':
         return <FieldEditor compact field={{ ...ASSIGNEES, name: `Assignees of ${t.name}` }} value={t.assignees.map((u) => u.id)} people={people} disabled={!ok}
           onChange={(v) => update(t, { assignees: (v as string[] | null) ?? [] })} />;
-      case 'priority':
-        return (
-          <select aria-label={`Priority of ${t.name}`} disabled={!ok} value={t.priority ?? ''} onChange={(e) => {
-            const p = e.target.value ? Number(e.target.value) : null;
-            update(t, { priority: p }, { priority: p });
-          }} className={input} style={{ color: t.priority ? PRIORITIES[t.priority].color : undefined }}>
-            <option value="">—</option>
-            {[1, 2, 3, 4].map((p) => <option key={p} value={p}>{PRIORITIES[p].label}</option>)}
-          </select>
+      case 'priority': {
+        const flag = (p: number | null) => (
+          <span
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: p ? PRIORITIES[p].color : '#D1D5DB' }}
+          />
         );
+        return (
+          <PickCell
+            label={`Priority of ${t.name}`}
+            disabled={!ok}
+            current={
+              <>
+                {flag(t.priority)}
+                <span className="truncate text-[13px]" style={{ color: t.priority ? PRIORITIES[t.priority].color : '#9CA3AF' }}>
+                  {t.priority ? PRIORITIES[t.priority].label : 'None'}
+                </span>
+              </>
+            }
+            items={[1, 2, 3, 4, null].map((p) => ({
+              key: String(p ?? 'none'),
+              label: p ? PRIORITIES[p].label : 'No priority',
+              icon: flag(p),
+              on: (t.priority ?? null) === p,
+              onPick: () => update(t, { priority: p }, { priority: p }),
+            }))}
+          />
+        );
+      }
       case 'start_date':
       case 'due_date': {
         const v = key === 'start_date' ? t.start_date : t.due_date;
         return (
-          <input type="date" aria-label={`${key === 'start_date' ? 'Start' : 'Due'} date of ${t.name}`} disabled={!ok} key={v ?? ''} defaultValue={toDateInput(v)}
-            onChange={(e) => update(t, { [key]: fromDateInput(e.target.value) })}
-            className={`${input} ${key === 'due_date' && t.is_overdue ? 'text-red-600' : ''}`} />
+          <DateField
+            value={v}
+            disabled={!ok}
+            label={`${key === 'start_date' ? 'Start' : 'Due'} date of ${t.name}`}
+            overdue={key === 'due_date' && t.is_overdue}
+            onChange={(iso) => update(t, { [key]: iso })}
+          />
         );
       }
       case 'time_estimate':
@@ -217,8 +297,16 @@ export const TableView: React.FC<{
             {t.tags.map((tag) => <span key={tag.id} className="rounded px-1.5 py-px text-[11px] font-medium" style={{ backgroundColor: tag.bg_color, color: tag.fg_color }}>{tag.name}</span>)}
           </span>
         );
-      case 'list':
-        return <span className="truncate px-1 text-xs text-gray-500">{listName(t.list_id)}</span>;
+      case 'list': {
+        const path = listName(t.list_id) ?? '';
+        // The last two segments are what tell one task's home from another's; the whole path is
+        // on the tooltip for when it does not.
+        return (
+          <span className="block truncate px-1 text-xs text-gray-500" title={path}>
+            {path.split(' / ').slice(-2).join(' / ')}
+          </span>
+        );
+      }
       default:
         return null;
     }
@@ -232,7 +320,8 @@ export const TableView: React.FC<{
         <button type="button" onClick={exportCsv} className="ml-auto flex items-center gap-1.5 rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-600 hover:bg-gray-50">
           <Download size={14} /> Export CSV
         </button>
-        <button type="button" onClick={() => exportTasks('xlsx', 'tasks', taskRows(rows, shownFields, people, listName))} className="flex items-center gap-1.5 rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-600 hover:bg-gray-50">
+        <ExportMenu filename="tasks" rows={() => taskRows(rows, shownFields, people, listName)} />
+        <button type="button" hidden onClick={() => exportTasks('xlsx', 'tasks', taskRows(rows, shownFields, people, listName))} className="flex items-center gap-1.5 rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-600 hover:bg-gray-50">
           <FileSpreadsheet size={14} /> Excel
         </button>
       </div>
@@ -250,7 +339,7 @@ export const TableView: React.FC<{
                   onChange={(e) => onSelect(rows.map((t) => t.id), e.target.checked)} />
               </th>
               <th className="sticky left-[44px] z-20 border-b border-r border-gray-200 bg-gray-50 px-2 py-2">Task name</th>
-              {columns.map((c) => <th key={c.key} className="border-b border-r border-gray-200 px-2 py-2">{c.label}</th>)}
+              {columns.map((c) => <th key={c.key} className="overflow-hidden border-b border-r border-gray-200 px-2 py-2" title={c.label}><span className="block truncate">{c.label}</span></th>)}
               {shownFields.map((f) => (
                 <th key={f.id} className="border-b border-r border-gray-200 px-2 py-2">
                   <span className="flex items-center gap-1 truncate"><span className="text-gray-400">{fieldIcon(f.type)}</span>{f.name}</span>
@@ -260,7 +349,7 @@ export const TableView: React.FC<{
           </thead>
           <tbody>
             {rows.map((t, i) => (
-              <tr key={t.id} className={`group ${selected.has(t.id) ? 'bg-indigo-50' : 'bg-white hover:bg-gray-50'}`}>
+              <tr key={t.id} className={`group ${selected.has(t.id) ? 'bg-brand-50' : 'bg-white hover:bg-gray-50'}`}>
                 <td className={`${cellBase} sticky left-0 z-[1] bg-inherit text-center text-xs text-gray-400`}>
                   <span className={selected.size > 0 || selected.has(t.id) ? 'hidden' : 'group-hover:hidden'}>{i + 1}</span>
                   <input type="checkbox" aria-label={`Select ${t.name}`} checked={selected.has(t.id)} onChange={(e) => onSelect([t.id], e.target.checked)}
@@ -292,11 +381,12 @@ export const TableView: React.FC<{
               <tr><td colSpan={2 + columns.length + shownFields.length} className="px-3 py-10 text-center text-sm text-gray-400">No tasks match.</td></tr>
             )}
           </tbody>
+          {/* The totals sit at the end of the table; sticking them to the viewport made them float over rows. */}
           {rows.length > 0 && (
-            <tfoot className="sticky bottom-0 z-10 bg-gray-50 text-xs text-gray-600" aria-label="Column totals">
+            <tfoot className="bg-gray-50 text-xs text-gray-600" aria-label="Column totals">
               <tr>
-                <td className="sticky left-0 z-10 border-t border-gray-200 bg-gray-50" />
-                <td className="sticky left-[44px] z-10 border-t border-r border-gray-200 bg-gray-50 px-2 py-1.5 font-medium">{rows.length} task{rows.length === 1 ? '' : 's'}</td>
+                <td className="sticky left-0 z-[1] border-t border-gray-200 bg-gray-50" />
+                <td className="sticky left-[44px] z-[1] border-t border-r border-gray-200 bg-gray-50 px-2 py-1.5 font-medium">{rows.length} task{rows.length === 1 ? '' : 's'}</td>
                 {columns.map((c) => <td key={c.key} className="border-t border-r border-gray-200 px-1.5 py-1">{calcCell(c.key)}</td>)}
                 {shownFields.map((f) => <td key={f.id} className="border-t border-r border-gray-200 px-1.5 py-1">{calcCell(`cf:${f.id}`, f)}</td>)}
               </tr>

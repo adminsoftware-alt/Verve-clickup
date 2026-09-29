@@ -2,7 +2,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   AlignLeft, AtSign, Calendar, CheckSquare, ChevronDown, CircleDollarSign, ExternalLink, Gauge, Hash, Link2,
-  ListChecks, Phone, Star, Tags, Type, Users,
+  ListChecks, MapPin, Phone, Star, Tags, Type, Users,
 } from 'lucide-react';
 import type { CustomField, FieldType, Task, UserRef } from '../api';
 import type { LocatedNode } from '../WorkContext';
@@ -23,6 +23,7 @@ export const FIELD_TYPES: { type: FieldType; label: string; icon: React.ReactNod
   { type: 'url', label: 'Website', icon: <Link2 size={14} />, hint: 'A link' },
   { type: 'rating', label: 'Rating', icon: <Star size={14} />, hint: 'Stars, 1 to 10' },
   { type: 'progress', label: 'Progress', icon: <Gauge size={14} />, hint: '0-100%, set by hand' },
+  { type: 'location', label: 'Location', icon: <MapPin size={14} />, hint: 'A place, shown on the Map view' },
 ];
 export const fieldIcon = (t: FieldType) => FIELD_TYPES.find((x) => x.type === t)?.icon ?? <ListChecks size={14} />;
 
@@ -56,6 +57,7 @@ export function valueText(field: CustomField, value: unknown, people: UserRef[])
     case 'rating': return `${value}/${field.config.max ?? 5}`;
     case 'progress': return `${value}%`;
     case 'people': return (value as string[]).map((id) => { const p = people.find((x) => x.id === id); return p?.display_name || p?.email || id; }).join(', ');
+    case 'location': return (value as { address?: string }).address ?? '';
     default: return String(value);
   }
 }
@@ -118,7 +120,7 @@ export const FieldEditor: React.FC<{
   onChange: (value: unknown) => void;
 }> = ({ field, value, people, disabled, compact, onChange }) => {
   const opts = field.config.options ?? [];
-  const input = `w-full min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-gray-800 placeholder:text-gray-300 hover:border-gray-200 focus:border-indigo-400 focus:bg-white focus:outline-none disabled:hover:border-transparent`;
+  const input = `w-full min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-gray-800 placeholder:text-gray-300 hover:border-gray-200 focus:border-brand-400 focus:bg-white focus:outline-none disabled:hover:border-transparent`;
   const commitText = (raw: string, current: unknown, parse: (s: string) => unknown = (s) => s) => {
     const next = raw.trim() === '' ? null : parse(raw.trim());
     if (next !== (current ?? null)) onChange(next);
@@ -139,7 +141,7 @@ export const FieldEditor: React.FC<{
             type={field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'} placeholder={compact ? '' : '—'}
             onBlur={(e) => commitText(e.target.value, value)} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
             className={input} />
-          {href && <a href={href} target="_blank" rel="noreferrer" title="Open" className="shrink-0 text-gray-400 hover:text-indigo-600"><ExternalLink size={12} /></a>}
+          {href && <a href={href} target="_blank" rel="noreferrer" title="Open" className="shrink-0 text-gray-400 hover:text-brand-600"><ExternalLink size={12} /></a>}
         </span>
       );
     }
@@ -216,7 +218,13 @@ export const FieldEditor: React.FC<{
     case 'dropdown': {
       const current = opts.find((o) => o.id === value);
       return (
-        <Picker label={field.name} disabled={disabled} trigger={current ? <Chip color={current.color}>{current.name}</Chip> : <span className="text-sm text-gray-300">{compact ? '' : '—'}</span>}>
+        <Picker label={field.name} disabled={disabled} trigger={
+          current && compact
+            // In List and Table cells, ClickUp's full-width coloured pill with a chevron.
+            ? <span className="flex w-full min-w-0 items-center justify-between gap-1 rounded px-2 py-0.5 text-xs font-medium text-white" style={{ backgroundColor: current.color }}>
+                <span className="truncate">{current.name}</span><ChevronDown size={12} className="shrink-0 opacity-80" />
+              </span>
+            : current ? <Chip color={current.color}>{current.name}</Chip> : <span className="text-sm text-gray-300">{compact ? '' : '—'}</span>}>
           {(close) => (
             <>
               {opts.map((o) => (
@@ -232,6 +240,8 @@ export const FieldEditor: React.FC<{
         </Picker>
       );
     }
+    case 'location':
+      return <LocationEditor label={field.name} value={value} disabled={disabled} compact={compact} onChange={onChange} />;
     case 'labels':
     case 'people': {
       const chosen = Array.isArray(value) ? (value as string[]) : [];
@@ -259,4 +269,57 @@ export const FieldEditor: React.FC<{
       );
     }
   }
+};
+
+
+// --- places --------------------------------------------------------------------------------------
+
+type PlaceValue = { address: string; lat: number; lng: number };
+const asPlace = (v: unknown): PlaceValue | null =>
+  v && typeof v === 'object' && typeof (v as PlaceValue).lat === 'number' ? (v as PlaceValue) : null;
+
+/** An address with its point on the map: type "lat, lng", or look the address up (OpenStreetMap). */
+const LocationEditor: React.FC<{ label: string; value: unknown; disabled?: boolean; compact?: boolean; onChange: (v: unknown) => void }> = ({ label, value, disabled, compact, onChange }) => {
+  const place = asPlace(value);
+  const [address, setAddress] = useState(place?.address ?? '');
+  const [coords, setCoords] = useState(place ? `${place.lat}, ${place.lng}` : '');
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => { setAddress(place?.address ?? ''); setCoords(place ? `${place.lat}, ${place.lng}` : ''); }, [place?.address, place?.lat, place?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
+  const find = async () => {
+    setNote('Looking up…');
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`);
+      const [hit] = await res.json();
+      if (!hit) { setNote('Not found — type the latitude and longitude instead'); return; }
+      setCoords(`${Number(hit.lat).toFixed(5)}, ${Number(hit.lon).toFixed(5)}`);
+      setNote(null);
+    } catch { setNote('Lookup unavailable — type the latitude and longitude instead'); }
+  };
+  const save = (close: () => void) => {
+    const m = coords.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if (!m) { setNote('Give a latitude and longitude, e.g. 19.0596, 72.8295'); return; }
+    onChange({ address: address.trim(), lat: Number(m[1]), lng: Number(m[2]) });
+    close();
+  };
+  const trigger = place
+    ? <span className="flex min-w-0 items-center gap-1 text-sm text-gray-800"><MapPin size={12} className="shrink-0 text-gray-400" /><span className="truncate">{place.address}</span></span>
+    : <span className="text-sm text-gray-300">{compact ? '' : '—'}</span>;
+  return (
+    <Picker label={label} disabled={disabled} trigger={trigger}>
+      {(close) => (
+        <div className="space-y-1.5 p-1" onKeyDown={(e) => e.stopPropagation()}>
+          <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Address" aria-label="Address" className="w-full rounded border border-gray-300 px-2 py-1 text-sm" />
+          <div className="flex gap-1">
+            <input value={coords} onChange={(e) => setCoords(e.target.value)} placeholder="lat, lng" aria-label="Latitude, longitude" className="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-sm" />
+            <button type="button" onClick={find} disabled={!address.trim()} className="rounded border border-gray-300 px-2 text-xs hover:bg-gray-50 disabled:opacity-40">Find</button>
+          </div>
+          {note && <p className="text-[11px] text-gray-500">{note}</p>}
+          <div className="flex justify-end gap-1">
+            {place && <button type="button" onClick={() => { onChange(null); close(); }} className="rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-50">Clear</button>}
+            <button type="button" onClick={() => save(close)} className="rounded bg-brand-600 px-2 py-0.5 text-xs font-medium text-white">Save place</button>
+          </div>
+        </div>
+      )}
+    </Picker>
+  );
 };

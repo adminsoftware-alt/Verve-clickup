@@ -20,10 +20,10 @@ function inline(text: string, key: string): React.ReactNode[] {
     else if (m[6]) out.push(<code key={k} className="rounded bg-gray-100 px-1 py-px font-mono text-[0.85em] text-pink-700">{m[6]}</code>);
     else if (m[8]) {
       out.push(SAFE_URL.test(m[9])
-        ? <a key={k} href={m[9]} target="_blank" rel="noreferrer" className="text-indigo-600 underline">{m[8]}</a>
+        ? <a key={k} href={m[9]} target="_blank" rel="noreferrer" className="text-brand-600 underline">{m[8]}</a>
         : <span key={k}>{m[8]}</span>);
     } else if (m[11] || m[13]) out.push(<em key={k}>{inline(m[11] ?? m[13], k)}</em>);
-    else if (m[14]) out.push(<a key={k} href={m[14]} target="_blank" rel="noreferrer" className="break-all text-indigo-600 underline">{m[14]}</a>);
+    else if (m[14]) out.push(<a key={k} href={m[14]} target="_blank" rel="noreferrer" className="break-all text-brand-600 underline">{m[14]}</a>);
     last = re.lastIndex;
   }
   if (last < text.length) out.push(text.slice(last));
@@ -163,7 +163,7 @@ export const RichTextEditor: React.FC<{ value: string; disabled?: boolean; onSav
     );
   }
   return (
-    <div className="rounded-md border border-indigo-400">
+    <div className="rounded-md border border-brand-400">
       <div className="flex flex-wrap gap-0.5 border-b border-gray-100 px-1.5 py-1" role="toolbar" aria-label="Formatting">
         {TOOLS.map((t) => (
           <button key={t.label} type="button" title={`${t.label}${t.key ? ` (Ctrl+${t.key.toUpperCase()})` : ''}`} aria-label={t.label}

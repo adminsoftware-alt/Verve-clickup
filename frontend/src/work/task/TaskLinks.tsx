@@ -4,6 +4,7 @@ import { Ban, GitMerge, Link2, Plus, Search, Trash2, X } from 'lucide-react';
 import { workApi, type LinkKind, type Task, type TaskDetail, type TaskLinks } from '../api';
 import { Portal, StatusDot, formatDue, useEscapeToClose } from '../ui';
 import { useWork } from '../WorkContext';
+import { ask } from '../../components/ask';
 
 /** Search the workspace for a task to link or merge (excluding some). */
 export const TaskPicker: React.FC<{ exclude: string[]; onPick: (t: Task) => void; placeholder?: string; autoFocus?: boolean }> = ({ exclude, onPick, placeholder, autoFocus }) => {
@@ -66,13 +67,13 @@ export const TaskRelations: React.FC<{ task: TaskDetail; editable: boolean; onCh
     <section className="mt-5" aria-label="Relationships">
       <div className="mb-1.5 flex items-center gap-2">
         <Link2 size={15} className="text-gray-500" />
-        <h4 className="text-sm font-semibold text-gray-700">Relationships {total > 0 && <span className="font-normal text-gray-400">{total}</span>}</h4>
+        <h4 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Relationships {total > 0 && <span className="text-gray-400">{total}</span>}</h4>
         {openBlockers > 0 && <span className="flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700"><Ban size={11} /> Waiting on {openBlockers}</span>}
         {editable && (
           <span className="ml-auto flex gap-1">
             {(['waiting_on', 'blocking', 'relates'] as LinkKind[]).map((k) => (
               <button key={k} type="button" onClick={() => setAdding(adding === k ? null : k)}
-                className={`flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs ${adding === k ? 'bg-indigo-50 text-indigo-700' : 'text-indigo-600 hover:bg-indigo-50'}`}>
+                className={`flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs ${adding === k ? 'bg-brand-50 text-brand-700' : 'text-brand-600 hover:bg-brand-50'}`}>
                 <Plus size={11} /> {k === 'waiting_on' ? 'Waiting on' : k === 'blocking' ? 'Blocking' : 'Link'}
               </button>
             ))}
@@ -117,7 +118,7 @@ export const MergeDialog: React.FC<{ task: TaskDetail; onClose: () => void; onDo
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const go = async () => {
-    if (!window.confirm(`Merge ${picked.length} task${picked.length === 1 ? '' : 's'} into “${task.name}”? Their comments, files, checklists, time and subtasks move here, and they are deleted.`)) return;
+    if (!(await ask.confirm({ danger: true, title: `Merge ${picked.length} task${picked.length === 1 ? '' : 's'} into “${task.name}”? Their comments, files, checklists, time and subtasks move here, and they are deleted.` }))) return;
     setBusy(true);
     try { await workApi.mergeTasks(task.id, picked.map((p) => p.id)); onDone(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
@@ -125,7 +126,7 @@ export const MergeDialog: React.FC<{ task: TaskDetail; onClose: () => void; onDo
     <Portal>
       <div className="fixed inset-0 z-[125] flex items-center justify-center bg-black/30" onMouseDown={onClose}>
         <div ref={ref} role="dialog" aria-label="Merge tasks" onMouseDown={(e) => e.stopPropagation()} className="w-[30rem] max-w-[calc(100vw-2rem)] rounded-xl bg-white p-5 shadow-xl">
-          <div className="mb-2 flex items-center gap-2"><GitMerge size={17} className="text-indigo-600" /><h3 className="font-semibold text-gray-900">Merge into “{task.name}”</h3></div>
+          <div className="mb-2 flex items-center gap-2"><GitMerge size={17} className="text-brand-600" /><h3 className="font-semibold text-gray-900">Merge into “{task.name}”</h3></div>
           <p className="mb-3 text-xs text-gray-500">Pick the duplicates. Everything on them moves to this task, and they are deleted.</p>
           <TaskPicker autoFocus exclude={[task.id, ...picked.map((p) => p.id)]} onPick={(t) => setPicked((p) => [...p, t])} placeholder="Find the duplicate tasks" />
           <ul className="mt-2 space-y-1" aria-label="Tasks to merge">
@@ -139,7 +140,7 @@ export const MergeDialog: React.FC<{ task: TaskDetail; onClose: () => void; onDo
           {error && <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-            <button type="button" disabled={!picked.length || busy} onClick={go} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Merge {picked.length || ''}</button>
+            <button type="button" disabled={!picked.length || busy} onClick={go} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">Merge {picked.length || ''}</button>
           </div>
         </div>
       </div>

@@ -44,6 +44,10 @@ def _resolve(db: Session, user_id: str, kind: str, target_id: uuid.UUID) -> Opti
             view = view_service.open_view(db, user_id, target_id, VIEW).obj
             loc_kind, loc_id = ("space", view.space_id) if view.space_id else ("folder", view.folder_id) if view.folder_id else ("list", view.list_id)
             return {"name": view.name, "location_kind": loc_kind, "location_id": loc_id}
+        if kind == "goal":
+            from app.services.work import goals
+
+            return {"name": goals.open_goal(db, user_id, target_id)[0].name}
     except (NotFound, Forbidden):
         return None
     return None
@@ -85,6 +89,21 @@ def reorder_favorites(db: Session, access: Access, ids: Sequence[uuid.UUID]) -> 
 
 
 # --- task types --------------------------------------------------------------------------------
+
+
+def types_out(db: Session, access: Access) -> List[s.TaskTypeOut]:
+    """The workspace's types with a count of the tasks on each, in one pass rather than N."""
+    rows = list_types(db, access)
+    counts = dict(db.execute(
+        select(Task.type_id, func.count()).where(Task.type_id.is_not(None), Task.archived_at.is_(None))
+        .group_by(Task.type_id)
+    ).all())
+    out = []
+    for kind in rows:
+        one = s.TaskTypeOut.model_validate(kind)
+        one.task_count = counts.get(kind.id, 0)
+        out.append(one)
+    return out
 
 
 def list_types(db: Session, access: Access) -> List[TaskType]:

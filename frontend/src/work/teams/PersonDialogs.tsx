@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Briefcase, Building2, Calendar, Copy, Hash, Mail, MapPin, Phone, Send, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { Briefcase, Building2, Cake, Calendar, Camera, ClipboardCheck, Copy, Crown, Hash, Heart, LogOut, Mail, MapPin, Phone, Power, Send, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { JoinerDialog, OffboardDialog } from './AdminDialogs';
 import type { Role, Task } from '../api';
 import { Avatar, Portal, StatusDot, formatDue, useEscapeToClose } from '../ui';
 import { peopleApi, personName, type Person, type PersonInput, type TeamFull } from './peopleApi';
+import { ask } from '../../components/ask';
 
-export const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member', guest: 'Guest' };
+export const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member', limited: 'Limited member', guest: 'Guest' };
 
 const Modal: React.FC<{ title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }> = ({ title, onClose, wide, children }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -38,7 +40,7 @@ const TeamPicker: React.FC<{ teams: TeamFull[]; value: string[]; onChange: (v: s
       const on = value.includes(t.id);
       return (
         <button key={t.id} type="button" role="checkbox" aria-checked={on} onClick={() => onChange(on ? value.filter((x) => x !== t.id) : [...value, t.id])}
-          className={`rounded-full border px-2 py-0.5 text-xs ${on ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+          className={`rounded-full border px-2 py-0.5 text-xs ${on ? 'border-brand-400 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
           {t.name}
         </button>
       );
@@ -61,7 +63,7 @@ const ProfileFields: React.FC<{
         <Field label="Reporting manager">
           <select aria-label="Reporting manager" value={form.manager_id ?? ''} onChange={(e) => set({ manager_id: e.target.value || null })} className={inputCls}>
             <option value="">No manager</option>
-            {people.filter((p) => p.user.id !== self).map((p) => <option key={p.user.id} value={p.user.id}>{personName(p)}{p.designation ? ` — ${p.designation}` : ''}</option>)}
+            {people.filter((p) => p.user.id !== self && !p.deactivated_at).map((p) => <option key={p.user.id} value={p.user.id}>{personName(p)}{p.designation ? ` — ${p.designation}` : ''}</option>)}
           </select>
         </Field>
         {showRole && (
@@ -73,6 +75,10 @@ const ProfileFields: React.FC<{
         )}
         <Field label="Employee code"><input aria-label="Employee code" value={form.employee_code ?? ''} onChange={(e) => set({ employee_code: e.target.value })} className={inputCls} /></Field>
         <Field label="Date of joining"><input aria-label="Date of joining" type="date" value={form.date_of_joining ?? ''} onChange={(e) => set({ date_of_joining: e.target.value || null })} className={inputCls} /></Field>
+        {/* Date of birth, marriage anniversary and the interview flag were here. The
+            fields still exist on a person and still import from a spreadsheet; they are just
+            not asked for when someone is added. */}
+
       </>
     )}
     <Field label="Phone"><input aria-label="Phone" value={form.phone ?? ''} onChange={(e) => set({ phone: e.target.value })} className={inputCls} /></Field>
@@ -125,8 +131,8 @@ export const AddPersonDialog: React.FC<{
           <div className="mt-4 flex items-center justify-between">
             <SignInLink link={done.link} />
             <div className="flex gap-2">
-              <button type="button" onClick={() => { setDone(null); setForm({ role: 'member', team_ids: [], send_invite: false }); }} className="rounded-md px-3 py-1.5 text-sm text-indigo-700 hover:bg-indigo-50">Add another</button>
-              <button type="button" onClick={onClose} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white">Done</button>
+              <button type="button" onClick={() => { setDone(null); setForm({ role: 'member', team_ids: [], send_invite: false }); }} className="rounded-md px-3 py-1.5 text-sm text-brand-700 hover:bg-brand-50">Add another</button>
+              <button type="button" onClick={onClose} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white">Done</button>
             </div>
           </div>
         </div>
@@ -138,10 +144,14 @@ export const AddPersonDialog: React.FC<{
             <input type="checkbox" checked={!!form.send_invite} onChange={(e) => setForm((f) => ({ ...f, send_invite: e.target.checked }))} />
             Also email them an invitation
           </label>
+          <label className="mt-1 flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={!!form.start_joiner_checklist} onChange={(e) => setForm((f) => ({ ...f, start_joiner_checklist: e.target.checked }))} />
+            Start the joiner checklist (induction, learning, reviews and HR reminders, as in the SOP)
+          </label>
           {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-            <button type="button" disabled={!ok || busy} onClick={save} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Add person</button>
+            <button type="button" disabled={!ok || busy} onClick={save} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">Add person</button>
           </div>
         </div>
       )}
@@ -176,7 +186,7 @@ export const InviteDialog: React.FC<{ ws: string; teams: TeamFull[]; roles: Role
           {result.email_problem && <p className="mt-2 text-amber-700">{result.email_problem}</p>}
           {result.problems.map((p) => <p key={p} className="mt-1 text-xs text-red-700">{p}</p>)}
           <div className="mt-4 flex items-center justify-between"><SignInLink link={result.link} />
-            <button type="button" onClick={onClose} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white">Done</button></div>
+            <button type="button" onClick={onClose} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white">Done</button></div>
         </div>
       ) : (
         <>
@@ -198,7 +208,7 @@ export const InviteDialog: React.FC<{ ws: string; teams: TeamFull[]; roles: Role
           {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-            <button type="button" disabled={!list.length || bad.length > 0} onClick={send} className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"><Send size={14} /> Send invitations</button>
+            <button type="button" disabled={!list.length || bad.length > 0} onClick={send} className="flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"><Send size={14} /> Send invitations</button>
           </div>
         </>
       )}
@@ -219,9 +229,14 @@ export const PersonPanel: React.FC<{
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<'offboard' | 'joiner' | null>(null);
+  const photoRef = useRef<HTMLInputElement>(null);
   const isMe = person.user.id === me;
+  const left = !!person.deactivated_at;
+  const myRole = people.find((p) => p.user.id === me)?.role;
   const canEdit = isAdmin || isMe;
-  useEffect(() => { peopleApi.tasks(ws, person.user.id).then(setTasks).catch(() => setTasks([])); }, [ws, person.user.id]);
+  // Reload after offboarding or the joiner checklist changes what they are assigned.
+  useEffect(() => { peopleApi.tasks(ws, person.user.id).then(setTasks).catch(() => setTasks([])); }, [ws, person.user.id, person.deactivated_at, person.joiner_tasks]);
   const manager = people.find((p) => p.user.id === person.manager_id);
   const reports = useMemo(() => people.filter((p) => p.manager_id === person.user.id), [people, person.user.id]);
   const startEdit = () => {
@@ -229,6 +244,7 @@ export const PersonPanel: React.FC<{
       name: person.user.display_name ?? '', designation: person.designation ?? '', department: person.department ?? '',
       manager_id: person.manager_id, phone: person.phone ?? '', employee_code: person.employee_code ?? '',
       date_of_joining: person.date_of_joining, location: person.location ?? '', team_ids: person.team_ids, role: person.role,
+      date_of_birth: person.date_of_birth, marriage_anniversary: person.marriage_anniversary, takes_interviews: person.takes_interviews,
     });
     setEditing(true);
   };
@@ -244,9 +260,18 @@ export const PersonPanel: React.FC<{
     onChanged();
   };
   const remove = async () => {
-    if (!window.confirm(`Remove ${personName(person)} from the workspace? Their tasks stay, but they lose access.`)) return;
+    if (!(await ask.confirm({ danger: true, title: `Remove ${personName(person)} from the workspace? Their tasks stay, but they lose access.` }))) return;
     try { await peopleApi.remove(ws, person.user.id); onChanged(); onClose(); } catch (e) { setError((e as Error).message); }
   };
+  const act = async (fn: () => Promise<unknown>, done?: string) => {
+    setError(null);
+    try { await fn(); if (done) setNote(done); onChanged(); } catch (e) { setError((e as Error).message); }
+  };
+  const photo = (file: File | undefined) => file && act(() => peopleApi.setAvatar(ws, person.user.id, file), 'Photo updated.');
+  const makeOwner = async () => await ask.confirm(`Make ${personName(person)} the owner of this workspace? You become an admin.`)
+    && act(() => peopleApi.transferOwnership(ws, person.user.id), `${personName(person)} now owns the workspace.`);
+  const turnOff = async () => await ask.confirm({ danger: true, title: `Turn off access for ${personName(person)}? Their tasks stay as they are.` })
+    && act(() => peopleApi.setActive(ws, person.user.id, false), 'Access turned off.');
   const info = (icon: React.ReactNode, label: string, value: React.ReactNode) => value ? (
     <div className="flex items-start gap-2 py-1 text-sm"><span className="mt-0.5 text-gray-400">{icon}</span><span className="w-28 shrink-0 text-gray-500">{label}</span><span className="min-w-0 text-gray-800">{value}</span></div>
   ) : null;
@@ -256,13 +281,24 @@ export const PersonPanel: React.FC<{
         <aside ref={ref} role="dialog" aria-label={`Profile of ${personName(person)}`} onMouseDown={(e) => e.stopPropagation()}
           className="flex h-full w-[32rem] max-w-full flex-col overflow-hidden bg-white shadow-2xl">
           <header className="flex items-start gap-3 border-b border-gray-100 p-5">
-            <Avatar user={person.user} size={48} />
+            <span className="relative">
+              <Avatar user={person.user} size={48} />
+              {canEdit && (
+                <>
+                  <button type="button" title="Change photo" onClick={() => photoRef.current?.click()}
+                    className="absolute -bottom-1 -right-1 rounded-full border border-gray-200 bg-white p-1 text-gray-500 shadow-sm hover:text-gray-800"><Camera size={11} /></button>
+                  <input ref={photoRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="Upload photo" className="hidden"
+                    onChange={(e) => { photo(e.target.files?.[0]); e.target.value = ''; }} />
+                </>
+              )}
+            </span>
             <div className="min-w-0 flex-1">
               <h2 className="truncate text-lg font-semibold text-gray-900">{personName(person)}</h2>
               <p className="text-sm text-gray-500">{person.designation || 'No designation'}{person.department ? ` · ${person.department}` : ''}</p>
               <div className="mt-1 flex flex-wrap gap-1.5 text-[11px]">
                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-700">{ROLE_LABEL[person.role]}</span>
                 {person.pending && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">Pending — hasn't signed in yet</span>}
+                {left && <span className="rounded-full bg-red-100 px-2 py-0.5 text-red-800">Access turned off</span>}
               </div>
             </div>
             <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
@@ -276,20 +312,23 @@ export const PersonPanel: React.FC<{
                   roles={roles} showEmail={false} showRole={isAdmin && person.role !== 'owner'} adminFields={isAdmin} />
                 <div className="mt-4 flex justify-end gap-2">
                   <button type="button" onClick={() => setEditing(false)} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-                  <button type="button" onClick={save} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Save</button>
+                  <button type="button" onClick={save} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">Save</button>
                 </div>
               </>
             ) : (
               <>
                 {info(<Mail size={14} />, 'Email', person.user.email)}
-                {info(<Briefcase size={14} />, 'Reports to', manager ? <button type="button" onClick={() => onOpenPerson(manager.user.id)} className="text-indigo-700 hover:underline">{personName(manager)}</button> : null)}
+                {info(<Briefcase size={14} />, 'Reports to', manager ? <button type="button" onClick={() => onOpenPerson(manager.user.id)} className="text-brand-700 hover:underline">{personName(manager)}</button> : null)}
                 {info(<Hash size={14} />, 'Employee code', person.employee_code)}
                 {info(<Calendar size={14} />, 'Joining date', person.date_of_joining ? new Date(`${person.date_of_joining}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : null)}
                 {info(<Phone size={14} />, 'Phone', person.phone)}
                 {info(<MapPin size={14} />, 'Location', person.location)}
                 {info(<Building2 size={14} />, 'Department', person.department)}
+                {info(<Cake size={14} />, 'Birthday', person.date_of_birth ? new Date(`${person.date_of_birth}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : null)}
+                {info(<Heart size={14} />, 'Anniversary', person.marriage_anniversary ? new Date(`${person.marriage_anniversary}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : null)}
+                {isAdmin && info(<ClipboardCheck size={14} />, 'Joiner checklist', person.joiner_tasks ? `${person.joiner_tasks} tasks created` : 'Not started')}
                 {info(<Users size={14} />, 'Teams', person.team_ids.length ? (
-                  <span className="flex flex-wrap gap-1">{person.team_ids.map((id) => { const t = teams.find((x) => x.id === id); return t ? <Link key={id} to={`/people/teams/${id}`} onClick={onClose} className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700 no-underline">{t.name}</Link> : null; })}</span>
+                  <span className="flex flex-wrap gap-1">{person.team_ids.map((id) => { const t = teams.find((x) => x.id === id); return t ? <Link key={id} to={`/people/teams/${id}`} onClick={onClose} className="rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700 no-underline">{t.name}</Link> : null; })}</span>
                 ) : null)}
                 {reports.length > 0 && info(<UserPlus size={14} />, 'Direct reports', (
                   <span className="flex flex-wrap gap-1">{reports.map((r) => <button key={r.user.id} type="button" onClick={() => onOpenPerson(r.user.id)} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700 hover:bg-gray-200">{personName(r)}</button>)}</span>
@@ -297,6 +336,14 @@ export const PersonPanel: React.FC<{
                 <div className="mt-3 flex flex-wrap gap-2">
                   {canEdit && <button type="button" onClick={startEdit} className="rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Edit profile</button>}
                   {isAdmin && person.pending && <button type="button" onClick={resend} className="flex items-center gap-1 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"><Send size={13} /> {person.invite_sent_at ? 'Resend invitation' : 'Email invitation'}</button>}
+                  {isAdmin && !left && <button type="button" onClick={() => setDialog('joiner')} className="flex items-center gap-1 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"><ClipboardCheck size={13} /> Joiner checklist</button>}
+                  {myRole === 'owner' && !isMe && !left && person.role !== 'guest' && person.role !== 'limited' && !person.pending && (
+                    <button type="button" onClick={makeOwner} className="flex items-center gap-1 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"><Crown size={13} /> Make owner</button>
+                  )}
+                  {isAdmin && person.role !== 'owner' && !isMe && !left && <button type="button" onClick={() => setDialog('offboard')} className="flex items-center gap-1 rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"><LogOut size={13} /> Offboard…</button>}
+                  {isAdmin && person.role !== 'owner' && !isMe && (left
+                    ? <button type="button" onClick={() => act(() => peopleApi.setActive(ws, person.user.id, true), 'Access turned back on.')} className="flex items-center gap-1 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"><Power size={13} /> Turn access back on</button>
+                    : <button type="button" onClick={turnOff} className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100"><Power size={13} /> Turn off access</button>)}
                   {isAdmin && person.role !== 'owner' && !isMe && <button type="button" onClick={remove} className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"><Trash2 size={13} /> Remove from workspace</button>}
                 </div>
                 <h3 className="mb-1 mt-6 text-xs font-semibold uppercase tracking-wide text-gray-400">Assigned work {tasks ? tasks.length : ''}</h3>
@@ -317,6 +364,8 @@ export const PersonPanel: React.FC<{
           </div>
         </aside>
       </div>
+      {dialog === 'offboard' && <OffboardDialog ws={ws} person={person} people={people} onClose={() => setDialog(null)} onDone={onChanged} />}
+      {dialog === 'joiner' && <JoinerDialog ws={ws} person={person} onClose={() => setDialog(null)} onDone={onChanged} />}
     </Portal>
   );
 };

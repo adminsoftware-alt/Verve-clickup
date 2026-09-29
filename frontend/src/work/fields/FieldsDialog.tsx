@@ -4,6 +4,7 @@ import { workApi, type CustomField, type FieldConfig, type FieldOption, type Fie
 import { Portal } from '../ui';
 import { useWork } from '../WorkContext';
 import { FIELD_TYPES, fieldIcon } from './FieldValue';
+import { ask } from '../../components/ask';
 
 const KIND = { space: 'Space', folder: 'Folder', list: 'List' } as const;
 const SWATCHES = ['#7c3aed', '#0ea5e9', '#16a34a', '#ea580c', '#db2777', '#4f46e5', '#0d9488', '#b45309', '#dc2626', '#64748b'];
@@ -25,7 +26,7 @@ const OptionsEditor: React.FC<{ options: FieldOption[]; onChange: (o: FieldOptio
       </div>
     ))}
     <button type="button" onClick={() => onChange([...options, { id: '', name: '', color: SWATCHES[options.length % SWATCHES.length] }])}
-      className="flex items-center gap-1 rounded px-1 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50"><Plus size={12} /> Add option</button>
+      className="flex items-center gap-1 rounded px-1 py-0.5 text-xs text-brand-600 hover:bg-brand-50"><Plus size={12} /> Add option</button>
   </div>
 );
 
@@ -64,7 +65,7 @@ export const FieldsDialog: React.FC<{
     } catch (e) { setError((e as Error).message); }
   };
   const remove = async (f: CustomField) => {
-    if (!window.confirm(`Delete the field “${f.name}”? Its value is removed from every task.`)) return;
+    if (!(await ask.confirm({ danger: true, title: `Delete the field “${f.name}”? Its value is removed from every task.` }))) return;
     try { await workApi.deleteField(f.id); await load(); onChanged(); } catch (e) { setError((e as Error).message); }
   };
 
@@ -92,7 +93,7 @@ export const FieldsDialog: React.FC<{
                   <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3" role="radiogroup" aria-label="Field type">
                     {FIELD_TYPES.map((t) => (
                       <button key={t.type} type="button" role="radio" aria-checked={draft.type === t.type} onClick={() => pickType(t.type)}
-                        className={`flex items-start gap-2 rounded-lg border px-2 py-1.5 text-left ${draft.type === t.type ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                        className={`flex items-start gap-2 rounded-lg border px-2 py-1.5 text-left ${draft.type === t.type ? 'border-brand-400 bg-brand-50' : 'border-gray-200 hover:bg-gray-50'}`}>
                         <span className="mt-0.5 text-gray-500">{t.icon}</span>
                         <span><span className="block text-sm text-gray-800">{t.label}</span><span className="block text-[11px] text-gray-400">{t.hint}</span></span>
                       </button>
@@ -130,7 +131,7 @@ export const FieldsDialog: React.FC<{
               {!draft.id && <p className="mt-3 text-xs text-gray-500">Every task in this {KIND[kind]}{kind !== 'list' ? ' and the Lists inside it' : ''} can use this field. A field's type can't be changed later.</p>}
               <div className="mt-4 flex justify-end gap-2">
                 <button type="button" onClick={() => setDraft(null)} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-                <button type="button" disabled={!draft.name.trim()} onClick={save} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+                <button type="button" disabled={!draft.name.trim()} onClick={save} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
                   {draft.id ? 'Save' : 'Create field'}
                 </button>
               </div>

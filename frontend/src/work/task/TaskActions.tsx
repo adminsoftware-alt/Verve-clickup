@@ -1,11 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Archive, ArchiveRestore, Bell, Copy, Eye, EyeOff, GitMerge, LayoutTemplate, Link2, ListOrdered, MoreHorizontal, MoveRight, Star, Trash2, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Bell, Copy, Eye, EyeOff, GitMerge, LayoutTemplate, Link2, MoreHorizontal, MoveRight, Star, Trash2, Users, X } from 'lucide-react';
+import { ShareWithPeople } from './ShareWithPeople';
+import { PeoplePicker } from '../PeoplePicker';
+import { ALL_PARTS, PART_LABELS, type CopyParts } from './CopyParts';
+import { notify } from '../../components/notify';
 import { SaveTemplateDialog } from '../templates/Templates';
 import { MergeDialog } from './TaskLinks';
+import { ListPicker } from './ListPicker';
 import { useFavorites } from '../Favorites';
 import { useWork, useMe } from '../WorkContext';
 import { collabApi } from '../collabApi';
-import { planningApi } from '../planningApi';
 import { workApi, type FolderNode, type ListNode, type SpaceNode, type TaskDetail } from '../api';
 import { Avatar, Menu, Portal } from '../ui';
 
@@ -42,37 +46,133 @@ const MoveDialog: React.FC<{ task: TaskDetail; mode: 'move' | 'duplicate'; onClo
   const lists = useWritableLists();
   const [target, setTarget] = useState(task.list_id);
   const [name, setName] = useState(`${task.name} (copy)`);
-  const [subtasks, setSubtasks] = useState(true);
+  const [parts, setParts] = useState<CopyParts>(ALL_PARTS);
+  const [custom, setCustom] = useState(false);
+  // Into a List, or onto people's own lists. The second is how "give everyone their own" works.
+  const [where, setWhere] = useState<'list' | 'people'>('list');
+  const [people, setPeople] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const set = (key: keyof CopyParts, on: boolean) => setParts((p) => ({ ...p, [key]: on }));
+
   const go = async () => {
+    setBusy(true);
+    setError(null);
+    const body = { name, include_subtasks: parts.subtasks, parts };
     try {
-      const out = mode === 'move'
-        ? await collabApi.moveTask(task.id, target)
-        : await collabApi.duplicateTask(task.id, { name, include_subtasks: subtasks, list_id: target });
-      onDone(out.id);
-    } catch (e) { setError((e as Error).message); }
+      if (mode === 'move') { onDone((await collabApi.moveTask(task.id, target)).id); return; }
+      if (where === 'people') {
+        const out = await collabApi.duplicateToPeople(task.id, { ...body, user_ids: people });
+        notify.ok(`A copy each for ${out.people.length} ${out.people.length === 1 ? 'person' : 'people'}.`);
+        onDone(task.id);
+        return;
+      }
+      onDone((await collabApi.duplicateTask(task.id, { ...body, list_id: target })).id);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
   };
+
+  if (mode === 'move') {
+    return (
+      <Dialog title="Move task" onClose={onClose}>
+        <ListPicker label="Move to List" lists={lists} value={target} currentId={task.list_id} onChange={setTarget} />
+        <p className="mt-2 text-xs text-gray-500">
+          Subtasks move with it. A status the new List does not have is matched by name, or by the
+          state it is in.
+        </p>
+        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
+          <button type="button" disabled={target === task.list_id || busy} onClick={go} className="btn-accent rounded-md px-3 py-1.5 text-sm font-semibold disabled:opacity-50">Move</button>
+        </div>
+      </Dialog>
+    );
+  }
+
+  const tab = (on: boolean) =>
+    `flex-1 rounded-md px-3 py-1.5 text-sm ${on ? 'bg-white font-medium text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`;
+
   return (
-    <Dialog title={mode === 'move' ? 'Move task' : 'Duplicate task'} onClose={onClose}>
-      {mode === 'duplicate' && (
-        <label className="mb-3 block text-xs font-medium text-gray-600">Name
-          <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal" />
-        </label>
-      )}
-      <label className="block text-xs font-medium text-gray-600">{mode === 'move' ? 'Move to List' : 'Into List'}
-        <select aria-label="List" value={target} onChange={(e) => setTarget(e.target.value)} className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal">
-          {lists.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
-        </select>
+    <Dialog title="Duplicate task" onClose={onClose}>
+      <label className="block text-xs font-medium text-gray-600">Name
+        <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal" />
       </label>
-      {mode === 'duplicate' && (
-        <label className="mt-3 flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={subtasks} onChange={(e) => setSubtasks(e.target.checked)} /> Include subtasks</label>
+
+      {/* Two different things wear the word "duplicate": one task somewhere else, or one each for
+          a group of people. Asking which is cheaper than guessing. */}
+      <div className="mt-3">
+        <span className="text-xs font-medium text-gray-600">Where should the copy go?</span>
+        <div className="mt-1 flex gap-1 rounded-lg bg-gray-100 p-1">
+          <button type="button" onClick={() => setWhere('list')} className={tab(where === 'list')}>Into a List</button>
+          <button type="button" onClick={() => setWhere('people')} className={tab(where === 'people')}>A copy each, to people</button>
+        </div>
+      </div>
+
+      {where === 'list' ? (
+        <div className="mt-3"><ListPicker label="Into List" lists={lists} value={target} currentId={task.list_id} onChange={setTarget} /></div>
+      ) : (
+        <div className="mt-3">
+          <PeoplePicker chosen={people} onChange={setPeople} label="A copy each for" maxHeight={180} />
+          <p className="mt-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-[12px] text-amber-900">
+            Separate tasks from here on: what one person does to theirs leaves the rest alone. If
+            it is one job several people are on, use <b>Share with people</b> instead, so the hours
+            add up to the job rather than to copies of it.
+          </p>
+        </div>
       )}
-      {mode === 'move' && <p className="mt-2 text-xs text-gray-500">Subtasks move with it. Statuses the new List doesn't have are matched by name or type.</p>}
+
+      <div className="mt-4">
+        <span className="text-xs font-medium text-gray-600">What would you like to copy?</span>
+        <div className="mt-1 flex gap-1 rounded-lg bg-gray-100 p-1">
+          <button type="button" onClick={() => { setCustom(false); setParts(ALL_PARTS); }} className={tab(!custom)}>Everything</button>
+          <button type="button" onClick={() => setCustom(true)} className={tab(custom)}>Customize</button>
+        </div>
+      </div>
+
+      {custom ? (
+        <div className="mt-2 rounded-lg border border-gray-200 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Customize what is copied</span>
+            <button
+              type="button"
+              onClick={() => setParts(Object.fromEntries(Object.keys(ALL_PARTS).map((k) => [k, false])) as unknown as CopyParts)}
+              className="text-xs font-medium text-brand-600 hover:text-brand-800"
+            >
+              Unselect all
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            {PART_LABELS.map((row) => {
+              const blocked = row.under ? !parts[row.under] : false;
+              return (
+                <label key={row.key} className={`flex items-center gap-2 text-sm ${blocked ? 'text-gray-400' : 'text-gray-800'} ${row.under ? 'pl-5' : ''}`}>
+                  <input type="checkbox" checked={parts[row.key]} disabled={blocked} onChange={(e) => set(row.key, e.target.checked)} />
+                  {row.label}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-gray-500">
+          Everything except the comments and the ticked checklist items, which belong to the task
+          that already happened.
+        </p>
+      )}
+
       {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-        <button type="button" disabled={mode === 'move' && target === task.list_id} onClick={go} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
-          {mode === 'move' ? 'Move' : 'Duplicate'}
+        <button
+          type="button"
+          disabled={busy || (where === 'people' && people.length === 0)}
+          onClick={go}
+          className="btn-accent rounded-md px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
+        >
+          {busy ? 'Duplicating\u2026' : where === 'people' ? `Duplicate to ${people.length || ''}`.trim() : 'Duplicate'}
         </button>
       </div>
     </Dialog>
@@ -120,7 +220,7 @@ export const ReminderDialog: React.FC<{ taskId?: string; defaultTitle?: string; 
       {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-        <button type="button" onClick={save} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Set reminder</button>
+        <button type="button" onClick={save} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">Set reminder</button>
       </div>
     </Dialog>
   );
@@ -131,10 +231,9 @@ export const TaskActions: React.FC<{
   task: TaskDetail; onChanged: () => void; onReload: () => void; onOpen: (id: string) => void; onDeleted: () => void;
 }> = ({ task, onChanged, onReload, onOpen, onDeleted }) => {
   const [watch, setWatch] = useState<{ watchers: { id: string; email: string; display_name: string | null }[]; watching: boolean } | null>(null);
-  const [dialog, setDialog] = useState<'move' | 'duplicate' | 'remind' | 'template' | 'merge' | null>(null);
+  const [dialog, setDialog] = useState<'move' | 'duplicate' | 'remind' | 'template' | 'merge' | 'share' | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const favorites = useFavorites();
-  const { workspace } = useWork();
   const me = useMe();
   useEffect(() => { collabApi.watchers(task.id).then(setWatch).catch(() => undefined); }, [task.id]);
   const editable = task.permission_level === 'edit' || task.permission_level === 'full';
@@ -149,7 +248,7 @@ export const TaskActions: React.FC<{
     <>
       {note && <span className="mr-1 text-xs text-emerald-700">{note}</span>}
       <button type="button" onClick={toggleWatch} title={watch?.watching ? 'Stop watching' : 'Watch this task'}
-        className={`flex items-center gap-1 rounded px-1.5 py-1 text-xs ${watch?.watching ? 'text-indigo-600' : 'text-gray-400'} hover:bg-gray-100`}>
+        className={`flex items-center gap-1 rounded px-1.5 py-1 text-xs ${watch?.watching ? 'text-brand-600' : 'text-gray-400'} hover:bg-gray-100`}>
         {watch?.watching ? <Eye size={15} /> : <EyeOff size={15} />} {watch?.watchers.length ?? ''}
       </button>
       {watch && watch.watchers.length > 0 && (
@@ -161,10 +260,13 @@ export const TaskActions: React.FC<{
       <Menu align="right" label="Task actions" items={[
         { label: 'Copy link', icon: <Link2 size={14} />, onClick: () => { navigator.clipboard?.writeText(`${window.location.origin}/l/${task.list_id}?task=${task.id}`); flash('Link copied'); } },
         { label: 'Duplicate', icon: <Copy size={14} />, onClick: () => setDialog('duplicate') },
+        // Beside Duplicate on purpose: the two are the choice between a copy each and one task
+        // between them, and that is a choice best made with both in front of you.
+        ...(full ? [{ label: 'Share with people…', icon: <Users size={14} />, onClick: () => setDialog('share') }] : []),
         { label: 'Save as template', icon: <LayoutTemplate size={14} />, onClick: () => setDialog('template') },
         { label: favorites.isFavorite('task', task.id) ? 'Remove from Favourites' : 'Add to Favourites', icon: <Star size={14} />, onClick: () => favorites.toggle('task', task.id) },
-        ...(workspace ? [{ label: 'Add to my LineUp', icon: <ListOrdered size={14} />, onClick: () => planningApi.addToLineup(workspace.id, task.id)
-          .then(() => { flash('Added to your LineUp'); window.dispatchEvent(new Event('timetriq:lineup')); }).catch((e: Error) => flash(e.message)) }] : []),
+        // 'Add to my LineUp' was here. The LineUp itself still works from My Tasks.
+        ...[],
         ...(editable ? [{ label: 'Move to…', icon: <MoveRight size={14} />, onClick: () => setDialog('move') }] : []),
         ...(editable ? [{ label: 'Merge duplicates…', icon: <GitMerge size={14} />, onClick: () => setDialog('merge') }] : []),
         ...(editable ? [{
@@ -175,6 +277,15 @@ export const TaskActions: React.FC<{
       ]} trigger={<span className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><MoreHorizontal size={16} /></span>} />
       {(dialog === 'move' || dialog === 'duplicate') && (
         <MoveDialog task={task} mode={dialog} onClose={() => setDialog(null)} onDone={(id) => { setDialog(null); onChanged(); if (id !== task.id) onOpen(id); else onReload(); }} />
+      )}
+      {dialog === 'share' && (
+        <ShareWithPeople
+          taskId={task.id}
+          taskName={task.name}
+          canManage={full}
+          onClose={() => setDialog(null)}
+          onChanged={() => { onReload(); onChanged(); }}
+        />
       )}
       {dialog === 'merge' && <MergeDialog task={task} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); onChanged(); }} />}
       {dialog === 'template' && <SaveTemplateDialog kind="task" id={task.id} name={task.name} onClose={() => setDialog(null)} />}

@@ -74,6 +74,10 @@ def get_settings(db: Session, access: Access) -> t.SettingsOut:
     return t.SettingsOut(
         week_start=row.week_start, approvals_enabled=row.approvals_enabled,
         capacity_seconds=list(row.capacity_seconds), can_manage=can_manage_workspace(access.role),
+        reminders_enabled=row.reminders_enabled if row.reminders_enabled is not None else True,
+        reminder_weekday=row.reminder_weekday if row.reminder_weekday is not None else 4,
+        reminder_hour=row.reminder_hour if row.reminder_hour is not None else 16,
+        reminder_timezone=row.reminder_timezone or "Asia/Kolkata",
     )
 
 
@@ -90,6 +94,12 @@ def update_settings(db: Session, access: Access, data: t.SettingsIn) -> t.Settin
         row.approvals_enabled = data.approvals_enabled
     if data.capacity_seconds is not None:
         row.capacity_seconds = list(data.capacity_seconds)
+    if data.reminder_timezone is not None:
+        zone(data.reminder_timezone)
+        row.reminder_timezone = data.reminder_timezone
+    for name in ("reminders_enabled", "reminder_weekday", "reminder_hour"):
+        if getattr(data, name) is not None:
+            setattr(row, name, getattr(data, name))
     db.flush()
     return get_settings(db, access)
 
@@ -103,8 +113,11 @@ def capacity_of(db: Session, workspace_id: uuid.UUID, user_id: str) -> Tuple[Lis
 
 
 def set_capacity(db: Session, access: Access, user_id: str, data: t.CapacityIn) -> t.CapacityOut:
-    if user_id != access.user_id and not can_manage_workspace(access.role):
-        raise Forbidden("Only owners and admins can change someone else's working hours")
+    # Working hours are what capacity, workload and every "are they over" figure are measured
+    # against, so they are set for people rather than by them -- including for the person doing
+    # the setting. A manager cannot give themselves a four-hour week any more than anyone else.
+    if not can_manage_workspace(access.role):
+        raise Forbidden("Only owners and admins set working hours")
     _member(db, access, user_id)
     row = db.get(MemberCapacity, (access.workspace_id, user_id))
     if data.capacity_seconds is None:
@@ -269,6 +282,21 @@ def timesheet(
         added[task.id] = min(added.get(task.id, entry.created_at), entry.created_at)
 
     statuses = {st.id: st for st in db.scalars(select(Status).where(Status.id.in_({x.status_id for x in tasks.values()})))} if tasks else {}
+    assignees: Dict[uuid.UUID, List[User]] = {}
+    tag_names: Dict[uuid.UUID, List[str]] = {}
+    if tasks:
+        from app.db.models import Tag, TaskAssignee, TaskTag
+
+        for task_id, user in db.execute(
+            select(TaskAssignee.task_id, User).join(User, User.id == TaskAssignee.user_id)
+            .where(TaskAssignee.task_id.in_(list(tasks)))
+        ):
+            assignees.setdefault(task_id, []).append(user)
+        for task_id, name in db.execute(
+            select(TaskTag.task_id, Tag.name).join(Tag, Tag.id == TaskTag.tag_id)
+            .where(TaskTag.task_id.in_(list(tasks)))
+        ):
+            tag_names.setdefault(task_id, []).append(name)
     locate = _Locator(db)
     rows: Dict[uuid.UUID, t.SheetRow] = {}
     for task in tasks.values():
@@ -282,6 +310,13 @@ def timesheet(
                 list_id=task.list_id if can_open else None,
                 archived=task.archived_at is not None,
                 can_open=can_open,
+                priority=task.priority if can_open else None,
+                assignees=[s.UserOut.model_validate(u) for u in assignees.get(task.id, [])] if can_open else [],
+                tags=sorted(tag_names.get(task.id, [])) if can_open else [],
+                start_date=task.start_date if can_open else None,
+                due_date=task.due_date if can_open else None,
+                date_done=(task.date_done or task.date_closed) if can_open else None,
+                time_estimate_seconds=task.time_estimate_seconds if can_open else None,
             ),
             seconds_per_day=[0] * 7, total_seconds=0, added_at=added[task.id], running=False, entries=[],
         )
@@ -308,13 +343,25 @@ def timesheet(
 
     out_rows = list(rows.values())
     if tracked_op and tracked_seconds is not None:
-        out_rows = [r for r in out_rows if (r.total_seconds > tracked_seconds if tracked_op == "gt" else r.total_seconds < tracked_seconds)]
+        # "more than 2h" and "at least 2h" are different questions, and on a filter that people
+        # use to find the rows they forgot to fill in, the difference is the whole point.
+        compare = {
+            "gt": lambda total: total > tracked_seconds,
+            "gte": lambda total: total >= tracked_seconds,
+            "lt": lambda total: total < tracked_seconds,
+            "lte": lambda total: total <= tracked_seconds,
+            "eq": lambda total: total == tracked_seconds,
+        }.get(tracked_op)
+        if compare is not None:
+            out_rows = [r for r in out_rows if compare(r.total_seconds)]
     if sort == "name":
         out_rows.sort(key=lambda r: r.task.name.lower(), reverse=descending)
     else:
         out_rows.sort(key=lambda r: r.added_at, reverse=descending)
 
-    weekly, _ = capacity_of(db, access.workspace_id, user_id)
+    from app.services.work.leave import daily_capacity
+
+    capacity = daily_capacity(db, access.workspace_id, [user_id], days)[user_id]  # hours less holidays and leave
     sub = current_submission(db, access.workspace_id, user_id, first)
     settings = settings_row(db, access.workspace_id)
     locked = sub is not None and sub.status in LOCKED
@@ -324,7 +371,7 @@ def timesheet(
         period_start=first,
         period_end=last,
         days=days,
-        capacity_per_day=[weekly[day.weekday()] for day in days],
+        capacity_per_day=capacity,
         tracked_per_day=tracked,
         billable_per_day=billed,
         rows=out_rows,
@@ -363,8 +410,7 @@ def set_cell(db: Session, access: Access, data: t.CellIn) -> None:
     current = sum(e.duration_seconds or 0 for e in cell)
     if data.seconds > current:
         extra = data.seconds - current
-        # Put new time in working hours where it fits; it must stay on the chosen day.
-        begin = _at(data.day, tz, 9) if extra <= 15 * 3600 else day_start
+        begin = _new_entry_start(data.day, tz, extra, day_start, day_end)
         db.add(TimeEntry(
             task_id=data.task_id, user_id=user_id, started_at=begin, ended_at=begin + timedelta(seconds=extra),
             duration_seconds=extra, created_by=access.user_id,
@@ -384,6 +430,26 @@ def set_cell(db: Session, access: Access, data: t.CellIn) -> None:
                 remove = 0
     db.flush()
 
+
+
+def _new_entry_start(day: date, tz: ZoneInfo, seconds: int, day_start: datetime, day_end: datetime) -> datetime:
+    """When time typed into a cell should say it started: now, on the day you typed it against.
+
+    Type an hour at 10:21 and the entry reads 10:21 to 11:21. On a day that is not today the
+    clock is still the honest answer -- you are recording work at the moment you remember it --
+    so the same time of day is used, on that day.
+
+    Every entry used to be stamped 09:00 instead, which put three of them on top of each other
+    at nine in the morning and made the hover card read as nonsense.
+
+    The one thing it cannot do is run past midnight, so an entry long enough to overflow the day
+    is pulled back until it fits.
+    """
+    here = datetime.now(timezone.utc).astimezone(tz)
+    begin = datetime.combine(day, time(here.hour, here.minute), tz).astimezone(timezone.utc)
+    if seconds >= (day_end - day_start).total_seconds():
+        return day_start
+    return min(max(begin, day_start), day_end - timedelta(seconds=seconds))
 
 def add_row(db: Session, access: Access, data: t.RowIn) -> None:
     user_id = data.user_id or access.user_id
@@ -469,7 +535,9 @@ def all_timesheets(db: Session, access: Access, any_day: date, tz: ZoneInfo, tea
     )
     people = [u for u in members if visible is None or u.id in visible]
     if team_id is not None:
-        in_team = set(db.scalars(select(TeamMember.user_id).where(TeamMember.team_id == team_id)))
+        from app.services.work import team_tree
+
+        in_team = team_tree.people(db, [team_id])
         people = [u for u in people if u.id in in_team]
     ids = [u.id for u in people]
     tracked: Dict[str, List[int]] = {uid: [0] * 7 for uid in ids}
@@ -501,10 +569,12 @@ def all_timesheets(db: Session, access: Access, any_day: date, tz: ZoneInfo, tea
             )
         )
     }
+    from app.services.work.leave import daily_capacity
+
+    capacities = daily_capacity(db, access.workspace_id, [u.id for u in people], days)
     out = []
     for user in sorted(people, key=lambda u: (u.display_name or u.email).lower()):
-        weekly, _ = capacity_of(db, access.workspace_id, user.id)
-        capacity = [weekly[day.weekday()] for day in days]
+        capacity = capacities[user.id]
         out.append(t.PersonWeek(
             user=s.UserOut.model_validate(user), capacity_per_day=capacity, tracked_per_day=tracked[user.id],
             billable_per_day=billed[user.id], total_seconds=sum(tracked[user.id]), capacity_seconds=sum(capacity),
@@ -613,3 +683,82 @@ def submission_out(db: Session, access: Access, sub: TimesheetSubmission) -> t.S
         approvers=[s.UserOut.model_validate(people[uid]) for uid in sorted(approver_ids) if uid in people],
     )
 
+
+
+# --- filling in from the Planner, and reminders ----------------------------------------------------------------
+
+
+def prefill_from_planner(db: Session, access: Access, user_id: Optional[str], any_day: date, tz_name: str) -> t.PrefillOut:
+    """Turn the week's finished Planner blocks for tasks into time entries, where no time is logged for them yet."""
+    from app.db.models import TimeBlock
+
+    user_id = user_id or access.user_id
+    _require_edit(db, access, user_id)
+    tz = zone(tz_name)
+    first, last = period_of(db, access.workspace_id, any_day)
+    start, end = _at(first, tz), _at(last + DAY, tz)
+    now = datetime.now(timezone.utc)
+    made = seconds = 0
+    for block in db.scalars(select(TimeBlock).where(
+            TimeBlock.workspace_id == access.workspace_id, TimeBlock.user_id == user_id, TimeBlock.task_id.is_not(None),
+            TimeBlock.start_at >= start, TimeBlock.start_at < end, TimeBlock.end_at <= now).order_by(TimeBlock.start_at)):
+        opened = open_task(db, access.user_id, block.task_id, PermissionLevel.view)
+        if not opened.level.at_least(PermissionLevel.edit):
+            continue
+        overlap = db.scalars(select(TimeEntry.id).where(
+            TimeEntry.user_id == user_id, TimeEntry.task_id == block.task_id,
+            TimeEntry.started_at < block.end_at, func.coalesce(TimeEntry.ended_at, now) > block.start_at)).first()
+        if overlap is not None:
+            continue
+        ensure_unlocked(db, access.workspace_id, user_id, block.start_at, access.role)
+        length = int((block.end_at - block.start_at).total_seconds())
+        db.add(TimeEntry(task_id=block.task_id, user_id=user_id, started_at=block.start_at, ended_at=block.end_at,
+                         duration_seconds=length, description="From the Planner", created_by=access.user_id))
+        made += 1
+        seconds += length
+    db.flush()
+    return t.PrefillOut(entries=made, seconds=seconds)
+
+
+def run_timesheet_reminders(db: Session, now: Optional[datetime] = None) -> int:
+    """On the reminder day and hour, nudge people whose timesheet so far is short of their working hours. Once a week each."""
+    from app.db.models import Notification, Workspace, WorkspaceRole
+    from app.services.work import events
+    from app.services.work.leave import daily_capacity
+
+    now = now or datetime.now(timezone.utc)
+    sent = 0
+    for ws in db.scalars(select(Workspace)):
+        row = settings_row(db, ws.id)
+        if row.reminders_enabled is False:
+            continue
+        tz = zone(row.reminder_timezone or "Asia/Kolkata")
+        local = now.astimezone(tz)
+        if local.weekday() != (row.reminder_weekday if row.reminder_weekday is not None else 4) or local.hour < (row.reminder_hour or 16):
+            continue
+        first, _last = period_of(db, ws.id, local.date())
+        days = [first + timedelta(days=i) for i in range((local.date() - first).days + 1)]
+        members = [m for m in db.scalars(select(WorkspaceMember).where(WorkspaceMember.workspace_id == ws.id))
+                   if m.deactivated_at is None and m.role != WorkspaceRole.guest]
+        if not members:
+            continue
+        capacity = daily_capacity(db, ws.id, [m.user_id for m in members], days)
+        start, end = _at(first, tz), _at(local.date() + DAY, tz)
+        for m in members:
+            due = sum(capacity[m.user_id])
+            if due <= 0:
+                continue
+            already = db.scalars(select(Notification.id).where(
+                Notification.workspace_id == ws.id, Notification.user_id == m.user_id, Notification.kind == "timesheet_reminder",
+                Notification.data["period"].astext == first.isoformat())).first()
+            if already:
+                continue
+            tracked = db.scalar(select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0)).where(
+                TimeEntry.user_id == m.user_id, TimeEntry.started_at >= start, TimeEntry.started_at < end)) or 0
+            if tracked >= due * 0.9:
+                continue
+            events.notify(db, ws.id, [m.user_id], None, "timesheet_reminder", "primary",
+                          data={"period": first.isoformat(), "tracked": int(tracked), "expected": int(due)})
+            sent += 1
+    db.flush()
+    return sent

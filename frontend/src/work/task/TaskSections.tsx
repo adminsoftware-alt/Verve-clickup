@@ -3,11 +3,12 @@ import { CheckSquare, Download, FileText, Paperclip, Plus, Trash2, Upload } from
 import { useWork } from '../WorkContext';
 import { collabApi, openAttachment, type Attachment, type Checklist } from '../collabApi';
 import { Avatar } from '../ui';
+import { ask } from '../../components/ask';
 
 const Heading: React.FC<{ icon: React.ReactNode; title: string; extra?: React.ReactNode; action?: React.ReactNode }> = ({ icon, title, extra, action }) => (
   <div className="mb-2 flex items-center gap-2">
-    <span className="text-gray-500">{icon}</span>
-    <h4 className="text-sm font-semibold text-gray-700">{title}</h4>
+    <span className="text-gray-400">{icon}</span>
+    <h4 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{title}</h4>
     {extra}
     <span className="ml-auto">{action}</span>
   </div>
@@ -32,7 +33,7 @@ export const Checklists: React.FC<{ taskId: string; editable: boolean; me?: stri
   return (
     <section className="mt-5" aria-label="Checklists">
       <Heading icon={<CheckSquare size={15} />} title="Checklists" extra={total > 0 ? <span className="text-xs text-gray-400">{done}/{total}</span> : null}
-        action={editable && <button type="button" onClick={() => run(() => collabApi.addChecklist(taskId, 'Checklist'))} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50"><Plus size={12} /> Checklist</button>} />
+        action={editable && <button type="button" onClick={() => run(() => collabApi.addChecklist(taskId, 'Checklist'))} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-brand-600 hover:bg-brand-50"><Plus size={12} /> Checklist</button>} />
       {error && <p className="mb-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700">{error}</p>}
       {lists.length === 0 && <p className="text-xs text-gray-400">{editable ? 'Break the work into steps with a checklist.' : 'No checklists.'}</p>}
       {lists.map((cl) => {
@@ -47,7 +48,7 @@ export const Checklists: React.FC<{ taskId: string; editable: boolean; me?: stri
               ) : <span className="flex-1 text-sm font-medium text-gray-800">{cl.name}</span>}
               <span className="text-xs text-gray-400">{ticked}/{cl.items.length}</span>
               <span className="h-1.5 w-16 overflow-hidden rounded bg-gray-100"><span className="block h-full bg-emerald-500" style={{ width: `${cl.items.length ? (100 * ticked) / cl.items.length : 0}%` }} /></span>
-              {editable && <button type="button" title="Delete checklist" onClick={() => window.confirm(`Delete “${cl.name}”?`) && run(() => collabApi.deleteChecklist(cl.id))} className="text-gray-300 hover:text-red-600"><Trash2 size={13} /></button>}
+              {editable && <button type="button" title="Delete checklist" onClick={async () => await ask.confirm({ danger: true, title: `Delete “${cl.name}”?` }) && run(() => collabApi.deleteChecklist(cl.id))} className="text-gray-300 hover:text-red-600"><Trash2 size={13} /></button>}
             </div>
             <ul>
               {cl.items.map((item) => {
@@ -112,7 +113,7 @@ export const Attachments: React.FC<{ taskId: string; canAttach: boolean; isFull:
   };
   return (
     <section
-      className={`mt-5 rounded-lg ${dragging ? 'ring-2 ring-indigo-300' : ''}`}
+      className={`mt-5 rounded-lg ${dragging ? 'ring-2 ring-brand-300' : ''}`}
       aria-label="Attachments"
       onDragOver={(e) => { if (canAttach) { e.preventDefault(); setDragging(true); } }}
       onDragLeave={() => setDragging(false)}
@@ -122,7 +123,7 @@ export const Attachments: React.FC<{ taskId: string; canAttach: boolean; isFull:
         action={canAttach && (
           <>
             <input ref={input} type="file" multiple hidden aria-label="Upload files" onChange={(e) => e.target.files && send(e.target.files)} />
-            <button type="button" disabled={busy} onClick={() => input.current?.click()} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50 disabled:opacity-50">
+            <button type="button" disabled={busy} onClick={() => input.current?.click()} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-brand-600 hover:bg-brand-50 disabled:opacity-50">
               <Upload size={12} /> {busy ? 'Uploading…' : 'Upload'}
             </button>
           </>
@@ -141,7 +142,7 @@ export const Attachments: React.FC<{ taskId: string; canAttach: boolean; isFull:
               </button>
               <button type="button" title="Download" onClick={() => openAttachment(a, true).catch((e) => setError(e.message))} className="text-gray-400 hover:text-gray-700"><Download size={14} /></button>
               {(isFull || a.user?.id === me) && (
-                <button type="button" title="Delete" onClick={() => window.confirm(`Delete ${a.filename}?`) && collabApi.deleteAttachment(a.id).then(load).then(onChanged).catch((e) => setError(e.message))} className="text-gray-300 hover:text-red-600"><Trash2 size={14} /></button>
+                <button type="button" title="Delete" onClick={async () => await ask.confirm({ danger: true, title: `Delete ${a.filename}?` }) && collabApi.deleteAttachment(a.id).then(load).then(onChanged).catch((e) => setError(e.message))} className="text-gray-300 hover:text-red-600"><Trash2 size={14} /></button>
               )}
             </li>
           ))}

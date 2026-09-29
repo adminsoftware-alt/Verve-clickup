@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
-import { Archive, CalendarDays, CircleDot, Flag, MoveRight, Tag as TagIcon, Trash2, UserPlus, X } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Archive, CalendarDays, CircleDot, Diamond, Flag, MoveRight, Shapes, Tag as TagIcon, Timer, Trash2, UserPlus, X } from 'lucide-react';
 import { workApi, type BulkEdit, type BulkResult, type Status, type Task, type UserRef } from '../api';
-import { PRIORITIES, fromDateInput } from '../ui';
+import { PRIORITIES, fromDateInput, parseDuration } from '../ui';
 import { useWritableLists } from '../task/TaskActions';
+import { useWork } from '../WorkContext';
 import { Popover } from './ViewControls';
+import { ask } from '../../components/ask';
 
 /**
  * ClickUp's bulk action toolbar: shown while tasks are selected. Each change is applied to
@@ -18,7 +20,15 @@ export const BulkBar: React.FC<{
 }> = ({ selected, statuses, people, onClear, onDone }) => {
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null);
   const [tag, setTag] = useState('');
+  const [moveQ, setMoveQ] = useState('');
+  const [estimate, setEstimate] = useState('');
   const lists = useWritableLists();
+  const { taskTypes } = useWork();
+  // Every word has to appear in the path, so "dev pms" finds "PMS - Dev" under a Dev Space.
+  const matchingLists = useMemo(() => {
+    const words = moveQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return words.length ? lists.filter((l) => words.every((w) => l.label.toLowerCase().includes(w))) : lists;
+  }, [lists, moveQ]);
   const ids = selected.map((t) => t.id);
   // Above a List, offer every status name the selected tasks' Lists are known to use.
   const statusNames = statuses
@@ -62,11 +72,33 @@ export const BulkBar: React.FC<{
           {(close) => people.map((p) => (
             <div key={p.id} className="flex items-center gap-2 px-1 py-0.5 text-sm text-gray-700">
               <span className="min-w-0 flex-1 truncate">{p.display_name || p.email}</span>
-              <button type="button" aria-label={`Add ${p.display_name || p.email}`} onClick={() => { close(); run({ add_assignees: [p.id] }, 'Assigned'); }} className="rounded px-1.5 text-xs text-indigo-600 hover:bg-indigo-50">Add</button>
+              <button type="button" aria-label={`Add ${p.display_name || p.email}`} onClick={() => { close(); run({ add_assignees: [p.id] }, 'Assigned'); }} className="rounded px-1.5 text-xs text-brand-600 hover:bg-brand-50">Add</button>
               <button type="button" aria-label={`Remove ${p.display_name || p.email}`} onClick={() => { close(); run({ remove_assignees: [p.id] }, 'Updated'); }} className="rounded px-1.5 text-xs text-gray-500 hover:bg-gray-100">Remove</button>
             </div>
           ))}
         </Popover>
+
+        {/* The reason a type exists is that a lot of tasks share one, so this is where it is
+            really set: pick the rows, say what kind of thing they are. */}
+        {taskTypes.length > 0 && (
+          <Popover label="Set task type" icon={<Shapes size={14} />} text="Task type" up dark width={220}>
+            {(close) => (
+              <>
+                {taskTypes.map((t) => (
+                  <button key={t.id} type="button" className={item} onClick={() => { close(); run({ type_id: t.id }, 'Updated'); }}>
+                    {t.is_milestone
+                      ? <Diamond size={13} style={{ color: t.color }} fill={t.color} />
+                      : <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: t.color }} />}
+                    {t.name}
+                  </button>
+                ))}
+                <button type="button" className={item} onClick={() => { close(); run({ type_id: null }, 'Updated'); }}>
+                  <span className="inline-block h-2.5 w-2.5 rounded-full border border-gray-300" /> Task <span className="text-xs text-gray-400">default</span>
+                </button>
+              </>
+            )}
+          </Popover>
+        )}
 
         <Popover label="Set priority" icon={<Flag size={14} />} text="Priority" up dark width={180}>
           {(close) => (
@@ -91,26 +123,78 @@ export const BulkBar: React.FC<{
           )}
         </Popover>
 
+        {/* Every new task needs an estimate now, so older work often has to be sized in batches. */}
+        <Popover label="Set time estimate" icon={<Timer size={14} />} text="Estimate" up dark width={220}>
+          {(close) => (
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const seconds = parseDuration(estimate);
+              if (seconds !== null && seconds > 0) { close(); run({ time_estimate_seconds: seconds }, 'Sized'); setEstimate(''); }
+            }}>
+              <input
+                autoFocus aria-label="Time estimate" value={estimate} onChange={(e) => setEstimate(e.target.value)}
+                placeholder="e.g. 2h 30m"
+                className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-800"
+              />
+              <p className="mt-1 text-[11px] text-gray-400">Applied to every selected task.</p>
+              <button type="submit" disabled={!parseDuration(estimate)} className="mt-2 w-full rounded-md bg-brand-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-40">
+                Set estimate
+              </button>
+            </form>
+          )}
+        </Popover>
+
         <Popover label="Tags" icon={<TagIcon size={14} />} text="Tags" up dark width={240}>
           {(close) => (
             <form onSubmit={(e) => { e.preventDefault(); if (tag.trim()) { close(); run({ add_tags: [tag.trim()] }, 'Tagged'); setTag(''); } }}>
               <input autoFocus aria-label="Tag name" value={tag} onChange={(e) => setTag(e.target.value)} placeholder="Tag name" className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-800" />
               <div className="mt-2 flex gap-1">
-                <button type="submit" disabled={!tag.trim()} className="flex-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-40">Add tag</button>
+                <button type="submit" disabled={!tag.trim()} className="flex-1 rounded-md bg-brand-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-40">Add tag</button>
                 <button type="button" disabled={!tag.trim()} onClick={() => { close(); run({ remove_tags: [tag.trim()] }, 'Updated'); setTag(''); }} className="flex-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 disabled:opacity-40">Remove tag</button>
               </div>
             </form>
           )}
         </Popover>
 
-        <Popover label="Move to List" icon={<MoveRight size={14} />} text="Move" up dark width={280}>
-          {(close) => lists.map((l) => (
-            <button key={l.id} type="button" className={item} onClick={() => { close(); run({ list_id: l.id }, 'Moved'); }}>{l.label}</button>
-          ))}
+        {/* Searchable, because a workspace with two hundred Lists makes a flat list of them
+            a worse way to find one than scrolling the sidebar. */}
+        <Popover label="Move to List" icon={<MoveRight size={14} />} text="Move" up dark width={300}>
+          {(close) => (
+            <div className="-m-1">
+              <input
+                autoFocus
+                value={moveQ}
+                onChange={(e) => setMoveQ(e.target.value)}
+                placeholder="Search Lists…"
+                aria-label="Search Lists"
+                className="mb-1 w-full rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-800"
+              />
+              <div className="max-h-56 overflow-y-auto">
+                {matchingLists.length === 0 ? (
+                  <p className="px-2 py-3 text-center text-xs text-gray-400">No List matches.</p>
+                ) : matchingLists.map((l) => {
+                  const parts = l.label.split(' / ');
+                  return (
+                    <button
+                      key={l.id}
+                      type="button"
+                      className={`${item} flex-col !items-start gap-0`}
+                      onClick={() => { close(); setMoveQ(''); run({ list_id: l.id }, 'Moved'); }}
+                    >
+                      <span className="w-full truncate">{parts[parts.length - 1]}</span>
+                      {parts.length > 1 && (
+                        <span className="w-full truncate text-[11px] text-gray-400">{parts.slice(0, -1).join(' / ')}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </Popover>
 
         <button type="button" onClick={() => run({ archived: true }, 'Archived')} className="flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-gray-100 hover:bg-white/10"><Archive size={14} /> Archive</button>
-        <button type="button" onClick={() => window.confirm(`Delete ${selected.length} task${selected.length === 1 ? '' : 's'} and their subtasks? This cannot be undone.`) && run({ delete: true }, 'Deleted')}
+        <button type="button" onClick={async () => await ask.confirm({ danger: true, title: `Delete ${selected.length} task${selected.length === 1 ? '' : 's'} and their subtasks? This cannot be undone.` }) && run({ delete: true }, 'Deleted')}
           className="flex items-center gap-1.5 rounded-md px-2 py-1 text-red-300 hover:bg-white/10"><Trash2 size={14} /> Delete</button>
       </div>
     </div>

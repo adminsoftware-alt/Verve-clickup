@@ -79,7 +79,7 @@ def bulk_edit(db: Session, user_id: str, data: s.BulkEdit) -> s.BulkResult:
                 change: Dict[str, Any] = {}
                 if data.status is not None:
                     change["status_id"] = _status_by_name(db, task, data.status)
-                for key in ("priority", "start_date", "due_date", "group_id", "archived"):
+                for key in ("priority", "start_date", "due_date", "group_id", "archived", "time_estimate_seconds", "type_id"):
                     if key in fields:
                         change[key] = getattr(data, key)
                 if data.add_assignees or data.remove_assignees:

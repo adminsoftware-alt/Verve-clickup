@@ -3,6 +3,10 @@ import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../core/firebase';
 import { isAllowedDomain } from '../utils/auth';
+import { devUser, signOutOfDev } from '../core/devSession';
+
+/** Local testing: the v1 role that goes with a v2 workspace role, so the old pages behave too. */
+const DEV_ROLE: Record<string, string> = { owner: 'Admin', admin: 'Admin', member: 'Employee', guest: 'Employee' };
 
 interface AuthContextType {
   user: User | null;
@@ -22,6 +26,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Local testing: pretending to be someone skips Firebase entirely.
+    const pretending = devUser();
+    if (pretending) {
+      setUser({
+        uid: pretending.id,
+        email: pretending.email,
+        displayName: pretending.name,
+      } as User);
+      setRole(pretending.leads.length ? 'Manager' : DEV_ROLE[pretending.role] ?? 'Employee');
+      setLoading(false);
+      return;
+    }
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u) {
         if (!isAllowedDomain(u.email)) {
@@ -67,6 +83,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const logout = async () => {
+    if (devUser()) {
+      signOutOfDev();
+      window.location.assign('/login');
+      return;
+    }
     await signOut(auth);
     setRole(null);
   };

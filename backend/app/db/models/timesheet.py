@@ -83,6 +83,11 @@ class TimesheetSettings(Base):
     capacity_seconds: Mapped[List[int]] = mapped_column(
         ARRAY(Integer), nullable=False, server_default=text("'{28800,28800,28800,28800,28800,0,0}'")
     )
+    # A nudge before the week closes to anyone whose timesheet is short of their hours.
+    reminders_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"), default=True)
+    reminder_weekday: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("4"), default=4)  # Friday
+    reminder_hour: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("16"), default=16)
+    reminder_timezone: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'Asia/Kolkata'"), default="Asia/Kolkata")
 
 
 class MemberCapacity(Base):

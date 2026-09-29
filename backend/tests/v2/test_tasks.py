@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from tests.v2.conftest import ok
 
 
@@ -20,6 +22,9 @@ def iso(dt):
     return dt.isoformat()
 
 
+HOUR = 3600
+
+
 # --- creation & fields -------------------------------------------------------
 
 
@@ -34,6 +39,111 @@ def test_new_task_starts_in_the_first_not_started_status(api, folderless_list):
 def test_priority_must_be_one_to_four(api, folderless_list):
     r = api.post(f"/lists/{folderless_list['id']}/tasks", "owner", {"name": "x", "priority": 5})
     assert r.status_code == 422
+
+
+def test_task_defaults_answer_the_mandatory_fields_from_the_list_history(api, folderless_list):
+    """The create dialog has five required fields; this is what stops that being five decisions.
+
+    Without it the rule added in test_a_typed_in_task_must_carry_a_plan just makes the app slower
+    to use, which is how a policy meant to improve the data ends up degrading it.
+    """
+    url = f"/lists/{folderless_list['id']}/tasks"
+    now = datetime.now(timezone.utc)
+    # An empty List can only offer the safe fallbacks.
+    bare = ok(api.get(f"/lists/{folderless_list['id']}/task-defaults", "owner"))
+    assert bare["time_estimate_seconds"] is None and bare["priority"] == 3
+    assert bare["assignees"] == ["owner"] and bare["days_to_due"] == 2
+
+    for hours, name in ((2, "File Acme GSTR-3B"), (2, "File Borealis GSTR-3B"), (8, "Annual audit")):
+        ok(api.post(url, "owner", {
+            "name": name, "assignees": ["owner"], "priority": 2,
+            "start_date": iso(now), "due_date": iso(now + timedelta(days=1)),
+            "time_estimate_seconds": hours * HOUR,
+        }), 201)
+
+    # With no name to go on, the List's own median is the best available guess.
+    overall = ok(api.get(f"/lists/{folderless_list['id']}/task-defaults", "owner"))
+    assert overall["estimate_basis"] == "list" and overall["estimate_from"] == 3
+    assert overall["time_estimate_seconds"] == 2 * HOUR  # median of 2h, 2h, 8h
+    assert overall["priority"] == 2
+
+    # A name that matches past work beats the average: the GST filings ignore the audit.
+    similar = ok(api.get(f"/lists/{folderless_list['id']}/task-defaults?name=File+Cognivion+GSTR-3B", "owner"))
+    assert similar["estimate_basis"] == "similar" and similar["estimate_from"] == 2
+    assert similar["time_estimate_seconds"] == 2 * HOUR
+
+
+def test_people_load_shows_what_is_already_booked_into_someones_days(api, workspace, folderless_list):
+    """The number that should be in front of you before you hand over more work."""
+    today = datetime.now(timezone.utc).replace(hour=9, minute=0, second=0, microsecond=0)
+    ok(api.post(f"/lists/{folderless_list['id']}/tasks", "owner", {
+        "name": "Two days of work", "assignees": ["member"], "priority": 2,
+        "start_date": iso(today), "due_date": iso(today + timedelta(days=1)),
+        "time_estimate_seconds": 6 * HOUR,
+    }), 201)
+    start = today.date().isoformat()
+    got = ok(api.get(f"/workspaces/{workspace['id']}/people-load"
+                     f"?user_ids=member&user_ids=admin&start={start}&days=7", "owner"))
+    assert len(got["days"]) == 7
+    rows = {r["user_id"]: r for r in got["rows"]}
+    # The estimate is spread across the days it spans, not dumped on the first one.
+    assert rows["member"]["planned_total"] == 6 * HOUR
+    assert sum(1 for v in rows["member"]["planned_per_day"] if v) == 2
+    assert rows["member"]["capacity_total"] > 0
+    # Somebody with nothing on still gets a row, so the picker can say "free".
+    assert rows["admin"]["planned_total"] == 0
+
+
+def test_a_name_alone_is_enough_to_make_a_task(api, folderless_list):
+    """Capturing work has to take one line, or it gets written down somewhere we cannot see it.
+
+    Who, when and how big still matter, and the List view says so on the row itself -- in red,
+    in the cells that are empty, where they can be filled in. What it no longer does is refuse
+    to record the work until all five are answered.
+    """
+    now = datetime.now(timezone.utc)
+    url = f"/lists/{folderless_list['id']}/tasks"
+
+    bare = ok(api.post(url, "owner", {"name": "Ring the auditor back"}), 201)
+    assert bare["name"] == "Ring the auditor back"
+    # Exactly the five the List view will mark, so the row can say what is still wanted.
+    assert bare["assignees"] == [] and bare["priority"] is None
+    assert bare["start_date"] is None and bare["due_date"] is None
+    assert bare["time_estimate_seconds"] is None
+
+    full = ok(api.post(url, "owner", {
+        "name": "Planned", "assignees": ["owner"], "start_date": iso(now), "due_date": iso(now),
+        "time_estimate_seconds": 3600, "priority": 2,
+    }), 201)
+    assert full["priority"] == 2
+
+    # A subtask inherits its parent's plan, so it is never asked for one of its own.
+    ok(api.post(url, "owner", {"name": "Step one", "parent_id": full["id"]}), 201)
+
+
+def test_the_planning_rule_still_says_what_a_task_is_missing():
+    """The rule itself is intact and still names each gap; nothing on the API asks for it.
+
+    It is kept because the wording is the specification of what the red cells mean, and because
+    a workspace that wants creation gated can have it back by passing require_details again.
+    """
+    from app.services.work.tasks import _check_details
+    from app.schemas import work as s
+    from app.services.work.errors import Invalid
+
+    now = datetime.now(timezone.utc)
+
+    with pytest.raises(Invalid) as bare:
+        _check_details(s.TaskCreate(name="x"))
+    for word in ("assignee", "start date", "due date", "estimate", "priority"):
+        assert word in str(bare.value)
+
+    # Missing just one of them still says which one, and only that one.
+    with pytest.raises(Invalid) as partial:
+        _check_details(s.TaskCreate(
+            name="x", assignees=["owner"], start_date=now, due_date=now, time_estimate_seconds=3600,
+        ))
+    assert str(partial.value) == "A new task needs a priority."
 
 
 def test_due_date_cannot_precede_start_date(api, folderless_list):
@@ -52,11 +162,16 @@ def test_status_must_belong_to_the_list(api, workspace, folderless_list):
     assert r.status_code == 400
 
 
-def test_assignees_must_be_workspace_members(api, folderless_list):
-    task = new_task(api, folderless_list["id"], assignees=["member", "guest"])
+def test_assignees_must_be_workspace_members_who_can_open_the_list(api, folderless_list):
+    lid = folderless_list["id"]
+    # The guest only sees what's shared with them, so work can't be given to them until it is.
+    blind = api.post(f"/lists/{lid}/tasks", "owner", {"name": "x", "assignees": ["guest"]})
+    assert blind.status_code == 400 and "can't see this List" in blind.json()["detail"]
+    ok(api.post(f"/lists/{lid}/shares", "owner", {"user_id": "guest", "level": "edit"}), 201)
+    task = new_task(api, lid, assignees=["member", "guest"])
     assert sorted(a["id"] for a in task["assignees"]) == ["guest", "member"]
-    r = api.post(f"/lists/{folderless_list['id']}/tasks", "owner", {"name": "x", "assignees": ["outsider"]})
-    assert r.status_code == 400
+    r = api.post(f"/lists/{lid}/tasks", "owner", {"name": "x", "assignees": ["outsider"]})
+    assert r.status_code == 400 and "workspace members" in r.json()["detail"]
 
 
 def test_tags_are_created_per_space_and_reused_ignoring_case(api, folderless_list):

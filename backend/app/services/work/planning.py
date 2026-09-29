@@ -83,8 +83,29 @@ def planner(db: Session, access: Access, start: datetime, end: datetime) -> p.Pl
             if ev_start < end and ev_end > start:
                 events.append(p.CalendarEvent(feed_id=feed.id, title=ev["title"], start=ev_start, end=ev_end,
                                               all_day=ev["all_day"], location=ev.get("location"), color=feed.color))
+    from app.services.work import calendar_sync
+
+    events.extend(calendar_sync.planner_events(db, access, start, end))  # Google / Outlook, two-way
     events.sort(key=lambda e: e.start)
-    return p.PlannerOut(blocks=_blocks_out(db, access, blocks), events=events, feed_errors=errors)
+    return p.PlannerOut(blocks=_blocks_out(db, access, blocks), events=events, feed_errors=errors,
+                        days_off=_days_off(db, access, start.date() - timedelta(days=1), end.date()))
+
+
+def _days_off(db: Session, access: Access, first: date, last: date) -> List[p.DayOff]:
+    """The caller's leave (approved or pending) and company holidays, day by day."""
+    from app.db.models import Holiday, LeaveRequest, LeaveType
+
+    out = [p.DayOff(day=h.day, label=h.name, kind="holiday") for h in db.scalars(select(Holiday).where(
+        Holiday.workspace_id == access.workspace_id, Holiday.day >= first, Holiday.day <= last))]
+    for r in db.scalars(select(LeaveRequest).where(
+            LeaveRequest.workspace_id == access.workspace_id, LeaveRequest.user_id == access.user_id,
+            LeaveRequest.status.in_(("pending", "approved")), LeaveRequest.start_date <= last, LeaveRequest.end_date >= first)):
+        kind = db.get(LeaveType, r.type_id) if r.type_id else None
+        day = max(r.start_date, first)
+        while day <= min(r.end_date, last):
+            out.append(p.DayOff(day=day, label=f"{kind.name if kind else 'Leave'} leave", part=r.part, kind="leave", pending=r.status == "pending"))
+            day += timedelta(days=1)
+    return sorted(out, key=lambda d: d.day)
 
 
 def add_block(db: Session, access: Access, data: p.TimeBlockIn) -> p.TimeBlockOut:
@@ -368,9 +389,9 @@ def ics_for_token(db: Session, token: str) -> bytes:
         raise NotFound("Calendar not found")
     access = Access.for_workspace(db, member.user_id, member.workspace_id)
     cal = icalendar.Calendar()
-    cal.add("prodid", "-//Timetriq//Tasks//EN")
+    cal.add("prodid", "-//Verve Workflow//Tasks//EN")
     cal.add("version", "2.0")
-    cal.add("x-wr-calname", "Timetriq tasks")
+    cal.add("x-wr-calname", "Verve Workflow tasks")
     stamp = _now()
     tasks = mywork.my_tasks(db, access, include_closed=False)
     for t in tasks:

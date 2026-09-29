@@ -6,10 +6,10 @@ import { workApi } from './api';
 import { Avatar, Portal } from './ui';
 
 /**
- * Hand a List to one person. Managers (Team leads) can pick people in the Teams they
+ * Hand a List to one or more people. Managers (Team leads) can pick people in the Teams they
  * lead; owners and admins anyone. The List becomes theirs to fill and work through.
  */
-export const AssignListDialog: React.FC<{ listId: string; name: string; current: string | null; onClose: () => void; onDone: () => void }> = ({
+export const AssignListDialog: React.FC<{ listId: string; name: string; current: string[]; onClose: () => void; onDone: () => void }> = ({
   listId, name, current, onClose, onDone,
 }) => {
   const { members, teams, hierarchy } = useWork();
@@ -18,10 +18,12 @@ export const AssignListDialog: React.FC<{ listId: string; name: string; current:
   const isAdmin = hierarchy?.role === 'owner' || hierarchy?.role === 'admin';
   const ledPeople = new Set(teams.filter((t) => user && t.lead_ids.includes(meId)).flatMap((t) => t.members.map((m) => m.id)));
   const choices = members.filter((m) => m.role !== 'guest' && (isAdmin || m.user.id === meId || ledPeople.has(m.user.id)));
-  const [picked, setPicked] = useState(current ?? '');
+  const [picked, setPicked] = useState<string[]>(current);
   const [isPrivate, setIsPrivate] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const save = (userId: string | null) => workApi.assignList(listId, userId, isPrivate).then(onDone).catch((e) => setError(e.message));
+  const toggle = (id: string) => setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const save = (ids: string[]) => workApi.assignListTo(listId, ids, isPrivate).then(onDone).catch((e) => setError(e.message));
+  const unchanged = picked.length === current.length && picked.every((id) => current.includes(id));
 
   return (
     <Portal>
@@ -33,14 +35,14 @@ export const AssignListDialog: React.FC<{ listId: string; name: string; current:
           </header>
           <div className="px-5 py-4">
             <p className="mb-3 text-xs text-gray-500">
-              The person you pick gets full access: they can add tasks, assign themselves, track time and complete them. You keep access.
+              Everyone you pick gets full access: they can add tasks, assign themselves, track time and complete them. You keep access.
               {!isAdmin && ' You can assign to people in the Teams you lead.'}
             </p>
-            <div className="max-h-60 overflow-y-auto rounded-md border border-gray-200" role="radiogroup" aria-label="Assign to">
+            <div className="max-h-60 overflow-y-auto rounded-md border border-gray-200" role="group" aria-label="Assign to">
               {choices.length === 0 && <p className="px-3 py-3 text-sm text-gray-400">No one you can assign to. Team leads can assign to their Team members.</p>}
               {choices.map((m) => (
                 <label key={m.user.id} className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-gray-50">
-                  <input type="radio" name="assignee" checked={picked === m.user.id} onChange={() => setPicked(m.user.id)} />
+                  <input type="checkbox" name="assignee" checked={picked.includes(m.user.id)} onChange={() => toggle(m.user.id)} />
                   <Avatar user={m.user} size={24} />
                   <span className="min-w-0 flex-1 truncate text-sm text-gray-800">{m.user.display_name || m.user.email}</span>
                   {m.user.id === meId && <span className="text-xs text-gray-400">you</span>}
@@ -54,10 +56,12 @@ export const AssignListDialog: React.FC<{ listId: string; name: string; current:
             {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           </div>
           <footer className="flex items-center justify-between border-t border-gray-100 px-5 py-3">
-            {current ? <button type="button" onClick={() => save(null)} className="text-sm text-red-600 hover:underline">Unassign</button> : <span />}
+            {current.length > 0 ? <button type="button" onClick={() => save([])} className="text-sm text-red-600 hover:underline">Unassign everyone</button> : <span />}
             <div className="flex gap-2">
               <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-              <button type="button" disabled={!picked || picked === current} onClick={() => save(picked)} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Assign</button>
+              <button type="button" disabled={picked.length === 0 || unchanged} onClick={() => save(picked)} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
+                {picked.length > 1 ? `Assign to ${picked.length} people` : 'Assign'}
+              </button>
             </div>
           </footer>
         </div>

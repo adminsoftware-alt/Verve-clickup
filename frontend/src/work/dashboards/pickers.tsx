@@ -39,7 +39,7 @@ export const SourcePicker: React.FC<{ value: Source[]; onChange: (value: Source[
       <>{f.folders.map((sub) => renderFolder(sub, depth + 1))}{f.lists.map((l) => renderList(l, depth + 1))}</>,
       f.folders.length + f.lists.length > 0);
   const renderSpace = (sp: SpaceNode) =>
-    row('space', sp, 0, <span className="flex h-4 w-4 items-center justify-center rounded bg-indigo-500 text-[9px] font-bold text-white">{sp.name[0]?.toUpperCase()}</span>,
+    row('space', sp, 0, <span className="flex h-4 w-4 items-center justify-center rounded bg-brand-500 text-[9px] font-bold text-white">{sp.name[0]?.toUpperCase()}</span>,
       <>{sp.folders.map((f) => renderFolder(f, 1))}{sp.lists.map((l) => renderList(l, 1))}</>,
       sp.folders.length + sp.lists.length > 0);
 
@@ -47,7 +47,7 @@ export const SourcePicker: React.FC<{ value: Source[]; onChange: (value: Source[
     <div>
       <p className="mb-1 text-xs text-gray-500">
         {value.length === 0 ? 'Everything you can see (all Spaces).' : `${value.length} location${value.length === 1 ? '' : 's'} picked.`}
-        {value.length > 0 && <button type="button" onClick={() => onChange([])} className="ml-2 text-indigo-600 hover:underline">Use everything</button>}
+        {value.length > 0 && <button type="button" onClick={() => onChange([])} className="ml-2 text-brand-600 hover:underline">Use everything</button>}
       </p>
       <div className="max-h-48 overflow-y-auto rounded-md border border-gray-200 px-2 py-1" aria-label="Locations">
         {hierarchy?.spaces.map(renderSpace)}
@@ -86,7 +86,7 @@ const PeoplePicker: React.FC<{ value: string[] | null | undefined; onChange: (v:
       <span className="text-xs font-medium text-gray-600">{label}</span>
       <div className="mt-1 flex flex-wrap items-center gap-1.5">
         {chosen.map((token) => (
-          <span key={token} className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">
+          <span key={token} className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700">
             {name(token)}
             <button type="button" aria-label={`Remove ${name(token)}`} onClick={() => remove(token)}><X size={11} /></button>
           </span>

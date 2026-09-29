@@ -50,6 +50,21 @@ def _cards(template: str) -> List[Card]:
             ("calculation", "Tasks without estimates", {"filters": {"estimate": "missing"}}, 4, 1),
             ("portfolio", "Estimated vs tracked by List", {"include_subtasks": True}, 12, 3),
         ]
+    if template == "monthly_review":
+        # The SOP's monthly review: what the person finished, on time or late, where their time went.
+        month = {"preset": "this_month"}
+        return [
+            ("calculation", "Done this month", {"filters": {"done": "this_month"}, "include_closed": True}, 3, 1),
+            ("calculation", "Open tasks", {}, 3, 1),
+            ("calculation", "Overdue", {"filters": {"due": "overdue"}}, 3, 1),
+            ("calculation", "Hours tracked this month", {"measure": "time_tracked", "fn": "sum", "include_closed": True,
+                                                         "include_subtasks": True, "filters": {"done": "this_month"}}, 3, 1),
+            ("completed", "Completed this month: on time or late", {"period": month}, 6, 3),
+            ("line", "Tasks done per week", {"group_by": "done_date", "interval": "week", "period": {"preset": "last_30_days"}}, 6, 3),
+            ("time_report", "Time this month by List", {"period": month, "time_group_by": "list", "then_by": "task", "include_subtasks": True}, 6, 3),
+            ("task_list", "Overdue tasks", {"filters": {"due": "overdue"}}, 6, 3),
+            ("timesheet", "Hours per day this month", {"period": month, "include_subtasks": True}, 12, 3),
+        ]
     return []
 
 

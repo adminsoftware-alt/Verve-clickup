@@ -279,7 +279,7 @@ export const GanttView: React.FC<{
                 <button type="button" onClick={() => onOpenTask(t.id)} className="hover:underline">{t.name}</button>
                 {canEdit(t) && (
                   <button type="button" title="Schedule this week" aria-label={`Schedule ${t.name}`} onClick={() => onUpdate(t.id, { start_date: new Date(today + 9 * 3600_000).toISOString(), due_date: new Date(addDays(today, 4) + 17 * 3600_000).toISOString() })}
-                    className="text-indigo-600 hover:text-indigo-800"><CalendarPlus size={12} /></button>
+                    className="text-brand-600 hover:text-brand-800"><CalendarPlus size={12} /></button>
                 )}
               </span>
             ))}

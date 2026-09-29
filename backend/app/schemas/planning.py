@@ -1,7 +1,7 @@
 """My Tasks extras: Planner time blocks, LineUp, calendar feeds, the Home layout, and Automations."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -62,9 +62,18 @@ class CalendarEvent(BaseModel):
     color: str
 
 
+class DayOff(BaseModel):
+    day: date
+    label: str  # e.g. "Casual leave", "Diwali"
+    part: str = "full"  # full | first_half | second_half
+    kind: str  # leave | holiday
+    pending: bool = False
+
+
 class PlannerOut(BaseModel):
     blocks: List[TimeBlockOut]
     events: List[CalendarEvent]
+    days_off: List[DayOff] = Field(default_factory=list)
     # Feeds that could not be read the last time they were fetched.
     feed_errors: Dict[str, str] = Field(default_factory=dict)
 
@@ -125,8 +134,8 @@ class HomeLayout(BaseModel):
 
 # --- Automations ------------------------------------------------------------------------------------
 
-Trigger = Literal["task_created", "status_changed"]
-Action = Literal["assign", "notify", "set_priority", "set_status"]
+Trigger = Literal["task_created", "status_changed", "due_soon", "overdue", "priority_changed", "assignee_added"]
+Action = Literal["assign", "notify", "set_priority", "set_status", "escalate", "add_tag"]
 
 
 class AutomationIn(BaseModel):
@@ -164,3 +173,39 @@ class AutomationOut(BaseModel):
     run_count: int
     # Set on rules defined higher up (e.g. a Space's rule shown on one of its Lists).
     inherited: bool = False
+
+
+# --- two-way calendar sync ---------------------------------------------------------------------------
+
+
+class CalendarConnectionOut(BaseModel):
+    id: uuid.UUID
+    provider: Literal["google", "microsoft"]
+    account_email: Optional[str]
+    push_tasks: bool
+    push_blocks: bool
+    pull_events: bool
+    color: str
+    event_count: int
+    synced_at: Optional[datetime]
+    error: Optional[str]
+
+
+class CalendarConnectionUpdate(BaseModel):
+    push_tasks: Optional[bool] = None
+    push_blocks: Optional[bool] = None
+    pull_events: Optional[bool] = None
+    color: Optional[Annotated[str, StringConstraints(pattern=r"^#[0-9a-fA-F]{6}$")]] = None
+
+
+class CalendarProviders(BaseModel):
+    google: bool
+    microsoft: bool
+
+
+class SyncResult(BaseModel):
+    created: int
+    updated: int
+    deleted: int
+    pulled: int
+    connection: CalendarConnectionOut

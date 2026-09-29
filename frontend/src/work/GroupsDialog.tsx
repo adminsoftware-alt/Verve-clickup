@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Folder, List as ListIcon, Trash2, X } from 'lucide-react';
 import { workApi, type LocationKind, type TaskGroup } from './api';
 import { Portal } from './ui';
+import { ask } from '../components/ask';
 
 const COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#ec4899', '#64748b'];
 const WHERE: Record<LocationKind, string> = { space: 'Space', folder: 'Folder', list: 'List' };
@@ -42,7 +43,7 @@ export const GroupsDialog: React.FC<{
                       className={`h-5 w-5 rounded-full ${color === c ? 'ring-2 ring-gray-900 ring-offset-1' : ''}`} style={{ backgroundColor: c }} />
                   ))}
                 </div>
-                <button type="submit" disabled={!draft.trim()} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Add</button>
+                <button type="submit" disabled={!draft.trim()} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">Add</button>
               </form>
             )}
             {error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -59,14 +60,14 @@ export const GroupsDialog: React.FC<{
                           defaultValue={g.name}
                           onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== g.name) run(() => workApi.updateGroup(g.id, { name: v })); }}
                           onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-                          className="min-w-0 flex-1 rounded border border-transparent px-1 py-0.5 text-sm hover:border-gray-200 focus:border-indigo-400 focus:outline-none"
+                          className="min-w-0 flex-1 rounded border border-transparent px-1 py-0.5 text-sm hover:border-gray-200 focus:border-brand-400 focus:outline-none"
                         />
                       ) : <span className="min-w-0 flex-1 truncate text-sm text-gray-800">{g.name}</span>}
                       <span className="flex shrink-0 items-center gap-1 text-xs text-gray-400" title={`Defined on this ${WHERE[g.location]}${own ? '' : ' above'}`}>
                         {g.location === 'list' ? <ListIcon size={12} /> : <Folder size={12} />} {own ? 'here' : `from ${WHERE[g.location]}`}
                       </span>
                       {own && canEdit && (
-                        <button type="button" title={`Delete ${g.name}`} onClick={() => window.confirm(`Delete the “${g.name}” group? Its tasks are kept, just ungrouped.`) && run(() => workApi.deleteGroup(g.id))} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600">
+                        <button type="button" title={`Delete ${g.name}`} onClick={async () => await ask.confirm({ danger: true, title: `Delete the “${g.name}” group? Its tasks are kept, just ungrouped.` }) && run(() => workApi.deleteGroup(g.id))} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600">
                           <Trash2 size={14} />
                         </button>
                       )}

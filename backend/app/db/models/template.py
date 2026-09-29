@@ -16,6 +16,7 @@ class TemplateKind(str, enum.Enum):
     task = "task"
     list = "list"
     folder = "folder"
+    space = "space"
 
 
 class Template(TimestampMixin, Base):

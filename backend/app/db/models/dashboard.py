@@ -55,6 +55,9 @@ class Dashboard(TimestampMixin, Base):
     # Set for the Dashboard behind a Space/Folder/List's Dashboard view: it follows that
     # location's permissions and isn't listed in the Dashboards hub.
     view_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("views.id", ondelete="CASCADE"), unique=True)
+    # "my_work", "team" or "company" for the ones made for people automatically; None for hand-made ones.
+    # Marked so they're only ever made once each, and so the hub can show them first.
+    standard: Mapped[Optional[str]] = mapped_column(String(16), index=True)
 
 
 class DashboardCard(TimestampMixin, Base):

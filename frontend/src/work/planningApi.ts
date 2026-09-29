@@ -3,18 +3,20 @@ import { request, type LocationKind, type Task, type UserRef } from './api';
 
 export interface TimeBlock { id: string; task_id: string | null; title: string | null; start_at: string; end_at: string; task: Task | null }
 export interface CalendarEvent { feed_id: string; title: string; start: string; end: string; all_day: boolean; location: string | null; color: string }
-export interface Planner { blocks: TimeBlock[]; events: CalendarEvent[]; feed_errors: Record<string, string> }
+export interface DayOff { day: string; label: string; part: string; kind: 'leave' | 'holiday'; pending: boolean }
+export interface Planner { blocks: TimeBlock[]; events: CalendarEvent[]; feed_errors: Record<string, string>; days_off?: DayOff[] }
 export interface CalendarFeed { id: string; name: string; color: string; host: string; event_count: number; fetched_at: string | null; error: string | null }
 
 export type HomeCardKey = 'recents' | 'agenda' | 'lineup' | 'priorities' | 'planner' | 'delegated' | 'done';
 export interface HomeCard { key: HomeCardKey; hidden: boolean; size: 'half' | 'full' }
 
-export type AutomationTrigger = 'task_created' | 'status_changed';
-export type AutomationAction = 'assign' | 'notify' | 'set_priority' | 'set_status';
+export type AutomationTrigger = 'task_created' | 'status_changed' | 'due_soon' | 'overdue' | 'priority_changed' | 'assignee_added';
+export type AutomationAction = 'assign' | 'notify' | 'set_priority' | 'set_status' | 'escalate' | 'add_tag';
+export interface AutomationConditions { priorities?: number[]; tags?: string[]; assignees?: string[] }
 export interface Automation {
   id: string; location_kind: 'space' | 'folder' | 'list'; location_id: string;
-  trigger: AutomationTrigger; trigger_config: { status?: string };
-  action: AutomationAction; action_config: { user_ids?: string[]; priority?: number; status_name?: string };
+  trigger: AutomationTrigger; trigger_config: { status?: string; days_before?: number; days_after?: number; priority?: number; conditions?: AutomationConditions };
+  action: AutomationAction; action_config: { user_ids?: string[]; priority?: number; status_name?: string; levels?: number; message?: string; tag?: string };
   active: boolean; created_by: UserRef | null; created_at: string; last_run_at: string | null; run_count: number; inherited: boolean;
 }
 export type AutomationIn = Pick<Automation, 'trigger' | 'trigger_config' | 'action' | 'action_config'> & { active?: boolean };

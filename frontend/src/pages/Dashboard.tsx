@@ -460,7 +460,14 @@ export const Dashboard: React.FC = () => {
           {/* Total Tasks Box */}
           <div style={{ ...cardStyle, justifyContent: 'center', alignItems: 'center' }}>
             <div style={{...headerStyle, width: '100%'}}>Total Tasks</div>
-            <div style={{ fontSize: '5rem', fontWeight: 400, color: '#111827', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>{totalTasks}</div>
+            {/* The count of everything, to match the list of everything beside it. It used to
+                show the KPI figure, which is narrowed to the chosen timeframe -- so this box
+                read 0 while Overall Tasks listed five tasks, which is not a number anyone can
+                make sense of. The timeframe figure is still on the KPI row above. */}
+            <div style={{ fontSize: '5rem', fontWeight: 400, color: '#111827', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>{tasks.length}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', textAlign: 'center', paddingBottom: '8px' }}>
+              {completedTasks} completed · {tasks.length - completedTasks} open
+            </div>
           </div>
           
           {/* Overall Tasks List */}

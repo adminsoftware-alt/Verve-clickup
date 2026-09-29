@@ -33,7 +33,7 @@ def get_timesheet(
     billable: Literal["all", "billable", "non_billable"] = Query("all"),
     tag_ids: List[uuid.UUID] = Query(default_factory=list),
     include_archived: bool = Query(False),
-    tracked_op: Optional[Literal["gt", "lt"]] = Query(None),
+    tracked_op: Optional[Literal["gt", "lt", "gte", "lte", "eq"]] = Query(None),
     tracked_seconds: Optional[int] = Query(None, ge=0),
     sort: Literal["date_added", "name"] = Query("date_added"),
     descending: bool = Query(False),
@@ -219,3 +219,14 @@ def set_approvers(
     approvals.set_approvers(db, _access(db, user, workspace_id), submitter_id, data)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/workspaces/{workspace_id}/timesheet/prefill", response_model=t.PrefillOut)
+def prefill_from_planner(
+    workspace_id: uuid.UUID, day: date = Query(...), tz: str = Query("UTC"), user_id: Optional[str] = Query(None),
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+):
+    """Log the week's finished Planner blocks as time, where nothing is logged for them yet."""
+    out = timesheets.prefill_from_planner(db, Access.for_workspace(db, user.id, workspace_id), user_id, day, tz)
+    db.commit()
+    return out

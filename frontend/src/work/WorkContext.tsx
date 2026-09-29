@@ -12,11 +12,14 @@ export interface LocatedNode {
 }
 
 interface WorkContextValue {
-  /** Your user id in Timetriq. Usually your sign-in id, but not if an admin added you before you first signed in. */
+  /** Your user id in Verve Workflow. Usually your sign-in id, but not if an admin added you before you first signed in. */
   me: string;
   workspace: Workspace | null;
   hierarchy: Hierarchy | null;
+  /** Active members: the people to assign, share with and pick. */
   members: Member[];
+  /** Everyone, including people whose access was turned off (for names in history). */
+  allMembers: Member[];
   teams: Team[];
   taskTypes: TaskType[];
   loading: boolean;
@@ -30,7 +33,7 @@ interface WorkContextValue {
 
 const WorkContext = createContext<WorkContextValue | null>(null);
 
-/** Your user id in Timetriq (see WorkContextValue.me). */
+/** Your user id in Verve Workflow (see WorkContextValue.me). */
 export const useMe = () => useWork().me;
 
 export const useWork = () => {
@@ -66,7 +69,8 @@ export const WorkProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { user } = useAuth();
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [hierarchy, setHierarchy] = useState<Hierarchy | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
+  const [allMembers, setMembers] = useState<Member[]>([]);
+  const members = useMemo(() => allMembers.filter((m) => !m.deactivated), [allMembers]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [taskTypes, setTaskTypes] = useState<TaskType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,7 +92,15 @@ export const WorkProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       setNeedsWorkspace(false);
       const stored = localStorage.getItem(STORAGE_KEY);
-      const current = workspaces.find((w) => w.id === stored) ?? workspaces[0];
+      const usable = workspaces.filter((w) => !w.access_problem);
+      const current = usable.find((w) => w.id === stored) ?? usable[0];
+      if (!current) {
+        // A member everywhere, but turned off or breaking a sign-in rule: say why instead of loading.
+        setWorkspace(null);
+        setHierarchy(null);
+        setError(workspaces[0].access_problem ?? 'You cannot open this workspace.');
+        return;
+      }
       localStorage.setItem(STORAGE_KEY, current.id);
       setWorkspace(current);
       const [tree, people, groups] = await Promise.all([
@@ -106,7 +118,7 @@ export const WorkProvider: React.FC<{ children: React.ReactNode }> = ({ children
         status === 503
           ? 'The work database is not configured on the server yet.'
           : status === 0
-            ? 'Cannot reach the Timetriq server.'
+            ? 'Cannot reach the Verve Workflow server.'
             : (e as Error).message,
       );
     } finally {
@@ -130,8 +142,8 @@ export const WorkProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const meId = me || user?.uid || '';
   const value = useMemo(
-    () => ({ me: meId, workspace, hierarchy, members, teams, taskTypes, loading, error, needsWorkspace, refresh: load, createWorkspace, locate, listName }),
-    [meId, workspace, hierarchy, members, teams, taskTypes, loading, error, needsWorkspace, load, createWorkspace, locate, listName],
+    () => ({ me: meId, workspace, hierarchy, members, allMembers, teams, taskTypes, loading, error, needsWorkspace, refresh: load, createWorkspace, locate, listName }),
+    [meId, workspace, hierarchy, members, allMembers, teams, taskTypes, loading, error, needsWorkspace, load, createWorkspace, locate, listName],
   );
   return <WorkContext.Provider value={value}>{children}</WorkContext.Provider>;
 };

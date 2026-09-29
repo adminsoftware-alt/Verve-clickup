@@ -51,6 +51,16 @@ class SheetTask(BaseModel):
     list_id: Optional[uuid.UUID]
     archived: bool
     can_open: bool
+    # Carried so the timesheet can be filtered the way any other view is -- by who the work is
+    # on, how urgent it is, when it is due -- without a second read per row. All of it is left
+    # empty for a task the viewer cannot open, like the name and the status above.
+    priority: Optional[int] = None
+    assignees: List[UserOut] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
+    start_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    date_done: Optional[datetime] = None
+    time_estimate_seconds: Optional[int] = None
 
 
 class SheetRow(BaseModel):
@@ -146,12 +156,25 @@ class SettingsOut(BaseModel):
     approvals_enabled: bool
     capacity_seconds: List[int]
     can_manage: bool
+    reminders_enabled: bool = True
+    reminder_weekday: int = 4
+    reminder_hour: int = 16
+    reminder_timezone: str = "Asia/Kolkata"
 
 
 class SettingsIn(BaseModel):
     week_start: Optional[int] = Field(default=None, ge=0, le=6)
     approvals_enabled: Optional[bool] = None
     capacity_seconds: Optional[Capacity] = None
+    reminders_enabled: Optional[bool] = None
+    reminder_weekday: Optional[int] = Field(default=None, ge=0, le=6)
+    reminder_hour: Optional[int] = Field(default=None, ge=0, le=23)
+    reminder_timezone: Optional[str] = Field(default=None, max_length=64)
+
+
+class PrefillOut(BaseModel):
+    entries: int
+    seconds: int
 
 
 class CapacityIn(BaseModel):

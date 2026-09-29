@@ -36,7 +36,7 @@ export const FormFill: React.FC<{ viewId: string; preview?: boolean; refreshKey?
       <div className="rounded-xl border border-gray-200 bg-white p-8 text-center" role="status">
         <CheckCircle2 size={36} className="mx-auto text-emerald-500" />
         <p className="mt-3 text-base font-medium text-gray-900">{done}</p>
-        <button type="button" onClick={() => setDone(null)} className="mt-4 text-sm text-indigo-600 hover:underline">Submit another response</button>
+        <button type="button" onClick={() => setDone(null)} className="mt-4 text-sm text-brand-600 hover:underline">Submit another response</button>
       </div>
     );
   }
@@ -71,7 +71,7 @@ export const FormFill: React.FC<{ viewId: string; preview?: boolean; refreshKey?
         ))}
       </div>
       {error && <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      <button type="submit" disabled={preview || !form.active} className="mt-5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+      <button type="submit" disabled={preview || !form.active} className="mt-5 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
         {preview ? 'Submit (preview)' : 'Submit'}
       </button>
     </form>
@@ -153,7 +153,7 @@ export const FormBuilder: React.FC<{ view: View; listId: string; canEdit: boolea
             <label className="block text-xs font-medium text-gray-600">Thank-you message<input aria-label="Thank-you message" value={form.success ?? ''} placeholder="Thanks! Your request has been received." onChange={(e) => setForm({ ...form, success: e.target.value })} className={input} /></label>
             <label className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={form.active !== false} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Taking responses</label>
             <div className="flex items-center gap-3">
-              <button type="button" onClick={save} className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"><Plus size={14} className="hidden" /> Save form</button>
+              <button type="button" onClick={save} className="flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"><Plus size={14} className="hidden" /> Save form</button>
               {note && <span className="text-xs text-emerald-700" role="status">{note}</span>}
             </div>
           </>

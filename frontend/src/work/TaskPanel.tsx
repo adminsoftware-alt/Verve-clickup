@@ -1,11 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, ChevronRight, Lock, Plus, Share2, X } from 'lucide-react';
+import {
+  Archive, CalendarDays, Check, ChevronDown, ChevronRight, CircleDot, Flag, Hourglass, Lock, Plus, Repeat, Share2,
+  Shapes, Tag as TagIcon, Users, X,
+} from 'lucide-react';
 import { useWork, useMe } from './WorkContext';
 import { useAuth } from '../components/AuthContext';
-import { workApi, type Status, type Task, type TaskDetail, type TaskGroup, type TaskInput } from './api';
-import { Avatar, PRIORITIES, Portal, StatusDot, fromDateInput, toDateInput, useEscapeToClose } from './ui';
+import { workApi, type Status, type Task, type TaskDetail, type TaskGroup, type TaskInput, type UserRef } from './api';
+import { Menu, PRIORITIES, Portal, StatusDot, useEscapeToClose } from './ui';
 import { ShareDialog } from './ShareDialog';
 import { TaskTimeSection } from './TaskTimeSection';
+import { AssigneePicker } from './task/AssigneePicker';
 import { rememberTask } from './recent';
 import { RecurrenceEditor } from './RecurrenceEditor';
 import { TaskFeed } from './task/TaskFeed';
@@ -14,18 +18,78 @@ import { FieldEditor, fieldIcon } from './fields/FieldValue';
 import { FieldsDialog } from './fields/FieldsDialog';
 import { RichTextEditor } from './task/RichText';
 import { TaskRelations } from './task/TaskLinks';
+import { Select } from './Select';
+import { DurationInput } from './DurationInput';
+import { FEATURES } from '../config/features';
 import { TaskTypesDialog, TypeIcon } from './LocationSettings';
 import { TaskActions } from './task/TaskActions';
+import { LeaveWarning } from './leave/LeaveWarning';
+import { DateField } from './DateField';
+import { TaskLists, TimeInStatusSection } from './task/TaskMore';
+import { Bar } from './Skeleton';
+import { ask } from '../components/ask';
 
-const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div className="grid grid-cols-[110px_1fr] items-center gap-2 py-1.5">
-    <span className="text-sm text-gray-500">{label}</span>
+/**
+ * One labelled field.
+ *
+ * Ten of these in a single column pushed the description off the screen, and folding the empty
+ * ones away only traded one problem for another: a field you cannot see is a field nobody fills
+ * in. So they go two to a line instead. `wide` is for the ones whose value is a row of chips and
+ * needs the full width -- people and tags.
+ */
+const Field: React.FC<{ label: string; icon?: React.ReactNode; wide?: boolean; children: React.ReactNode }> = ({ label, icon, wide, children }) => (
+  <div className={`group/field grid min-h-[34px] grid-cols-[104px_minmax(0,1fr)] items-center gap-2 rounded-lg px-1.5 transition-colors hover:bg-gray-50 ${wide ? 'md:col-span-2' : ''}`}>
+    <span className="flex items-center gap-1.5 text-[12px] font-medium text-gray-500">
+      {icon && <span className="shrink-0 text-gray-400">{icon}</span>}
+      <span className="truncate">{label}</span>
+    </span>
     <div className="min-w-0">{children}</div>
   </div>
 );
 
+/**
+ * A dropdown drawn by us rather than by the operating system.
+ *
+ * A native <select> renders its open list in the OS, so the status colours and priority flags --
+ * the whole reason these fields are quick to read -- disappear at the moment you are choosing
+ * between them. This keeps them.
+ */
+const Picker: React.FC<{
+  label: string;
+  current: React.ReactNode;
+  disabled?: boolean;
+  items: { key: string; label: string; icon?: React.ReactNode; on: boolean; onPick: () => void }[];
+}> = ({ label, current, disabled, items }) => {
+  if (disabled) return <span className="flex h-7 items-center gap-2 px-2 text-sm">{current}</span>;
+  return (
+    <Menu
+      align="left"
+      label={label}
+      width={230}
+      triggerClassName="flex w-full min-w-0"
+      items={items.map((i) => ({
+        label: i.label,
+        icon: (
+          <span className="flex items-center gap-1.5">
+            {i.on ? <Check size={12} className="text-brand-600" /> : <span className="w-3" />}
+            {i.icon}
+          </span>
+        ),
+        onClick: i.onPick,
+      }))}
+      trigger={
+        <span className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-md border border-transparent px-2 text-sm text-gray-800 hover:border-gray-200 hover:bg-white">
+          <span className="flex min-w-0 flex-1 items-center gap-2 truncate">{current}</span>
+          <ChevronDown size={13} className="shrink-0 text-gray-300 group-hover/field:text-gray-500" />
+        </span>
+      }
+    />
+  );
+};
+
+/** Every control in the panel is the same height and shows its edges only under the pointer. */
 const inputClass =
-  'w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-gray-800 hover:border-gray-200 focus:border-indigo-400 focus:outline-none';
+  'h-7 w-full rounded-md border border-transparent bg-transparent px-2 text-sm text-gray-800 hover:border-gray-200 hover:bg-gray-50 focus:border-brand-400 focus:bg-white focus:outline-none';
 
 export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChanged: () => void; onOpen: (id: string) => void }> = ({
   taskId,
@@ -49,6 +113,9 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
   const [managingFields, setManagingFields] = useState(false);
   const [managingTypes, setManagingTypes] = useState(false);
   const [fieldError, setFieldError] = useState<string | null>(null);
+  // As in ClickUp, only people who can open the List can be given the task.
+  const [timeVersion, setTimeVersion] = useState(0);
+  const [assignable, setAssignable] = useState<UserRef[] | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -63,6 +130,7 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
       setStatuses(set.statuses);
       setGroups(usable);
       setSubtasks(siblings.tasks.filter((x) => x.parent_id === t.id));
+      workApi.assignable('list', t.list_id).then(setAssignable).catch(() => setAssignable(null));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -98,17 +166,19 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
   };
 
   const remove = async () => {
-    if (!task || !window.confirm(`Delete "${task.name}" and its subtasks?`)) return;
+    if (!task || !await ask.confirm({ danger: true, title: `Delete "${task.name}" and its subtasks?` })) return;
     await workApi.deleteTask(task.id);
     onChanged();
     onClose();
   };
 
   const editable = task?.permission_level === 'edit' || task?.permission_level === 'full';
-  const taskType = taskTypes.find((t) => t.id === task?.type_id);
   const assigneeIds = new Set(task?.assignees.map((a) => a.id));
   // As in ClickUp, an assignee with comment access can still change the status.
   const canChangeStatus = editable || (task?.permission_level === 'comment' && !!user && assigneeIds.has(meId));
+  // The Space's ClickApps decide which fields show (missing = the ClickUp default).
+  const apps = hierarchy?.spaces.find((sp) => sp.id === task?.location.space.id)?.clickapps ?? {};
+  const on = (name: keyof typeof apps, fallback = true) => apps[name] ?? fallback;
 
   return (
     <Portal>
@@ -118,10 +188,22 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
         role="dialog"
         aria-label="Task details"
         onMouseDown={(e) => e.stopPropagation()}
-        className="flex h-full w-full max-w-[78rem] flex-col bg-white shadow-2xl"
+        className="flex h-full w-full max-w-[46rem] flex-col bg-white shadow-2xl"
       >
         {!task ? (
-          <div className="p-6 text-sm text-gray-500">{error ?? 'Loading…'}</div>
+          error
+            ? <div className="p-6 text-sm text-red-700">{error}</div>
+            : (
+              <div className="space-y-3 p-6" role="status" aria-label="Loading task">
+                <Bar className="h-6 w-2/3" />
+                {Array.from({ length: 7 }).map((_, i) => (
+                  <div key={i} className="grid grid-cols-[104px_1fr] items-center gap-2 py-1">
+                    <Bar className="h-3 w-20" /><Bar className="h-4 w-52" />
+                  </div>
+                ))}
+                <Bar className="h-24 w-full" />
+              </div>
+            )
         ) : (
           <>
             <header className="flex items-center justify-between border-b border-gray-100 px-6 py-3">
@@ -153,12 +235,12 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
             <div className="flex min-h-0 flex-1">
             <div className="min-w-0 flex-1 overflow-y-auto px-6 py-4">
               <div className="mb-1 flex items-center gap-2">
-                {task.custom_id && (
+                {task.custom_id && on('custom_task_ids') && (
                   <button type="button" title="Copy task ID" onClick={() => navigator.clipboard?.writeText(task.custom_id!)}
                     className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-600 hover:bg-gray-200">{task.custom_id}</button>
                 )}
                 {task.parent_id && (
-                  <button type="button" onClick={() => onOpen(task.parent_id!)} className="text-xs text-indigo-600 hover:underline">
+                  <button type="button" onClick={() => onOpen(task.parent_id!)} className="text-xs text-brand-600 hover:underline">
                     ← Back to parent task
                   </button>
                 )}
@@ -169,86 +251,116 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                 disabled={!editable}
                 onBlur={(e) => e.target.value.trim() && e.target.value !== task.name && save({ name: e.target.value.trim() })}
                 onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-                className="w-full rounded-md border border-transparent px-1 py-1 text-2xl font-semibold text-gray-900 hover:border-gray-200 focus:border-indigo-400 focus:outline-none"
+                className="w-full rounded-md border border-transparent px-1 py-1 text-2xl font-semibold text-gray-900 hover:border-gray-200 focus:border-brand-400 focus:outline-none"
               />
               {error && <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-              <div className="mt-4 grid grid-cols-1 gap-x-8 md:grid-cols-2">
-                <Field label="Status">
-                  <div className="flex items-center gap-2 px-2">
-                    <StatusDot status={task.status} />
-                    <select
-                      value={task.status.id}
-                      disabled={!canChangeStatus}
-                      aria-label="Status"
-                      onChange={(e) => {
-                        const next = statuses.find((st) => st.id === e.target.value);
+              <div className="mt-5 grid grid-cols-1 gap-x-8 gap-y-0.5 md:grid-cols-2">
+                <Field label="Status" icon={<CircleDot size={14} />}>
+                  <Picker
+                    label="Status"
+                    disabled={!canChangeStatus}
+                    current={
+                      <>
+                        <StatusDot status={task.status} />
+                        <span className="truncate text-sm font-medium uppercase tracking-wide text-gray-800">{task.status.name}</span>
+                      </>
+                    }
+                    items={statuses.map((st) => ({
+                      key: st.id,
+                      label: st.name,
+                      icon: <StatusDot status={st} size={11} />,
+                      on: st.id === task.status.id,
+                      onPick: async () => {
                         // Like ClickUp: finishing a task that still waits on others needs a second thought.
-                        if (next && (next.group === 'done' || next.group === 'closed') && (task.waiting_on_open ?? 0) > 0
-                          && !window.confirm(`This task is waiting on ${task.waiting_on_open} unfinished task${task.waiting_on_open === 1 ? '' : 's'}. Mark it ${next.name} anyway?`)) {
-                          e.target.value = task.status.id;
-                          return;
-                        }
-                        save({ status_id: e.target.value });
-                      }}
-                      className="flex-1 bg-transparent text-sm font-medium uppercase text-gray-800 focus:outline-none"
-                    >
-                      {statuses.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
-                    </select>
-                  </div>
-                </Field>
-                <Field label="Priority">
-                  <select
-                    value={task.priority ?? ''}
-                    disabled={!editable}
-                    onChange={(e) => save({ priority: e.target.value ? Number(e.target.value) : null })}
-                    className={inputClass}
-                  >
-                    <option value="">No priority</option>
-                    {Object.entries(PRIORITIES).map(([value, p]) => <option key={value} value={value}>{p.label}</option>)}
-                  </select>
-                </Field>
-                <Field label="Start date">
-                  <input type="date" disabled={!editable} value={toDateInput(task.start_date)} onChange={(e) => save({ start_date: fromDateInput(e.target.value) })} className={inputClass} />
-                </Field>
-                <Field label="Due date">
-                  <input
-                    type="date"
-                    disabled={!editable}
-                    value={toDateInput(task.due_date)}
-                    onChange={(e) => save({ due_date: fromDateInput(e.target.value) })}
-                    className={`${inputClass} ${task.is_overdue ? 'text-red-600' : ''}`}
+                        if ((st.group === 'done' || st.group === 'closed') && (task.waiting_on_open ?? 0) > 0
+                          && !await ask.confirm(`This task is waiting on ${task.waiting_on_open} unfinished task${task.waiting_on_open === 1 ? '' : 's'}. Mark it ${st.name} anyway?`)) return;
+                        save({ status_id: st.id });
+                      },
+                    }))}
                   />
                 </Field>
-                <Field label="Type">
-                  <span className="flex items-center gap-1.5">
-                    {taskType ? <TypeIcon type={taskType} /> : <span className="inline-block h-2.5 w-2.5 rounded-full border border-gray-300" />}
-                    <select
-                      aria-label="Task type"
-                      value={task.type_id ?? ''}
-                      disabled={!editable}
-                      onChange={(e) => { if (e.target.value === '__manage') { setManagingTypes(true); return; } save({ type_id: e.target.value || null }); }}
-                      className={inputClass}
-                    >
-                      <option value="">Task</option>
-                      {taskTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                      {isWorkspaceAdmin && <option value="__manage">Manage task types…</option>}
-                    </select>
-                  </span>
-                </Field>
-                <Field label="Group">
-                  <select
-                    aria-label="Group"
-                    value={task.group?.id ?? ''}
+                {on('priorities') && <Field label="Priority" icon={<Flag size={14} />}>
+                  <Picker
+                    label="Priority"
                     disabled={!editable}
-                    onChange={(e) => save({ group_id: e.target.value || null })}
-                    className={inputClass}
-                  >
-                    <option value="">No group</option>
-                    {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
+                    current={
+                      <>
+                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: task.priority ? PRIORITIES[task.priority].color : '#D1D5DB' }} />
+                        <span className="truncate text-sm" style={{ color: task.priority ? PRIORITIES[task.priority].color : '#9CA3AF' }}>
+                          {task.priority ? PRIORITIES[task.priority].label : 'No priority'}
+                        </span>
+                      </>
+                    }
+                    items={[...Object.entries(PRIORITIES).map(([value, p]) => ({
+                      key: value,
+                      label: p.label,
+                      icon: <span className="h-2 w-2 rounded-full" style={{ backgroundColor: p.color }} />,
+                      on: String(task.priority ?? '') === value,
+                      onPick: () => save({ priority: Number(value) }),
+                    })), {
+                      key: 'none',
+                      label: 'No priority',
+                      icon: <span className="h-2 w-2 rounded-full bg-gray-300" />,
+                      on: task.priority == null,
+                      onPick: () => save({ priority: null }),
+                    }]}
+                  />
+                </Field>}
+                <Field label="Assignees" icon={<Users size={14} />} wide>
+                  <AssigneePicker
+                    listId={task.list_id}
+                    assignees={task.assignees}
+                    assignable={assignable}
+                    editable={editable}
+                    canShare={task.permission_level === 'full'}
+                    multiple={on('multiple_assignees')}
+                    onChange={(ids) => save({ assignees: ids })}
+                    onShared={() => workApi.assignable('list', task.list_id).then(setAssignable).catch(() => undefined)}
+                  />
+                  <LeaveWarning dueDate={task.due_date} assignees={task.assignees} />
                 </Field>
-                <Field label="Repeat">
+                <Field label="Start date" icon={<CalendarDays size={14} />}>
+                  <DateField label="Start date" disabled={!editable} value={task.start_date} onChange={(iso) => save({ start_date: iso })} />
+                </Field>
+                <Field label="Due date" icon={<CalendarDays size={14} />}>
+                  <DateField label="Due date" disabled={!editable} value={task.due_date} overdue={task.is_overdue} onChange={(iso) => save({ due_date: iso })} />
+                </Field>
+                {on('time_estimates') && <Field label="Time estimate" icon={<Hourglass size={14} />}>
+                  <DurationInput
+                    key={task.id + String(task.time_estimate_seconds)}
+                    label="Time estimate"
+                    value={task.time_estimate_seconds}
+                    disabled={!editable}
+                    placeholder="3, 2.30, 45m"
+                    onChange={(seconds) => { if (seconds !== task.time_estimate_seconds) save({ time_estimate_seconds: seconds }); }}
+                  />
+                </Field>}
+                <Field label="Type" icon={<Shapes size={14} />}>
+                  <Select
+                    label="Task type"
+                    variant="bare"
+                    disabled={!editable}
+                    value={task.type_id ?? ''}
+                    onChange={(v) => { if (v === '__manage') { setManagingTypes(true); return; } save({ type_id: v || null }); }}
+                    choices={[
+                      { value: '', label: 'Task', icon: <span className="inline-block h-2.5 w-2.5 rounded-full border border-gray-300" /> },
+                      ...taskTypes.map((t) => ({ value: t.id, label: t.name, icon: <TypeIcon type={t} /> })),
+                      ...(isWorkspaceAdmin ? [{ value: '__manage', label: 'Manage task types…' }] : []),
+                    ]}
+                  />
+                </Field>
+                <Field label="Group" icon={<Users size={14} />}>
+                  <Select
+                    label="Group"
+                    variant="bare"
+                    disabled={!editable}
+                    value={task.group?.id ?? ''}
+                    onChange={(v) => save({ group_id: v || null })}
+                    choices={[{ value: '', label: 'No group' }, ...groups.map((g) => ({ value: g.id, label: g.name }))]}
+                  />
+                </Field>
+                <Field label="Repeat" icon={<Repeat size={14} />}>
                   <RecurrenceEditor
                     value={task.recurrence}
                     dueDate={task.due_date}
@@ -260,82 +372,55 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                     }}
                   />
                 </Field>
-                <Field label="Time estimate">
-                  <div className="flex items-center gap-1">
+                {on('sprint_points', false) && (
+                  <Field label="Sprint points">
                     <input
-                      key={task.id + String(task.time_estimate_seconds)}
-                      type="number"
-                      min={0}
-                      step={0.25}
-                      disabled={!editable}
-                      placeholder="—"
-                      defaultValue={task.time_estimate_seconds != null ? task.time_estimate_seconds / 3600 : ''}
-                      onBlur={(e) => {
-                        const hours = e.target.value === '' ? null : Math.round(Number(e.target.value) * 3600);
-                        if (hours !== task.time_estimate_seconds) save({ time_estimate_seconds: hours });
-                      }}
+                      key={task.id + String(task.points)}
+                      type="number" min={0} step={0.5} aria-label="Sprint points" disabled={!editable} placeholder="—"
+                      defaultValue={task.points ?? ''}
+                      onBlur={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); if (v !== (task.points ?? null)) save({ points: v }); }}
                       className={inputClass}
                     />
-                    <span className="text-sm text-gray-400">h</span>
+                  </Field>
+                )}
+                {on('tags') && <Field label="Tags" icon={<TagIcon size={14} />} wide>
+                  <div className="flex flex-wrap items-center gap-1.5 px-2">
+                    {task.tags.map((tag) => (
+                      <span key={tag.id} className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: tag.bg_color, color: tag.fg_color }}>
+                        {tag.name}
+                        {editable && (
+                          <button type="button" onClick={() => save({ tags: task.tags.filter((t) => t.id !== tag.id).map((t) => t.name) })}>
+                            <X size={11} />
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                    {editable && (
+                      <form onSubmit={(e) => { e.preventDefault(); if (tagDraft.trim()) { save({ tags: [...task.tags.map((t) => t.name), tagDraft.trim()] }); setTagDraft(''); } }}>
+                        <input value={tagDraft} onChange={(e) => setTagDraft(e.target.value)} placeholder="Add tag" className="w-24 rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-xs focus:outline-none" />
+                      </form>
+                    )}
                   </div>
-                </Field>
+                </Field>}
               </div>
 
-              <Field label="Assignees">
-                <div className="flex flex-wrap gap-1.5 px-2">
-                  {members.map((m) => {
-                    const on = assigneeIds.has(m.user.id);
-                    return (
-                      <button
-                        key={m.user.id}
-                        type="button"
-                        disabled={!editable}
-                        onClick={() => save({ assignees: on ? task.assignees.filter((a) => a.id !== m.user.id).map((a) => a.id) : [...assigneeIds, m.user.id] })}
-                        className={`flex items-center gap-1.5 rounded-full border py-0.5 pl-0.5 pr-2 text-xs ${on ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}
-                      >
-                        <Avatar user={m.user} size={20} />
-                        {m.user.display_name || m.user.email}
-                      </button>
-                    );
-                  })}
-                </div>
-              </Field>
-
-              <Field label="Tags">
-                <div className="flex flex-wrap items-center gap-1.5 px-2">
-                  {task.tags.map((tag) => (
-                    <span key={tag.id} className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: tag.bg_color, color: tag.fg_color }}>
-                      {tag.name}
-                      {editable && (
-                        <button type="button" onClick={() => save({ tags: task.tags.filter((t) => t.id !== tag.id).map((t) => t.name) })}>
-                          <X size={11} />
-                        </button>
-                      )}
-                    </span>
-                  ))}
-                  {editable && (
-                    <form onSubmit={(e) => { e.preventDefault(); if (tagDraft.trim()) { save({ tags: [...task.tags.map((t) => t.name), tagDraft.trim()] }); setTagDraft(''); } }}>
-                      <input value={tagDraft} onChange={(e) => setTagDraft(e.target.value)} placeholder="Add tag" className="w-24 rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-xs focus:outline-none" />
-                    </form>
-                  )}
-                </div>
-              </Field>
+              <TaskLists taskId={task.id} isSubtask={!!task.parent_id} editable={editable} enabled={on('multiple_lists')} onChanged={() => { load(); onChanged(); }} />
 
               {((task.fields?.length ?? 0) > 0 || editable) && (
-                <section className="mt-5" aria-label="Custom fields">
+                <section className="mt-4 border-t border-gray-100 pt-3" aria-label="Custom fields">
                   <div className="mb-1 flex items-center gap-2">
-                    <h4 className="text-sm font-semibold text-gray-700">Custom fields</h4>
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Custom fields</h4>
                     {editable && (
-                      <button type="button" onClick={() => setManagingFields(true)} className="ml-auto rounded px-1.5 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50">
-                        {task.fields?.length ? 'Manage fields' : '+ Add a field'}
+                      <button type="button" onClick={() => setManagingFields(true)} className="ml-auto rounded px-1.5 py-0.5 text-xs font-medium text-brand-600 hover:bg-brand-50">
+                        {task.fields?.length ? 'Manage' : '+ Add a field'}
                       </button>
                     )}
                   </div>
                   {fieldError && <p className="mb-1 rounded bg-red-50 px-2 py-1 text-xs text-red-700">{fieldError}</p>}
-                  <div className="rounded-lg border border-gray-200">
+                  <div className="grid grid-cols-1 gap-x-8 gap-y-0.5 md:grid-cols-2">
                     {(task.fields ?? []).map((f) => (
-                      <div key={f.id} className="grid grid-cols-[150px_1fr] items-center gap-2 border-b border-gray-100 px-3 py-1 last:border-b-0">
-                        <span className="flex min-w-0 items-center gap-1.5 text-sm text-gray-500"><span className="text-gray-400">{fieldIcon(f.type)}</span><span className="truncate">{f.name}</span></span>
+                      <div key={f.id} className="grid min-h-[34px] grid-cols-[104px_minmax(0,1fr)] items-center gap-2 rounded-lg px-1.5 transition-colors hover:bg-gray-50">
+                        <span className="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-gray-500"><span className="text-gray-400">{fieldIcon(f.type)}</span><span className="truncate">{f.name}</span></span>
                         <FieldEditor field={f} value={task.custom_fields?.[f.id]} people={members.map((m) => m.user)} disabled={!editable}
                           onChange={async (value) => {
                             setFieldError(null);
@@ -347,20 +432,28 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                           }} />
                       </div>
                     ))}
-                    {(task.fields?.length ?? 0) === 0 && <p className="px-3 py-2 text-xs text-gray-400">Track extra details on tasks here, like client tier or fee.</p>}
+                    {(task.fields?.length ?? 0) === 0 && <p className="px-1.5 py-1 text-xs text-gray-400">Extra details this Space files work by, like client tier or fee.</p>}
                   </div>
                 </section>
               )}
 
-              <div className="mt-5">
-                <h4 className="mb-1.5 text-sm font-semibold text-gray-700">Description</h4>
+              <div className="mt-4 border-t border-gray-100 pt-3">
+                <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">Description</h4>
                 <RichTextEditor key={task.id} value={task.description ?? ''} disabled={!editable} onSave={(text) => save({ description: text || null })} />
               </div>
 
-              <TaskTimeSection taskId={task.id} canTrack={editable} onChanged={onChanged} />
+              {on('time_tracking') && (
+                <TaskTimeSection
+                  key={timeVersion}
+                  taskId={task.id}
+                  canTrack={editable}
+                  onChanged={() => { setTimeVersion((v) => v + 1); load(); onChanged(); }}
+                />
+              )}
+              <TimeInStatusSection taskId={task.id} refreshKey={feedKey} />
 
-              <div className="mt-5">
-                <h4 className="mb-1.5 text-sm font-semibold text-gray-700">Subtasks {subtasks.length > 0 && <span className="font-normal text-gray-400">{subtasks.length}</span>}</h4>
+              <div className="mt-4 border-t border-gray-100 pt-3">
+                <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">Subtasks {subtasks.length > 0 && <span className="text-gray-400">{subtasks.length}</span>}</h4>
                 <div className="divide-y divide-gray-100 rounded-md border border-gray-200">
                   {subtasks.map((sub) => (
                     <button key={sub.id} type="button" onClick={() => onOpen(sub.id)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50">
@@ -377,16 +470,17 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                 </div>
               </div>
 
-              <TaskRelations task={task} editable={editable} onChanged={() => { load(); setFeedKey((k) => k + 1); onChanged(); }} />
+              {/* Dependencies and links still work and still block a status change; they are
+                  just not a section on the panel. */}
+              {FEATURES.taskRelationships && (
+                <TaskRelations task={task} editable={editable} onChanged={() => { load(); setFeedKey((k) => k + 1); onChanged(); }} />
+              )}
               <Checklists taskId={task.id} editable={editable} me={meId} onChanged={() => { load(); setFeedKey((k) => k + 1); onChanged(); }} />
               <Attachments taskId={task.id} canAttach={task.permission_level !== 'view'} isFull={task.permission_level === 'full'} me={meId}
                 onChanged={() => { setFeedKey((k) => k + 1); onChanged(); }} />
-              <div className="mt-5 h-[28rem] overflow-hidden rounded-lg border border-gray-200 lg:hidden">
+              <div className="mt-5 h-[26rem] overflow-hidden rounded-lg border border-gray-200">
                 <TaskFeed taskId={task.id} canComment={task.permission_level !== 'view'} refreshKey={feedKey} onChanged={onChanged} />
               </div>
-            </div>
-            <div className="hidden w-[24rem] shrink-0 border-l border-gray-200 lg:block">
-              <TaskFeed taskId={task.id} canComment={task.permission_level !== 'view'} refreshKey={feedKey} onChanged={onChanged} />
             </div>
             </div>
           </>

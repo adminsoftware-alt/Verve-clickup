@@ -24,6 +24,7 @@ def _save_route(path: str, kind: TemplateKind) -> None:
 _save_route("/tasks/{obj_id}", TemplateKind.task)
 _save_route("/lists/{obj_id}", TemplateKind.list)
 _save_route("/folders/{obj_id}", TemplateKind.folder)
+_save_route("/spaces/{obj_id}", TemplateKind.space)
 
 
 @router.get("/workspaces/{workspace_id}/templates", response_model=List[s.TemplateOut])

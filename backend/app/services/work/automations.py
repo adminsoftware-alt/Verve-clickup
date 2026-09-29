@@ -10,9 +10,9 @@ A rule only acts while the person who made it can still manage the location it's
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -87,18 +87,59 @@ def list_rules(db: Session, opened: Opened) -> List[p.AutomationOut]:
     return [_out(r, users, opened.obj) for r in rules]
 
 
+def _conditions(db: Session, access: Access, raw: Any) -> Dict[str, Any]:
+    """Optional "only if" filters: priorities, tags (any of), assignees (any of)."""
+    if not raw:
+        return {}
+    if not isinstance(raw, dict):
+        raise Invalid("Conditions must be a set of filters")
+    out: Dict[str, Any] = {}
+    pr = raw.get("priorities") or []
+    if pr:
+        if not all(p in (0, 1, 2, 3, 4) for p in pr):
+            raise Invalid("Priorities are 1 (urgent) to 4 (low), or 0 for none")
+        out["priorities"] = sorted(set(pr))
+    tags = [str(t).strip()[:64] for t in (raw.get("tags") or []) if str(t).strip()]
+    if tags:
+        out["tags"] = sorted(set(tags), key=str.lower)[:20]
+    people = [str(u) for u in (raw.get("assignees") or [])]
+    if people:
+        known = set(db.scalars(select(WorkspaceMember.user_id).where(
+            WorkspaceMember.workspace_id == access.workspace_id, WorkspaceMember.user_id.in_(people))))
+        if set(people) - known:
+            raise Invalid("Everyone in the conditions must be a member of this workspace")
+        out["assignees"] = sorted(set(people))
+    return out
+
+
 def _check(db: Session, access: Access, obj: Location, trigger: str, trigger_config: Dict[str, Any],
            action: str, action_config: Dict[str, Any]) -> tuple:
     """Validate a rule's settings and return them cleaned."""
     tcfg: Dict[str, Any] = {}
+    trigger_config = dict(trigger_config or {})
+    conditions = _conditions(db, access, trigger_config.pop("conditions", None))
     if trigger == "status_changed":
         name = str(trigger_config.get("status") or "").strip()
         if len(name) > 100:
             raise Invalid("Status name is too long")
         if name:
             tcfg["status"] = name
+    elif trigger in ("due_soon", "overdue"):
+        key = "days_before" if trigger == "due_soon" else "days_after"
+        days = trigger_config.get(key, 1 if trigger == "due_soon" else 0)
+        if not isinstance(days, int) or not 0 <= days <= 60:
+            raise Invalid("Choose 0 to 60 days")
+        tcfg[key] = days
+    elif trigger == "priority_changed":
+        pr = trigger_config.get("priority")
+        if pr is not None:
+            if pr not in (1, 2, 3, 4):
+                raise Invalid("Pick a priority")
+            tcfg["priority"] = pr
     elif trigger_config:
-        raise Invalid("\"When a task is created\" has no settings")
+        raise Invalid("This trigger has no settings")
+    if conditions:
+        tcfg["conditions"] = conditions
     acfg: Dict[str, Any] = {}
     if action in ("assign", "notify"):
         ids = action_config.get("user_ids")
@@ -123,6 +164,19 @@ def _check(db: Session, access: Access, obj: Location, trigger: str, trigger_con
         acfg["status_name"] = name
         if trigger == "status_changed" and tcfg.get("status", "").lower() == name.lower():
             raise Invalid("A rule can't set the status that sets it off")
+    elif action == "escalate":
+        levels = action_config.get("levels", 1)
+        if levels not in (1, 2):
+            raise Invalid("Escalate to the manager (1) or also the manager above (2)")
+        acfg["levels"] = levels
+        message = str(action_config.get("message") or "").strip()
+        if message:
+            acfg["message"] = message[:300]
+    elif action == "add_tag":
+        tag = str(action_config.get("tag") or "").strip()
+        if not tag or len(tag) > 64:
+            raise Invalid("Name the tag to add")
+        acfg["tag"] = tag
     return tcfg, acfg
 
 
@@ -139,6 +193,9 @@ def add_rule(db: Session, opened: Opened, data: p.AutomationIn) -> p.AutomationO
                       action_config=acfg, active=data.active, created_by=access.user_id, **{f"{kind}_id": obj.id})
     db.add(rule)
     db.flush()
+    from app.services.work import audit
+
+    audit.record(db, access.workspace_id, access.user_id, "automation.created", kind, obj.id, obj.name, {"rule": describe(rule)})
     return _out(rule, _users(db, [access.user_id]), obj)
 
 
@@ -176,7 +233,11 @@ def update_rule(db: Session, user_id: str, rule_id: uuid.UUID, data: p.Automatio
 
 
 def remove_rule(db: Session, user_id: str, rule_id: uuid.UUID) -> None:
-    rule, _ = open_rule(db, user_id, rule_id)
+    rule, opened = open_rule(db, user_id, rule_id)
+    from app.services.work import audit
+
+    audit.record(db, opened.access.workspace_id, user_id, "automation.deleted", _kind(opened.obj), opened.obj.id, opened.obj.name,
+                 {"rule": describe(rule)})
     db.delete(rule)
     db.flush()
 
@@ -192,7 +253,29 @@ def _matches(rule: Automation, kind: str, data: Dict[str, Any]) -> bool:
     if kind == "status" and rule.trigger == "status_changed":
         wanted = rule.trigger_config.get("status")
         return not wanted or str(data.get("to") or "").lower() == wanted.lower()
+    if kind == "priority" and rule.trigger == "priority_changed":
+        wanted = rule.trigger_config.get("priority")
+        return wanted is None or data.get("to") == wanted
+    if kind == "assignees" and rule.trigger == "assignee_added":
+        return bool(data.get("added"))
     return False
+
+
+def _conditions_met(db: Session, rule: Automation, task: Task) -> bool:
+    from app.db.models import Tag, TaskTag
+
+    cond = rule.trigger_config.get("conditions") or {}
+    if cond.get("priorities") and (task.priority or 0) not in cond["priorities"]:
+        return False
+    if cond.get("tags"):
+        names = {n.lower() for n in db.scalars(select(Tag.name).join(TaskTag, TaskTag.tag_id == Tag.id).where(TaskTag.task_id == task.id))}
+        if not names & {t.lower() for t in cond["tags"]}:
+            return False
+    if cond.get("assignees"):
+        people = set(db.scalars(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)))
+        if not people & set(cond["assignees"]):
+            return False
+    return True
 
 
 def _creator_can_manage(db: Session, rule: Automation, workspace_id: uuid.UUID) -> bool:
@@ -218,7 +301,7 @@ def _creator_can_manage(db: Session, rule: Automation, workspace_id: uuid.UUID) 
 
 def fire(db: Session, task: Task, kind: str, data: Dict[str, Any]) -> None:
     """Called for every task event; runs the rules that match it."""
-    if kind not in ("created", "status"):
+    if kind not in ("created", "status", "priority", "assignees"):
         return
     chain: List[uuid.UUID] = db.info.get(_CHAIN_KEY, [])
     if len(chain) >= MAX_DEPTH:
@@ -226,7 +309,7 @@ def fire(db: Session, task: Task, kind: str, data: Dict[str, Any]) -> None:
     lst = db.get(TaskList, task.list_id)
     if lst is None:
         return
-    rules = [r for r in _rules_for(db, lst) if r.id not in chain and _matches(r, kind, data)]
+    rules = [r for r in _rules_for(db, lst) if r.id not in chain and _matches(r, kind, data) and _conditions_met(db, r, task)]
     if not rules:
         return
     workspace_id = db.get(Space, lst.space_id).workspace_id
@@ -285,19 +368,129 @@ def _run(db: Session, rule: Automation, task: Task, lst: TaskList, workspace_id:
         apply_group_transition(task, old.group if old else None, target.group)
         db.flush()
         events.record(db, task, None, "status", {"from": old.name if old else None, "to": target.name, "color": target.color, **_by(rule)})
+    elif rule.action == "escalate":
+        _escalate(db, rule, task, workspace_id)
+    elif rule.action == "add_tag":
+        from app.db.models import Tag, TaskTag
+
+        tag = db.scalars(select(Tag).where(Tag.space_id == lst.space_id, func.lower(Tag.name) == cfg["tag"].lower())).first()
+        if tag is None:
+            tag = Tag(space_id=lst.space_id, name=cfg["tag"], fg_color="#ffffff", bg_color="#6366f1")
+            db.add(tag)
+            db.flush()
+        if db.get(TaskTag, (task.id, tag.id)) is None:
+            db.add(TaskTag(task_id=task.id, tag_id=tag.id))
+            db.flush()
+            events.record(db, task, None, "tags", {"added": [tag.name], "removed": [], **_by(rule)})
+
+
+def _escalate(db: Session, rule: Automation, task: Task, workspace_id: uuid.UUID) -> None:
+    """Tell the assignees' reporting managers (and, at level 2, their managers too). Unassigned: the rule's owner."""
+    assignees = list(db.scalars(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)))
+    managers: List[str] = []
+    for uid in assignees:
+        step = uid
+        for _ in range(rule.action_config.get("levels", 1)):
+            member = db.get(WorkspaceMember, (workspace_id, step))
+            if member is None or not member.manager_id:
+                break
+            step = member.manager_id
+            managers.append(step)
+    if not assignees and rule.created_by:
+        managers.append(rule.created_by)
+    events.notify(db, workspace_id, list(dict.fromkeys(managers)), None, "escalation", "primary", task=task, data={
+        "rule": describe(rule), "message": rule.action_config.get("message"), "assignees": assignees, **_by(rule),
+    })
+
+
+# --- scheduled rules: due soon, overdue ------------------------------------------------------------------------
+
+
+def _lists_of(db: Session, rule: Automation) -> List[uuid.UUID]:
+    if rule.list_id:
+        return [rule.list_id]
+    if rule.space_id:
+        return list(db.scalars(select(TaskList.id).where(TaskList.space_id == rule.space_id)))
+    folders = [rule.folder_id] + list(db.scalars(select(Folder.id).where(Folder.parent_folder_id == rule.folder_id)))
+    return list(db.scalars(select(TaskList.id).where(TaskList.folder_id.in_(folders))))
+
+
+def run_scheduled(db: Session, now: Optional[datetime] = None) -> int:
+    """Fire "due soon" and "overdue" rules for open tasks, once per rule, task and due date."""
+    from datetime import timedelta
+
+    from app.db.models import AutomationRun, Status, StatusGroup
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    now = now or datetime.now(timezone.utc)
+    fired = 0
+    for rule in db.scalars(select(Automation).where(Automation.active.is_(True), Automation.trigger.in_(("due_soon", "overdue")))):
+        workspace_id = rule.workspace_id
+        if not _creator_can_manage(db, rule, workspace_id):
+            continue
+        if rule.trigger == "due_soon":
+            ahead = timedelta(days=rule.trigger_config.get("days_before", 1))
+            window = (Task.due_date > now, Task.due_date <= now + ahead)
+        else:
+            late = timedelta(days=rule.trigger_config.get("days_after", 0))
+            window = (Task.due_date <= now - late,)
+        lists = _lists_of(db, rule)
+        if not lists:
+            continue
+        tasks = list(db.scalars(
+            select(Task).join(Status, Status.id == Task.status_id)
+            .where(Task.list_id.in_(lists), Task.archived_at.is_(None), Task.due_date.is_not(None),
+                   Status.group.in_([StatusGroup.not_started, StatusGroup.active]), *window)
+            .limit(500)
+        ))
+        for task in tasks:
+            if not _conditions_met(db, rule, task):
+                continue
+            key = task.due_date.isoformat()[:32]
+            # RETURNING tells a fresh insert from a skipped one (rowcount can't be relied on here).
+            inserted = db.execute(pg_insert(AutomationRun).values(id=uuid.uuid4(), rule_id=rule.id, task_id=task.id, key=key)
+                                  .on_conflict_do_nothing(constraint="uq_automation_runs_once").returning(AutomationRun.id)).scalar()
+            if not inserted:
+                continue
+            lst = db.get(TaskList, task.list_id)
+            db.info[_CHAIN_KEY] = [rule.id]
+            try:
+                _run(db, rule, task, lst, workspace_id)
+            finally:
+                db.info[_CHAIN_KEY] = []
+            rule.last_run_at = now
+            rule.run_count += 1
+            fired += 1
+    db.flush()
+    return fired
 
 
 PRIORITY_NAMES = {1: "Urgent", 2: "High", 3: "Normal", 4: "Low"}
 
 
 def describe(rule: Automation) -> str:
-    when = "When a task is created" if rule.trigger == "task_created" else (
-        f"When status changes to {rule.trigger_config['status']}" if rule.trigger_config.get("status") else "When status changes")
+    t = rule.trigger_config
+    if rule.trigger == "task_created":
+        when = "When a task is created"
+    elif rule.trigger == "status_changed":
+        when = f"When status changes to {t['status']}" if t.get("status") else "When status changes"
+    elif rule.trigger == "due_soon":
+        days = t.get("days_before", 1)
+        when = "On the due date" if days == 0 else f"{days} day{'s' if days != 1 else ''} before the due date"
+    elif rule.trigger == "overdue":
+        days = t.get("days_after", 0)
+        when = "When a task becomes overdue" if days == 0 else f"When a task is {days} day{'s' if days != 1 else ''} overdue"
+    elif rule.trigger == "priority_changed":
+        when = f"When priority changes to {PRIORITY_NAMES.get(t['priority'])}" if t.get("priority") else "When priority changes"
+    else:
+        when = "When someone is assigned"
     cfg = rule.action_config
     do = {
         "assign": "assign it",
         "notify": "notify people",
         "set_priority": f"set priority to {PRIORITY_NAMES.get(cfg.get('priority'), '')}",
         "set_status": f"move it to {cfg.get('status_name')}",
+        "escalate": "tell the assignees' managers" + (" and the managers above them" if cfg.get("levels") == 2 else ""),
+        "add_tag": f"add the tag {cfg.get('tag')}",
     }[rule.action]
     return f"{when}, {do}"

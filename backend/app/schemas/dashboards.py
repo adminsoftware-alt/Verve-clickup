@@ -11,10 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 from app.db.models import LocationKind, StatusGroup
 from app.schemas.work import Name, ShareOut, TeamRef, UserOut
 
-CardType = Literal["calculation", "pie", "bar", "line", "task_list", "time_report", "timesheet", "portfolio", "behind", "completed", "notes", "discussion", "embed"]
-TASK_CARDS = ("calculation", "pie", "bar", "line", "task_list", "portfolio", "behind", "completed")
-TIME_CARDS = ("time_report", "timesheet")
-Template = Literal["blank", "simple", "vapl_review", "time_tracking"]
+CardType = Literal[
+    "calculation", "pie", "bar", "line", "task_list", "time_report", "timesheet", "portfolio", "behind", "completed",
+    "notes", "discussion", "embed", "worked_on", "battery", "goal", "sprint", "capacity", "variance",
+    "plan",
+]
+TASK_CARDS = ("calculation", "pie", "bar", "line", "task_list", "portfolio", "behind", "completed", "worked_on", "battery", "plan")
+TIME_CARDS = ("time_report", "timesheet", "capacity", "variance")
+Template = Literal["blank", "simple", "vapl_review", "time_tracking", "monthly_review"]
 DashboardLevel = Literal["view", "edit", "full"]
 Relation = Literal["mine", "team", "shared", "my_team", "everyone", "location"]
 
@@ -33,7 +37,7 @@ class Source(BaseModel):
 
 PeriodPreset = Literal[
     "today", "yesterday", "this_week", "last_week", "this_month", "last_month",
-    "last_7_days", "last_30_days", "this_year", "custom",
+    "last_7_days", "last_30_days", "this_quarter", "last_quarter", "this_year", "custom",
 ]
 
 
@@ -64,10 +68,11 @@ class Filters(BaseModel):
     status_groups: Optional[List[StatusGroup]] = None
     priorities: Optional[List[Annotated[int, Field(ge=0, le=4)]]] = None  # 0 = no priority
     tags: Optional[List[str]] = None
-    due: Optional[Literal["overdue", "today", "this_week", "next_7_days", "none", "set"]] = None
+    # "period" means "inside the card's own period", so one control can re-scope the card.
+    due: Optional[Literal["overdue", "today", "this_week", "next_7_days", "none", "set", "period"]] = None
     estimate: Optional[Literal["set", "missing"]] = None
     scheduled: Optional[Literal["yes", "no"]] = None
-    done: Optional[Literal["today", "this_week", "this_month", "last_7_days", "last_30_days"]] = None
+    done: Optional[Literal["today", "this_week", "this_month", "last_7_days", "last_30_days", "period"]] = None
 
     @field_validator("assignees")
     @classmethod
@@ -89,14 +94,27 @@ class CardConfig(BaseModel):
     include_closed: bool = False
     filters: Filters = Field(default_factory=Filters)
 
-    # calculation / pie / bar
-    measure: Literal["tasks", "time_estimate", "time_tracked"] = "tasks"
+    # calculation / pie / bar.
+    # Either a built-in, or "custom:<field id>" for one of the Space's own fields -- the whole
+    # point of defining "Review Month" or "Fee" is being able to report on it.
+    measure: str = "tasks"
     fn: Literal["count", "sum", "avg", "min", "max"] = "count"
     unit: Optional[Annotated[str, StringConstraints(max_length=12)]] = None
-    group_by: Literal[
-        "status", "status_group", "assignee", "priority", "tag", "list",
-        "done_date", "created_date", "due_date",
-    ] = "status"
+    group_by: str = "status"
+
+    @field_validator("group_by")
+    @classmethod
+    def _known_group(cls, value: str) -> str:
+        if value in BUILT_IN_GROUPS or _field_id(value) is not None:
+            return value
+        raise ValueError(f"Cannot group by {value}")
+
+    @field_validator("measure")
+    @classmethod
+    def _known_measure(cls, value: str) -> str:
+        if value in BUILT_IN_MEASURES or _field_id(value) is not None:
+            return value
+        raise ValueError(f"Cannot measure {value}")
     interval: Literal["day", "week", "month"] = "day"
     donut: bool = True
 
@@ -119,8 +137,29 @@ class CardConfig(BaseModel):
     # embed: a web page, Google Sheet, video… shown inside the card
     url: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)]] = None
 
+    # goal: which goals to show
+    goal_ids: List[uuid.UUID] = Field(default_factory=list, max_length=30)
+    # sprint: the Sprint Folder whose current sprint to show
+    folder_id: Optional[uuid.UUID] = None
+
 
 DATE_GROUPS = ("done_date", "created_date", "due_date")
+BUILT_IN_GROUPS = ("status", "status_group", "assignee", "priority", "tag", "list") + DATE_GROUPS
+BUILT_IN_MEASURES = ("tasks", "time_estimate", "time_tracked")
+
+
+def _field_id(value: str) -> Optional[uuid.UUID]:
+    """The custom field a "custom:<id>" reference points at, or None if it is not one."""
+    if not value.startswith("custom:"):
+        return None
+    try:
+        return uuid.UUID(value[len("custom:"):])
+    except ValueError:
+        return None
+
+
+def field_id(value: str) -> Optional[uuid.UUID]:
+    return _field_id(value)
 
 
 def check_card(card_type: str, config: CardConfig) -> None:
@@ -136,6 +175,10 @@ def check_card(card_type: str, config: CardConfig) -> None:
         raise ValueError("Line charts show a trend over time: group by date completed, created or due")
     if card_type == "embed" and config.url and not re.match(r"^https://", config.url, re.IGNORECASE):
         raise ValueError("Embeds must be https:// links")
+    if card_type == "goal" and not config.goal_ids:
+        raise ValueError("Pick at least one goal")
+    if card_type == "sprint" and not config.folder_id:
+        raise ValueError("Pick a Sprint Folder")
 
 
 class CardCreate(BaseModel):
@@ -209,6 +252,9 @@ class Repoint(BaseModel):
 class DashboardSummary(BaseModel):
     id: uuid.UUID
     name: str
+    # "my_work", "team" or "company" when this is one of the Dashboards made for people
+    # automatically; None when someone built it themselves.
+    standard: Optional[Literal["my_work", "team", "company"]] = None
     owner: Optional[UserOut]
     team: Optional[TeamRef]
     your_level: DashboardLevel
