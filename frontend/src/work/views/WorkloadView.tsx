@@ -97,7 +97,7 @@ export const WorkloadView: React.FC<{
             <div className="grid border-b border-gray-200 bg-gray-50 text-xs font-medium text-gray-500" style={grid} role="row">
               <div className="px-3 py-2">Person</div>
               {dates.map((d) => (
-                <div key={d.toISOString()} className={`px-1 py-2 text-center ${[0, 6].includes(d.getDay()) ? 'bg-gray-100' : ''} ${isoDate(d) === today ? 'text-indigo-600' : ''}`}>
+                <div key={d.toISOString()} className={`px-1 py-2 text-center ${[0, 6].includes(d.getDay()) ? 'bg-gray-100' : ''} ${isoDate(d) === today ? 'text-brand-600' : ''}`}>
                   {d.toLocaleDateString(undefined, { weekday: 'short' })} {d.getDate()}
                 </div>
               ))}

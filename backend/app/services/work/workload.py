@@ -99,6 +99,94 @@ def _people_who_can_see(db: Session, location, workspace_id: uuid.UUID) -> List[
     return people
 
 
+def my_workload(
+    db: Session,
+    access: Access,
+    start: date,
+    days: int,
+    tz_offset_minutes: int = 0,
+) -> s.WorkloadOut:
+    """One person's own week, across every List they can open.
+
+    Same rules as the location Workload -- an estimate spread over the working days it spans,
+    only open work, capacity from the work schedule -- but gathered workspace-wide and narrowed
+    to the viewer, because "my week" is not a property of any one Space.
+    """
+    from app.services.work.load import _all_lists  # same visibility rules as everywhere else
+
+    if days < 1 or days > MAX_DAYS:
+        raise Invalid(f"Workload covers 1 to {MAX_DAYS} days")
+    tz = timezone(timedelta(minutes=-tz_offset_minutes))
+    window = [start + timedelta(days=i) for i in range(days)]
+    window_start = datetime.combine(window[0], time(), tz)
+    window_end = datetime.combine(window[-1] + timedelta(days=1), time(), tz)
+
+    lists = _all_lists(db, access)
+    tasks, _, groups = visible_tasks(db, access, lists, TaskFilter())
+    open_tasks = [t for t in tasks if groups[t.id] in OPEN_GROUPS]
+    statuses = {
+        st.id: st for st in db.scalars(select(Status).where(Status.id.in_({t.status_id for t in open_tasks})))
+    } if open_tasks else {}
+
+    mine: Set[uuid.UUID] = set()
+    if open_tasks:
+        mine = set(db.scalars(
+            select(TaskAssignee.task_id).where(
+                TaskAssignee.task_id.in_([t.id for t in open_tasks]),
+                TaskAssignee.user_id == access.user_id,
+            )
+        ))
+
+    scheduled = [0] * days
+    row_tasks: List[s.WorkloadTask] = []
+    unscheduled: List[Task] = []
+    no_estimate: List[Task] = []
+    for task in open_tasks:
+        if task.id not in mine:
+            continue
+        begins = task.start_date or task.due_date
+        ends = task.due_date or task.start_date
+        if begins is None or ends is None:
+            unscheduled.append(task)
+            continue
+        if begins >= window_end or ends < window_start:
+            continue  # entirely outside the window
+        if task.time_estimate_seconds is None:
+            no_estimate.append(task)
+            continue
+        per_day = spread(task.time_estimate_seconds, _local_date(begins, tz), _local_date(ends, tz))
+        seconds = [per_day.get(d, 0) for d in window]
+        if not any(seconds):
+            continue
+        for i, value in enumerate(seconds):
+            scheduled[i] += value
+        row_tasks.append(s.WorkloadTask(
+            id=task.id, name=task.name, list_id=task.list_id, priority=task.priority,
+            status=s.StatusOut.model_validate(statuses[task.status_id]), seconds_per_day=seconds,
+        ))
+
+    from app.services.work.leave import daily_capacity
+
+    own = daily_capacity(db, access.workspace_id, [access.user_id], window)
+    me = db.get(User, access.user_id)
+    rows = [s.WorkloadRow(
+        user=s.UserOut.model_validate(me) if me else None,
+        capacity_seconds=own.get(access.user_id) or [capacity_for(d) for d in window],
+        scheduled_seconds=scheduled,
+        tasks=row_tasks,
+    )]
+
+    def sort_key(t: Task):
+        return (t.due_date or datetime.max.replace(tzinfo=timezone.utc), t.name.lower())
+
+    return s.WorkloadOut(
+        days=[d.isoformat() for d in window],
+        rows=rows,
+        unscheduled=[_summary(t, statuses) for t in sorted(unscheduled, key=sort_key)[:_LIST_LIMIT]],
+        no_estimate=[_summary(t, statuses) for t in sorted(no_estimate, key=sort_key)[:_LIST_LIMIT]],
+    )
+
+
 def workload(
     db: Session,
     opened: Opened,
@@ -137,7 +225,9 @@ def workload(
     team_members: Optional[Set[str]] = None
     if team_id is not None:
         team = team_or_404(db, opened.access, team_id)
-        team_members = set(db.scalars(select(TeamMember.user_id).where(TeamMember.team_id == team.id)))
+        from app.services.work import team_tree
+
+        team_members = team_tree.people(db, [team.id])  # sub-teams count too
         people = [p for p in people if p.id in team_members]
     rows: Dict[Optional[str], Tuple[Optional[User], List[int], List[s.WorkloadTask]]] = {
         p.id: (p, [0] * days, []) for p in people
@@ -170,6 +260,7 @@ def workload(
             id=task.id,
             name=task.name,
             list_id=task.list_id,
+            priority=task.priority,
             status=s.StatusOut.model_validate(statuses[task.status_id]),
             seconds_per_day=seconds,
         )
@@ -184,11 +275,14 @@ def workload(
                 scheduled[i] += value
             row_tasks.append(entry)
 
-    capacity = [capacity_for(d) for d in window]
+    from app.services.work.leave import daily_capacity
+
+    # Each person's own working hours, less company holidays and approved leave.
+    capacities = daily_capacity(db, opened.access.workspace_id, [u.id for u, _, _ in rows.values() if u], window)
     out_rows = [
         s.WorkloadRow(
             user=s.UserOut.model_validate(user) if user else None,
-            capacity_seconds=capacity if user else [0] * days,
+            capacity_seconds=capacities[user.id] if user else [0] * days,
             scheduled_seconds=scheduled,
             tasks=row_tasks,
         )

@@ -48,3 +48,17 @@ backend/uploads/
 # Internal Verve documents (kept local; the repo is public)
 SOP - *.docx
 docs/Timetriq-vs-ClickUp-review.html
+
+# Web Push signing keys (generated locally; secret)
+backend/.vapid.json
+
+# Browser automation output from local checks: screenshots, page snapshots, console logs.
+.playwright-mcp/
+
+# Scratch assets in frontend/public that the app never references.
+frontend/public/ChatGPT Image*.png
+frontend/public/dashboard-proposal.html
+
+# One-off edit scripts used while building; not part of the app.
+backend/_*.py
+frontend/_*.py

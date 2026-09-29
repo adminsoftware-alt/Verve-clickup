@@ -280,6 +280,25 @@ def render_card(card, data: d.CardData) -> str:
         ]
         rows.append(["<b>Total</b>", f'<b>{x["total"]}</b>', str(x["late"])])
         return _table(["Person", "Completed", "Late"], rows)
+    if card.type == "battery":
+        rows = [[esc(sg["label"]), str(sg["value"])] for sg in x["segments"]]
+        return f'<div style="font-size:24px;font-weight:700;color:#111827">{x["percent"]}% done</div>' + _table(["", "Tasks"], rows)
+    if card.type == "worked_on":
+        rows = [
+            [esc((r["user"] or {}).get("display_name") or (r["user"] or {}).get("email") or ""), str(r["task_count"]), _duration(r["tracked_seconds"]),
+             esc(", ".join(t["name"] for t in r["tasks"][:5]))]
+            for r in x["rows"]
+        ]
+        return _table(["Person", "Tasks", "Tracked", "Including"], rows)
+    if card.type == "goal":
+        rows = [[esc(gl["name"]), f'{gl["progress"]}%', _bar(gl["progress"], 100, gl["color"])] for gl in x["goals"]]
+        return _table(["Goal", "Progress", ""], rows)
+    if card.type == "sprint":
+        rep = x.get("report")
+        if not rep:
+            return '<p style="font-size:13px;color:#6b7280">No sprint yet.</p>'
+        sp = rep["sprint"]
+        return f'<p style="font-size:13px"><b>{esc(sp["name"])}</b>: {sp["done_points"]:g} of {sp["total_points"]:g} points done · velocity {rep["average_velocity"]:g}</p>'
     if card.type == "portfolio":
         rows = [
             [esc(r["path"]), f'{r["progress"]}%', str(r["open"]), str(r["overdue"]), _duration(r["estimate_seconds"]), _duration(r["tracked_seconds"])]
@@ -305,11 +324,11 @@ def render_report(db: Session, opened: OpenedDashboard, tz: ZoneInfo, now: Optio
     return (
         '<div style="background:#f5f6f8;padding:24px 12px;font-family:Segoe UI,Arial,sans-serif">'
         '<div style="max-width:760px;margin:0 auto">'
-        f'<div style="font-size:12px;color:#6b7280">Timetriq Dashboard report · {moment.strftime("%a %d %b %Y, %H:%M")} ({tz.key})</div>'
+        f'<div style="font-size:12px;color:#6b7280">Verve Workflow Dashboard report · {moment.strftime("%a %d %b %Y, %H:%M")} ({tz.key})</div>'
         f'<h1 style="font-size:22px;color:#111827;margin:6px 0 16px">{html.escape(dash.name)}</h1>'
         + ("".join(blocks) or '<p style="color:#6b7280">This Dashboard has no cards yet.</p>')
         + f'<p style="font-size:12px;color:#6b7280">Figures are what the person who set up this report can see. '
-        f'<a href="{html.escape(link)}" style="color:#4f46e5">Open the Dashboard in Timetriq</a></p>'
+        f'<a href="{html.escape(link)}" style="color:#4f46e5">Open the Dashboard in Verve Workflow</a></p>'
         "</div></div>"
     )
 
@@ -405,6 +424,9 @@ def run_due(db: Session, now: Optional[datetime] = None) -> int:
 _stop = threading.Event()
 
 
+_compliance_hour: Optional[str] = None
+
+
 def _loop() -> None:
     from app.db.session import new_session
 
@@ -431,6 +453,65 @@ def _loop() -> None:
                     pass
         except Exception:
             log.exception("Sending due reminders failed")
+        try:
+            from app.services.work import automations
+
+            with new_session() as db:
+                if automations.run_scheduled(db):
+                    db.commit()
+        except Exception:
+            log.exception("Running due-date automations failed")
+        global _compliance_hour
+        hour = datetime.now(timezone.utc).strftime("%Y-%m-%d %H")
+        if hour != _compliance_hour:  # compliance tasks: once an hour is plenty
+            _compliance_hour = hour
+            try:
+                from app.services.work import compliance
+
+                with new_session() as db:
+                    if compliance.run_due(db):
+                        db.commit()
+            except Exception:
+                log.exception("Creating compliance tasks failed")
+        for job in ("run_instant", "run_daily_digests", "run_team_digests"):
+            try:
+                from app.services.work import outbound
+
+                with new_session() as db:
+                    getattr(outbound, job)(db)
+                    db.commit()
+            except Exception:
+                log.exception("Outbound job %s failed", job)
+        try:
+            from app.services.work.timesheets import run_timesheet_reminders
+
+            with new_session() as db:
+                if run_timesheet_reminders(db):
+                    db.commit()
+        except Exception:
+            log.exception("Sending timesheet reminders failed")
+        try:
+            from app.services.work import sprints
+
+            with new_session() as db:
+                if sprints.run_due(db):
+                    db.commit()
+        except Exception:
+            log.exception("Completing finished sprints failed")
+        try:
+            from app.services.work import calendar_sync
+
+            with new_session() as db:
+                calendar_sync.run_due(db)
+        except Exception:
+            log.exception("Calendar sync failed")
+        try:
+            from app.services.work import email_to_list
+
+            with new_session() as db:
+                email_to_list.poll(db)
+        except Exception:
+            log.exception("Reading the Email-to-List mailbox failed")
 
 
 def start_scheduler() -> Optional[threading.Thread]:

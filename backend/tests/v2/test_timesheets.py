@@ -152,8 +152,13 @@ def test_week_start_and_capacity_settings(api, org):
     assert api.patch(url, "member", {"week_start": 0}).status_code == 403
     ok(api.patch(url, "admin", {"week_start": 0}))
     assert sheet(api, org, "member", day=SUNDAY)["period_start"] == "2026-08-31"  # Monday weeks now
+    # Working hours are what every "are they over" figure is measured against, so they are set
+    # for people rather than by them -- a member cannot give themselves a shorter week, and
+    # neither can a Team lead.
     cap = f"/workspaces/{org['ws']}/members/member/capacity"
-    ok(api.put(cap, "member", {"capacity_seconds": [4 * HOUR] * 4 + [0, 0, 0]}))
+    assert api.put(cap, "member", {"capacity_seconds": [4 * HOUR] * 4 + [0, 0, 0]}).status_code == 403
+    assert api.put(cap, "lead", {"capacity_seconds": [4 * HOUR] * 4 + [0, 0, 0]}).status_code == 403
+    ok(api.put(cap, "admin", {"capacity_seconds": [4 * HOUR] * 4 + [0, 0, 0]}))
     assert sheet(api, org, "member")["capacity_per_day"][:5] == [4 * HOUR] * 4 + [0]
     assert api.put(f"/workspaces/{org['ws']}/members/member2/capacity", "member", {"capacity_seconds": None}).status_code == 403
 

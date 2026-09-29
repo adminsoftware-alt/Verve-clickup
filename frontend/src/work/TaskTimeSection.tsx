@@ -4,6 +4,7 @@ import { Play, Square, Trash2 } from 'lucide-react';
 import { workApi, type TaskTime } from './api';
 import { formatClock, useNow, useRunningTimer } from './RunningTimer';
 import { Avatar, formatDuration, parseDuration } from './ui';
+import { DurationInput } from './DurationInput';
 
 /**
  * Time tracked on a task, as in ClickUp's task view: start/stop the timer, log time
@@ -52,16 +53,16 @@ export const TaskTimeSection: React.FC<{ taskId: string; canTrack: boolean; onCh
   const done = time?.entries.filter((en) => !en.running) ?? [];
 
   return (
-    <div className="mt-5">
+    <div className="mt-4 border-t border-gray-100 pt-3">
       <div className="mb-1.5 flex items-center gap-3">
-        <h4 className="text-sm font-semibold text-gray-700">Time tracked</h4>
-        <span className="text-sm text-gray-500">{formatDuration(Math.floor(total)) || '0m'}</span>
+        <h4 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Time tracked</h4>
+        <span className="text-sm font-medium text-gray-700">{formatDuration(Math.floor(total)) || '0m'}</span>
         {canTrack && (running ? (
           <button type="button" onClick={() => act(stop)} className="ml-auto flex items-center gap-1.5 rounded-md bg-red-50 px-2.5 py-1 text-sm font-medium text-red-700 hover:bg-red-100">
             <Square size={11} fill="currentColor" /> Stop <span className="font-mono tabular-nums">{formatClock(elapsed)}</span>
           </button>
         ) : (
-          <button type="button" onClick={() => act(() => start(taskId))} className="ml-auto flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:border-indigo-300 hover:text-indigo-700">
+          <button type="button" onClick={() => act(() => start(taskId))} className="ml-auto flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:border-brand-300 hover:text-brand-700">
             <Play size={11} fill="currentColor" /> Start timer
           </button>
         ))}
@@ -84,9 +85,18 @@ export const TaskTimeSection: React.FC<{ taskId: string; canTrack: boolean; onCh
         {done.length === 0 && !canTrack && <div className="px-3 py-2 text-sm text-gray-400">No time tracked.</div>}
         {canTrack && (
           <form onSubmit={log} className="flex items-center gap-2 px-3 py-2">
-            <input aria-label="Time to log" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Log time, e.g. 1h 30m" className="w-40 text-sm focus:outline-none" />
+            {/* Same reading of what you type as the estimate field: "3" offers 3h or 3m. */}
+            <span className="w-40 shrink-0">
+              <DurationInput
+                label="Time to log"
+                value={parseDuration(draft) ?? null}
+                placeholder="Log time, e.g. 1h 30m"
+                className="h-7 w-full rounded-md border border-transparent px-1 text-sm focus:border-brand-400 focus:outline-none"
+                onChange={(seconds) => setDraft(seconds ? formatDuration(seconds) : '')}
+              />
+            </span>
             <input aria-label="What was done" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className="min-w-0 flex-1 text-sm focus:outline-none" />
-            <button type="submit" disabled={!draft.trim()} className="rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-40">Log</button>
+            <button type="submit" disabled={!draft.trim()} className="rounded-md bg-brand-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-40">Log</button>
           </form>
         )}
       </div>

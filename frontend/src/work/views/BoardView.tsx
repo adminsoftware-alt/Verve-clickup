@@ -75,7 +75,7 @@ export const BoardView: React.FC<{
             onDragOver={(e) => { if (canDrag) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(column.key); } }}
             onDragLeave={() => setDragOver((k) => (k === column.key ? null : k))}
             onDrop={(e) => canDrag && drop(e, column.key)}
-            className={`flex w-72 shrink-0 flex-col rounded-xl border-t-4 bg-gray-50 ${dragOver === column.key ? 'ring-2 ring-indigo-300' : ''}`}
+            className={`flex w-72 shrink-0 flex-col rounded-xl border-t-4 bg-gray-50 ${dragOver === column.key ? 'ring-2 ring-brand-300' : ''}`}
             style={{ borderTopColor: column.status.color }}
           >
             <header className="flex items-center gap-2 px-3 py-2.5">
@@ -126,7 +126,7 @@ export const BoardView: React.FC<{
                 );
               })}
               {canAddIn(column.key) && (adding === column.key ? (
-                <form onSubmit={(e) => create(e, column.key)} className="rounded-lg border border-indigo-300 bg-white p-2">
+                <form onSubmit={(e) => create(e, column.key)} className="rounded-lg border border-brand-300 bg-white p-2">
                   <input
                     autoFocus
                     value={draft}

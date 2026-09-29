@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronDown, ChevronLeft, ChevronRight, Flag, LayoutGrid, List as ListIcon, Plus, SquareCheck } from 'lucide-react';
+import { FEATURES } from '../config/features';
 import { useAuth } from '../components/AuthContext';
 import { useWork, useMe } from './WorkContext';
 import { isDueTodayOrOverdue, useMyTasks } from './MyTasksContext';
@@ -10,6 +11,7 @@ import { TaskPanel } from './TaskPanel';
 import { PriorityFlag, StatusDot, formatDue, fromDateInput, startOfDay } from './ui';
 import { TimeTrackedCell } from './views/ListView';
 import { planningApi, type HomeCard } from './planningApi';
+import { notify } from '../components/notify';
 import {
   DelegatedList, DoneList, LineupCard, ManageCardsDialog, MyWorkCard, TodaysPlanCard, completeLayout, useMyWorkTab,
 } from './HomeCards';
@@ -205,7 +207,7 @@ const AgendaItem: React.FC<{ task: Task; where: string; note: string; onOpen: (i
   <button
     type="button"
     onClick={() => onOpen(task.id)}
-    className="mb-1 flex w-full items-center gap-2.5 rounded-md border-l-[3px] bg-indigo-50/60 px-2.5 py-1.5 text-left text-sm hover:bg-indigo-50"
+    className="mb-1 flex w-full items-center gap-2.5 rounded-md border-l-[3px] bg-brand-50/60 px-2.5 py-1.5 text-left text-sm hover:bg-brand-50"
     style={{ borderLeftColor: task.status.color }}
   >
     <span className="min-w-0 flex-1">
@@ -271,7 +273,12 @@ function groupByDue(tasks: Task[], mode: Mode): Group[] {
     else next.tasks.push(t);
   }
   groups.forEach((g) => g.tasks.sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? '') || a.name.localeCompare(b.name)));
-  return mode === 'today' ? [overdue, todayGroup] : groups;
+  // Dates are mandatory on new tasks, so nothing new lands in Unscheduled. It stays hidden unless
+  // older work is still sitting there, which is the only time it is worth a heading.
+  const shown = FEATURES.unscheduledGroup || unscheduled.tasks.length
+    ? groups
+    : groups.filter((g) => g.key !== 'unscheduled');
+  return mode === 'today' ? [overdue, todayGroup] : shown;
 }
 
 const GroupedTasks: React.FC<{
@@ -304,7 +311,7 @@ const GroupedTasks: React.FC<{
       setDraft('');
       onCreated();
     } catch (err) {
-      window.alert((err as Error).message);
+      notify.error(err);
     } finally {
       setBusy(false);
     }
@@ -316,7 +323,7 @@ const GroupedTasks: React.FC<{
         <div role="tablist" aria-label="My Work" className="mb-4 flex gap-1 border-b border-gray-200">
           {([['todo', 'To do'], ['done', 'Done'], ['delegated', 'Delegated']] as const).map(([key, text]) => (
             <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
-              className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${tab === key ? 'border-indigo-600 font-medium text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>{text}</button>
+              className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${tab === key ? 'border-brand-600 font-medium text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>{text}</button>
           ))}
         </div>
       )}
@@ -330,7 +337,7 @@ const GroupedTasks: React.FC<{
           placeholder={mode === 'today' ? 'Add a task due today to your Personal List' : 'Add a task to your Personal List'}
           className="flex-1 bg-transparent text-sm focus:outline-none"
         />
-        <button type="submit" disabled={!draft.trim() || busy} className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-40">Add</button>
+        <button type="submit" disabled={!draft.trim() || busy} className="rounded-md bg-brand-600 px-3 py-1 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-40">Add</button>
       </form>
 
       {loading ? (

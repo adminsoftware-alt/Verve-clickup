@@ -1,6 +1,7 @@
 // Client for comments, activity, watchers, checklists, attachments, the Inbox, reminders,
 // and moving/duplicating/archiving locations and tasks (/api/v2).
 import { auth } from '../core/firebase';
+import type { CopyParts } from './task/CopyParts';
 import { API_V2, ApiError, request, type LocationKind, type Status, type StatusGroup, type TaskDetail, type TeamRef, type UserRef, type ListNode, type Hierarchy } from './api';
 
 export interface Reaction { emoji: string; count: number; mine: boolean; users: string[] }
@@ -110,9 +111,13 @@ export const collabApi = {
 
   // moving, duplicating, archiving, statuses
   moveTask: (taskId: string, listId: string) => request<TaskDetail>('POST', `/tasks/${taskId}/move`, { list_id: listId }),
-  duplicateTask: (taskId: string, body: { name?: string; include_subtasks?: boolean; list_id?: string }) => request<TaskDetail>('POST', `/tasks/${taskId}/duplicate`, body),
+  duplicateTask: (taskId: string, body: { name?: string; include_subtasks?: boolean; list_id?: string; parts?: CopyParts }) => request<TaskDetail>('POST', `/tasks/${taskId}/duplicate`, body),
+  /** A copy each, on their own Personal Lists. Separate tasks from here on. */
+  duplicateToPeople: (taskId: string, body: { user_ids: string[]; name?: string; include_subtasks?: boolean; parts?: CopyParts }) =>
+    request<{ people: string[] }>('POST', `/tasks/${taskId}/duplicate-to-people`, body),
   moveLocation: (kind: 'folder' | 'list', id: string, target: { space_id?: string; folder_id?: string }) => request('POST', `/${seg(kind)}/${id}/move`, target),
-  duplicateLocation: (kind: 'folder' | 'list', id: string, body: { name?: string; include_tasks?: boolean }) => request<ListNode>('POST', `/${seg(kind)}/${id}/duplicate`, body),
+  duplicateLocation: (kind: 'folder' | 'list', id: string, body: Record<string, unknown>) =>
+    request<ListNode>('POST', `/${seg(kind)}/${id}/duplicate`, body),
   hierarchyWithArchived: (ws: string) => request<Hierarchy>('GET', `/workspaces/${ws}/hierarchy`, undefined, { include_archived: 'true' }),
   setArchived: (kind: LocationKind, id: string, archived: boolean) => request('PATCH', `/${seg(kind)}/${id}`, { archived }),
   saveStatuses: (kind: LocationKind, id: string, body: { inherit?: boolean; statuses?: { id?: string; name: string; color: string; group: StatusGroup }[] }) =>

@@ -21,6 +21,8 @@ from typing import Dict, List, Optional, Set, Tuple
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.services.work import team_tree
+
 from app.db.models import (
     Dashboard,
     DashboardShare,
@@ -59,7 +61,7 @@ class Standing:
                 standing.led_teams.add(team_id)
         if standing.led_teams:
             standing.led_people = set(
-                db.scalars(select(TeamMember.user_id).where(TeamMember.team_id.in_(standing.led_teams)))
+                db.scalars(select(TeamMember.user_id).where(TeamMember.team_id.in_(team_tree.descendants(db, standing.led_teams))))
             )
         return standing
 

@@ -221,6 +221,26 @@ def counts(db: Session, task_ids) -> Dict[uuid.UUID, int]:
 # --- copying -------------------------------------------------------------------------------------
 
 
+def copy_attachments(db: Session, source: Task, target: Task) -> int:
+    """Copy a task's files onto the copy.
+
+    The bytes are written again under a new key rather than shared: two tasks pointing at one
+    file means deleting either one takes the file out from under the other.
+    """
+    made = 0
+    for a in db.scalars(select(Attachment).where(Attachment.task_id == source.id).order_by(Attachment.created_at)):
+        src = upload_dir() / a.storage_key
+        if not src.exists():
+            continue
+        key = secrets.token_hex(16)
+        (upload_dir() / key).write_bytes(src.read_bytes())
+        db.add(Attachment(task_id=target.id, user_id=a.user_id, filename=a.filename,
+                          content_type=a.content_type, size=a.size, storage_key=key))
+        made += 1
+    db.flush()
+    return made
+
+
 def copy_task_extras(db: Session, source: Task, target: Task, reset: bool = False) -> None:
     """Checklists travel with a duplicate (and with a repeat, unticked)."""
     for cl in db.scalars(select(Checklist).where(Checklist.task_id == source.id).order_by(Checklist.orderindex)):

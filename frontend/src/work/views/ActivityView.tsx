@@ -23,7 +23,7 @@ const dayLabel = (iso: string) => {
 
 /** ClickUp's Activity view: everything that happened to the tasks here, newest first. */
 export const ActivityView: React.FC<{ kind: LocationKind; id: string; refreshKey: number; onOpenTask: (id: string) => void }> = ({ kind, id, refreshKey, onOpenTask }) => {
-  const { members } = useWork();
+  const { allMembers: members } = useWork();
   const [items, setItems] = useState<LocationActivity[] | null>(null);
   const [filter, setFilter] = useState('all');
   const [more, setMore] = useState(true);
@@ -54,7 +54,7 @@ export const ActivityView: React.FC<{ kind: LocationKind; id: string; refreshKey
       <div className="mb-3 flex flex-wrap gap-1" role="radiogroup" aria-label="Show">
         {FILTERS.map((f) => (
           <button key={f.key} type="button" role="radio" aria-checked={filter === f.key} onClick={() => setFilter(f.key)}
-            className={`rounded-full border px-2.5 py-0.5 text-xs ${filter === f.key ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{f.label}</button>
+            className={`rounded-full border px-2.5 py-0.5 text-xs ${filter === f.key ? 'border-brand-400 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{f.label}</button>
         ))}
       </div>
       {items === null ? <p className="text-sm text-gray-400">Loading…</p> : days.length === 0 ? <p className="py-10 text-center text-sm text-gray-400">Nothing yet.</p> : (
@@ -71,7 +71,7 @@ export const ActivityView: React.FC<{ kind: LocationKind; id: string; refreshKey
                         <b className="font-medium text-gray-900">{a.user ? a.user.display_name || a.user.email : (a.data as Record<string, unknown>)?.automation ? 'Automation' : 'Someone'}</b>{' '}
                         {a.kind === 'comment' ? 'commented on' : describeActivity({ id: a.id, user: a.user, kind: a.kind, data: a.data, created_at: a.created_at }, name)}
                         {a.kind === 'comment' ? ' ' : ' · '}
-                        <button type="button" onClick={() => onOpenTask(a.task_id)} className="font-medium text-indigo-700 hover:underline">{a.task_name}</button>
+                        <button type="button" onClick={() => onOpenTask(a.task_id)} className="font-medium text-brand-700 hover:underline">{a.task_name}</button>
                       </p>
                       {a.comment && <p className="mt-1 whitespace-pre-wrap rounded bg-gray-50 px-2 py-1 text-gray-800">{a.comment}</p>}
                     </div>

@@ -78,7 +78,9 @@ def add(db: Session, opened: Opened[Task], data: c.CommentIn) -> TaskComment:
 
     team_people: Set[str] = set()
     if teams:
-        team_people = set(db.scalars(select(TeamMember.user_id).where(TeamMember.team_id.in_([uuid.UUID(t) for t in teams]))))
+        from app.services.work import team_tree
+
+        team_people = team_tree.people(db, [uuid.UUID(t) for t in teams])
     excerpt = {"excerpt": data.body[:200]}
     sent: Set[str] = set()
     if data.assignee_id:

@@ -217,3 +217,55 @@ def test_automation_rules_are_checked(api, org):
     for body in bad:
         assert api.post(f"/lists/{lst}/automations", "owner", body).status_code == 400, body
     assert api.post(f"/lists/{lst}/automations", "guest", {"trigger": "task_created", "action": "set_priority", "action_config": {"priority": 1}}).status_code in (403, 404)
+
+
+# --- scheduled automations, conditions, escalation ------------------------------------------------------------
+
+
+def test_due_soon_and_overdue_rules_escalate_once(api, org):
+    from app.db import session as db_session
+    from app.services.work import automations
+
+    ws = org["ws"]
+    ok(api.patch(f"/workspaces/{ws}/people/member", "owner", {"manager_id": "admin"}))
+    lst = org["lst"]["id"]
+    ok(api.post(f"/lists/{lst}/automations", "owner", {
+        "trigger": "overdue", "trigger_config": {"days_after": 1, "conditions": {"priorities": [1, 2]}},
+        "action": "escalate", "action_config": {"levels": 1, "message": "Please follow up"}}), 201)
+    ok(api.post(f"/lists/{lst}/automations", "owner", {
+        "trigger": "due_soon", "trigger_config": {"days_before": 2}, "action": "add_tag", "action_config": {"tag": "due-soon"}}), 201)
+    now = datetime.now(timezone.utc)
+    late = org["t"]("Late urgent", assignees=["member"], priority=1, due_date=(now - timedelta(days=2)).isoformat())
+    org["t"]("Late but low", assignees=["member"], priority=4, due_date=(now - timedelta(days=2)).isoformat())
+    soon = org["t"]("Due tomorrow", assignees=["member"], due_date=(now + timedelta(days=1)).isoformat())
+    org["t"]("Due next month", assignees=["member"], due_date=(now + timedelta(days=30)).isoformat())
+    with db_session.new_session() as db:
+        assert automations.run_scheduled(db) == 2  # the urgent late task, and the one due tomorrow
+        assert automations.run_scheduled(db) == 0  # once per due date
+        db.commit()
+    alerts = [n for n in ok(api.get(f"/workspaces/{ws}/inbox", "admin")) if n["kind"] == "escalation"]
+    assert len(alerts) == 1 and alerts[0]["task"]["id"] == late["id"] and alerts[0]["data"]["message"] == "Please follow up"
+    assert [t["name"] for t in ok(api.get(f"/tasks/{soon['id']}", "owner"))["tags"]] == ["due-soon"]
+    # Moving the due date lets the rule fire again for the new date.
+    ok(api.patch(f"/tasks/{late['id']}", "owner", {"due_date": (now - timedelta(days=3)).isoformat()}))
+    with db_session.new_session() as db:
+        assert automations.run_scheduled(db) == 1
+        db.commit()
+
+
+def test_priority_and_assignee_triggers_with_conditions(api, org):
+    lst = org["lst"]["id"]
+    ok(api.post(f"/lists/{lst}/automations", "owner", {
+        "trigger": "priority_changed", "trigger_config": {"priority": 1}, "action": "notify", "action_config": {"user_ids": ["admin"]}}), 201)
+    ok(api.post(f"/lists/{lst}/automations", "owner", {
+        "trigger": "assignee_added", "trigger_config": {"conditions": {"assignees": ["guest"]}},
+        "action": "add_tag", "action_config": {"tag": "external"}}), 201)
+    task = org["t"]("Board pack")
+    ok(api.patch(f"/tasks/{task['id']}", "owner", {"priority": 2}))
+    assert not [n for n in ok(api.get(f"/workspaces/{org['ws']}/inbox", "admin")) if n["kind"] == "automation"]
+    ok(api.patch(f"/tasks/{task['id']}", "owner", {"priority": 1}))
+    assert [n for n in ok(api.get(f"/workspaces/{org['ws']}/inbox", "admin")) if n["kind"] == "automation"]
+    ok(api.patch(f"/tasks/{task['id']}", "owner", {"assignees": ["member"]}))
+    assert ok(api.get(f"/tasks/{task['id']}", "owner"))["tags"] == []  # condition: only when the guest is on it
+    bad = api.post(f"/lists/{lst}/automations", "owner", {"trigger": "overdue", "trigger_config": {"days_after": 99}, "action": "escalate"})
+    assert bad.status_code == 400

@@ -29,7 +29,7 @@ from app.services.work.access import (
 )
 from app.services.work.errors import Forbidden, Invalid
 from app.services.work.mywork import ensure_not_personal
-from app.services.work.permissions import Node, can_create_spaces
+from app.services.work.permissions import Node, can_create_spaces, can_manage_workspace, is_manager
 from app.services.work.statuses import seed_space_statuses
 from app.services.work.views import add_required_views
 
@@ -71,6 +71,12 @@ def _grant_on_privatise(db: Session, access: Access, kind: LocationKind, obj) ->
     access.shares[(kind, obj.id)] = PermissionLevel.full
 
 
+def _own_personal(db: Session, obj, user_id: str) -> bool:
+    """True when this is the caller's own Personal Space or the List inside it."""
+    space = obj if isinstance(obj, Space) else db.get(Space, getattr(obj, "space_id", None))
+    return space is not None and space.personal_owner_id == user_id
+
+
 def _apply_location_update(
     db: Session, opened: Opened, kind: LocationKind, data: s.LocationUpdate
 ) -> None:
@@ -80,6 +86,15 @@ def _apply_location_update(
         ensure_not_personal(db, obj, "made public or archived")
     if not opened.level.at_least(PermissionLevel.edit):
         raise Forbidden("You need edit access to change this")
+    # Renaming is how everyone else finds their work again. A Space called something different
+    # from what the firm calls it breaks every person's mental map of the place at once, and the
+    # only trace is one line in the audit log, so the name is an admin's to change. Colour, dates
+    # and description are still anyone's with edit access -- they cost nothing if they are wrong.
+    #
+    # Except a Personal List: nobody else can see it, so there is no shared map to break. Its
+    # owner names it whatever they like.
+    if "name" in fields and not can_manage_workspace(opened.access.role) and not _own_personal(db, obj, opened.access.user_id):
+        raise Forbidden("Only admins can rename a Space, Folder or List. Ask an admin to change it.")
     touches_admin = ("is_private" in fields) or ("archived" in fields)
     if touches_admin and opened.level != PermissionLevel.full:
         raise Forbidden("You need full access to change privacy or archive this")
@@ -94,6 +109,11 @@ def _apply_location_update(
             _grant_on_privatise(db, opened.access, kind, obj)
         obj.is_private = data.is_private
     if "archived" in fields and data.archived is not None:
+        if bool(obj.archived_at) != data.archived and kind == LocationKind.space:
+            from app.services.work import audit
+
+            audit.record(db, opened.access.workspace_id, opened.access.user_id, "space.archived" if data.archived else "space.restored",
+                         "space", obj.id, obj.name)
         obj.archived_at = datetime.now(timezone.utc) if data.archived else None
     start, due = getattr(obj, "start_date", None), getattr(obj, "due_date", None)
     if start and due and due < start:
@@ -113,6 +133,9 @@ def default_prefix(name: str) -> str:
 def create_space(db: Session, access: Access, data: s.SpaceCreate) -> Space:
     if not can_create_spaces(access.role):
         raise Forbidden("Guests cannot create Spaces")
+    # A Space is the firm's shape, so only the people who run the place may add one.
+    if not can_manage_workspace(access.role):
+        raise Forbidden("Only admins can create Spaces. Ask one of them to add it.")
     space = Space(
         workspace_id=access.workspace_id,
         name=data.name,
@@ -129,11 +152,24 @@ def create_space(db: Session, access: Access, data: s.SpaceCreate) -> Space:
     seed_space_statuses(db, space)
     add_required_views(db, space, access.user_id)
     db.flush()
+    from app.services.work import audit
+
+    audit.record(db, access.workspace_id, access.user_id, "space.created", "space", space.id, space.name)
     return space
 
 
 def update_space(db: Session, opened: Opened[Space], data: s.SpaceUpdate) -> Space:
+    fields = data.model_fields_set
+    if ("clickapps" in fields or "discoverable" in fields) and opened.level != PermissionLevel.full:
+        raise Forbidden("You need full access to change this Space's ClickApps")
     _apply_location_update(db, opened, LocationKind.space, data)
+    if "clickapps" in fields and data.clickapps:
+        from app.services.work import space_admin
+
+        space_admin.set_clickapps(opened.obj, dict(data.clickapps))
+    if "discoverable" in fields and data.discoverable is not None:
+        opened.obj.discoverable = data.discoverable
+    db.flush()
     return opened.obj
 
 
@@ -148,6 +184,12 @@ def create_folder(
     parent: Optional[Folder] = None,
 ) -> Folder:
     ensure_not_personal(db, space, "given Folders")
+    # Folders organise a Space, so managers -- the leads of a Team -- and admins may add them.
+    if not can_manage_workspace(access.role):
+        from app.services.work.teams import led_team_ids
+
+        if not led_team_ids(db, access.workspace_id, access.user_id):
+            raise Forbidden("Only admins and managers can create Folders. You can add Lists and tasks inside one.")
     if parent is not None and parent.parent_folder_id is not None:
         raise Invalid("Subfolders can only be one level deep")
     parent_condition = (
@@ -198,6 +240,10 @@ def create_list(
     folder: Optional[Folder] = None,
 ) -> TaskList:
     ensure_not_personal(db, space, "given more Lists")
+    # A List is where a piece of work lives, so the people who decide the shape of the work make
+    # them: admins, and the managers who lead a Team. Everyone else works inside them.
+    if not is_manager(db, access.workspace_id, access.user_id, access.role):
+        raise Forbidden("Only admins and managers can create Lists. Ask your manager to add it.")
     parent_condition = (
         TaskList.folder_id == folder.id if folder else TaskList.folder_id.is_(None)
     )
@@ -229,6 +275,16 @@ def delete_location(db: Session, opened: Opened) -> None:
     ensure_not_personal(db, opened.obj, "deleted")
     if opened.level != PermissionLevel.full:
         raise Forbidden("You need full access to delete this")
+    # Deleting a Space takes its Folders, its Lists and every task in them, and there is no undo:
+    # the audit log records who did it, not how to get it back. Everyone who can see a public
+    # Space resolves to full access on it (see permissions.resolve_level), so without this an
+    # intern's stray click ends a year of work. Only admins.
+    if not can_manage_workspace(opened.access.role):
+        raise Forbidden("Only admins can delete a Space, Folder or List. Ask an admin to remove it.")
+    from app.services.work import audit
+
+    kind = "space" if isinstance(opened.obj, Space) else "folder" if isinstance(opened.obj, Folder) else "list"
+    audit.record(db, opened.access.workspace_id, opened.access.user_id, f"{kind}.deleted", kind, opened.obj.id, opened.obj.name)
     db.delete(opened.obj)
     db.flush()
 
@@ -236,9 +292,18 @@ def delete_location(db: Session, opened: Opened) -> None:
 # --- serialisation -----------------------------------------------------------
 
 
+def _team_ref(obj) -> Optional[s.TeamRef]:
+    """The Team this belongs to, if it was given to one."""
+    team = getattr(obj, "team", None)
+    if team is None:
+        return None
+    return s.TeamRef(id=team.id, name=team.name, color=team.color)
+
+
 def _common(obj: Location, level: PermissionLevel) -> dict:
     return dict(
         id=obj.id,
+        team=_team_ref(obj),
         name=obj.name,
         color=obj.color,
         is_private=obj.is_private,
@@ -257,6 +322,8 @@ def space_out(space: Space, level: PermissionLevel) -> s.SpaceOut:
         description=space.description,
         icon=space.icon,
         task_prefix=space.task_prefix,
+        clickapps=_clickapps(space),
+        discoverable=space.discoverable,
     )
 
 
@@ -266,6 +333,7 @@ def folder_out(folder: Folder, level: PermissionLevel) -> s.FolderOut:
         space_id=folder.space_id,
         parent_folder_id=folder.parent_folder_id,
         override_statuses=folder.override_statuses,
+        sprint_settings=folder.sprint_settings,
     )
 
 
@@ -277,9 +345,17 @@ def list_out(lst: TaskList, level: PermissionLevel) -> s.ListOut:
         description=lst.description,
         override_statuses=lst.override_statuses,
         assignee_id=lst.assignee_id,
+        assignees=[s.UserOut.model_validate(row.user) for row in lst.assignee_rows if row.user],
         start_date=lst.start_date,
         due_date=lst.due_date,
+        sprint_completed_at=lst.sprint_completed_at,
     )
+
+
+def _clickapps(space: Space) -> Dict[str, bool]:
+    from app.services.work import space_admin
+
+    return space_admin.clickapps(space)
 
 
 # --- the sidebar tree --------------------------------------------------------
@@ -338,6 +414,9 @@ def get_hierarchy(db: Session, access: Access, include_archived: bool = False) -
     personal_ids = {sp.id for sp in spaces if sp.personal_owner_id is not None}
     my_personal: Optional[s.ListNode] = None
 
+    from app.services.work import space_admin
+
+    hidden = space_admin.hidden_ids(db, access.user_id)
     shared = s.SharedWithMe()
     space_nodes: Dict[uuid.UUID, s.SpaceNode] = {}
     for space in spaces:
@@ -355,6 +434,8 @@ def get_hierarchy(db: Session, access: Access, include_archived: bool = False) -
             archived=space.archived_at is not None,
             orderindex=space.orderindex,
             permission_level=level,
+            hidden=space.id in hidden,
+            clickapps=space_admin.clickapps(space),
         )
 
     folder_nodes: Dict[uuid.UUID, s.FolderNode] = {}
@@ -376,6 +457,7 @@ def get_hierarchy(db: Session, access: Access, include_archived: bool = False) -
             archived=folder.archived_at is not None,
             orderindex=folder.orderindex,
             permission_level=level,
+            is_sprint=folder.sprint_settings is not None,
         )
         folder_nodes[folder.id] = node
         if folder.parent_folder_id is not None:
@@ -408,10 +490,13 @@ def get_hierarchy(db: Session, access: Access, include_archived: bool = False) -
             orderindex=lst.orderindex,
             permission_level=level,
             open_task_count=counts.get(lst.id, 0),
+            team=_team_ref(lst),
             assignee_id=lst.assignee_id,
+            assignee_ids=lst.assignee_ids,
             start_date=lst.start_date,
             due_date=lst.due_date,
             description=lst.description,
+            sprint_completed_at=lst.sprint_completed_at,
         )
         placed_lists.add(lst.id)
         if lst.space_id in personal_ids:
@@ -437,6 +522,7 @@ def get_hierarchy(db: Session, access: Access, include_archived: bool = False) -
         spaces=sorted(space_nodes.values(), key=_sort_key),
         shared_with_me=shared,
         personal_list=my_personal,
+        sections=space_admin.sections(db, access),
     )
 
 

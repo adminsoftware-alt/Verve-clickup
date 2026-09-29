@@ -8,7 +8,8 @@ node upwards (task, parent tasks, list, folders, space), the first node that dec
   3. You hold a personal share on it        -> that share's level
   4. One of your Teams holds a share on it  -> the highest such level
   5. The node is private                    -> no access
-  6. Otherwise                              -> ask the parent
+  6. The node belongs to a Team you are not in (and you don't run the place) -> no access
+  7. Otherwise                              -> ask the parent
 
 If nothing decides, owners, admins and members get full access to public items and
 guests get nothing. Consequences, all as in ClickUp:
@@ -19,7 +20,7 @@ guests get nothing. Consequences, all as in ClickUp:
 
 import uuid
 from dataclasses import dataclass
-from typing import Mapping, Optional, Sequence, Tuple
+from typing import Mapping, Optional, Sequence, Set, Tuple
 
 from app.db.models.enums import LocationKind, PermissionLevel, WorkspaceRole
 
@@ -30,6 +31,8 @@ class Node:
     id: uuid.UUID
     created_by: Optional[str]
     is_private: bool
+    #: Set when this belongs to a Team: only that Team's people (and admins) see it.
+    team_id: Optional[uuid.UUID] = None
 
 
 ShareKey = Tuple[LocationKind, uuid.UUID]
@@ -42,11 +45,13 @@ def resolve_level(
     role: Optional[WorkspaceRole],
     shares: ShareMap,
     team_shares: Optional[ShareMap] = None,
+    my_teams: Optional[Set[uuid.UUID]] = None,
 ) -> Optional[PermissionLevel]:
     """Return the caller's level on chain[0], or None for no access.
 
     `chain` runs from the item itself up to its Space. `team_shares` holds, per node,
-    the highest level granted to any Team the caller belongs to.
+    the highest level granted to any Team the caller belongs to, and `my_teams` the Teams
+    they are in (sub-teams counted), which is what opens work that belongs to a Team.
     """
     if role is None:  # not a member of this workspace
         return None
@@ -54,7 +59,7 @@ def resolve_level(
     for node in chain:
         if node.created_by is not None and node.created_by == user_id:
             return PermissionLevel.full
-        if node.kind == LocationKind.space and role == WorkspaceRole.guest:
+        if node.kind == LocationKind.space and role in SHARED_ONLY:
             return None
         key = (node.kind, node.id)
         personal = shares.get(key)
@@ -65,13 +70,33 @@ def resolve_level(
             return team
         if node.is_private:
             return None
-    if role == WorkspaceRole.guest:
+        # Work given to a Team is that Team's, and the people who run the place.
+        if node.team_id is not None and not can_manage_workspace(role) and node.team_id not in (my_teams or set()):
+            return None
+    if role in SHARED_ONLY:
         return None
     return PermissionLevel.full
 
 
 def can_manage_workspace(role: Optional[WorkspaceRole]) -> bool:
     return role in (WorkspaceRole.owner, WorkspaceRole.admin)
+
+
+def is_manager(db, workspace_id, user_id: str, role: Optional[WorkspaceRole]) -> bool:
+    """An admin, or someone who leads a Team.
+
+    "Manager" is not a role in its own right here -- it is what leading a Team makes you, which
+    is how the rest of the app already decides whose dashboards and whose time you may see.
+    """
+    if can_manage_workspace(role):
+        return True
+    from app.services.work.teams import led_team_ids
+
+    return bool(led_team_ids(db, workspace_id, user_id))
+
+
+# Roles that see only what is shared with them (a Space is never theirs by default).
+SHARED_ONLY = (WorkspaceRole.guest, WorkspaceRole.limited)
 
 
 def can_create_spaces(role: Optional[WorkspaceRole]) -> bool:

@@ -49,6 +49,11 @@ def list_people(workspace_id: uuid.UUID, user: User = Depends(current_user), db:
 def add_person(workspace_id: uuid.UUID, data: s.PersonCreate, user: User = Depends(current_user), db: Session = Depends(get_db)):
     access = Access.for_workspace(db, user.id, workspace_id)
     _, added = people.add_person(db, access, data)
+    db.flush()
+    if data.start_joiner_checklist:
+        from app.services.work import onboarding
+
+        onboarding.run_joiner(db, access, added.id)
     emailed, problem = people.send_invite(db, access, added.id) if data.send_invite else (False, None)
     db.commit()
     return s.PersonAdded(person=people.get_person(db, access, added.id), emailed=emailed, email_problem=problem, link=people.invite_link())
@@ -98,8 +103,10 @@ def team_overview(team_id: uuid.UUID, user: User = Depends(current_user), db: Se
         raise NotFound("Team not found")
     access = Access.for_workspace(db, user.id, team.workspace_id)
     member_list = teams.members_of(db, [team.id])[team.id]
-    out = teams.team_out(team, member_list, teams.leads_of(db, [team.id])[team.id])
-    tasks = mywork.tasks_assigned_to(db, access, [u.id for u in member_list], include_closed=True)
+    from app.services.work import team_tree
+
+    out = teams.team_out(team, member_list, teams.leads_of(db, [team.id])[team.id], team_tree.people(db, [team.id]))
+    tasks = mywork.tasks_assigned_to(db, access, out.all_member_ids, include_closed=True)  # sub-teams' work too
     by_id = {t.id: t for t in tasks}
     rows = list(db.scalars(
         select(TaskActivity).where(TaskActivity.task_id.in_(list(by_id))).order_by(TaskActivity.created_at.desc()).limit(60)

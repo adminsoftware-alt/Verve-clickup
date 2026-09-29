@@ -47,6 +47,16 @@ class UserOut(BaseModel):
     id: str
     email: str
     display_name: Optional[str] = None
+    # Path of the profile photo under /api/v2 (e.g. "avatars/ab12….png"), or None for initials.
+    avatar: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _avatar_from_row(cls, value):
+        key = getattr(value, "avatar_key", None) if not isinstance(value, dict) else None
+        if key:
+            return {"id": value.id, "email": value.email, "display_name": value.display_name, "avatar": f"avatars/{key}"}
+        return value
 
 
 class WorkspaceCreate(BaseModel):
@@ -57,6 +67,8 @@ class WorkspaceOut(BaseModel):
     id: uuid.UUID
     name: str
     role: WorkspaceRole
+    # Set when the caller is a member but can't open it (access turned off, or a sign-in rule).
+    access_problem: Optional[str] = None
 
 
 class MemberAdd(BaseModel):
@@ -85,8 +97,13 @@ class PersonCreate(BaseModel):
     employee_code: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
     date_of_joining: Optional[date] = None
     location: Optional[ShortText] = None
+    date_of_birth: Optional[date] = None
+    marriage_anniversary: Optional[date] = None
+    takes_interviews: bool = False
     team_ids: List[uuid.UUID] = Field(default_factory=list)
     send_invite: bool = False
+    # Create the joiner checklist tasks (induction, learning, reviews, HR reminders) straight away.
+    start_joiner_checklist: bool = False
 
 
 class PersonUpdate(BaseModel):
@@ -102,6 +119,9 @@ class PersonUpdate(BaseModel):
     employee_code: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
     date_of_joining: Optional[date] = None
     location: Optional[ShortText] = None
+    date_of_birth: Optional[date] = None
+    marriage_anniversary: Optional[date] = None
+    takes_interviews: Optional[bool] = None
     team_ids: Optional[List[uuid.UUID]] = None
 
 
@@ -117,9 +137,14 @@ class PersonOut(BaseModel):
     employee_code: Optional[str] = None
     date_of_joining: Optional[date] = None
     location: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    marriage_anniversary: Optional[date] = None
+    takes_interviews: bool = False
     team_ids: List[uuid.UUID] = Field(default_factory=list)
     direct_reports: int = 0
     invite_sent_at: Optional[datetime] = None
+    deactivated_at: Optional[datetime] = None
+    joiner_tasks: int = 0  # tasks the joiner checklist made for them
 
 
 class PersonAdded(BaseModel):
@@ -148,6 +173,115 @@ class MemberOut(BaseModel):
     user: UserOut
     role: WorkspaceRole
     joined_at: datetime
+    deactivated: bool = False
+
+
+# --- people administration ------------------------------------------------------------------
+
+
+class PersonImportRow(BaseModel):
+    """One person from a spreadsheet. Manager and teams are given by email and name, as people write them."""
+
+    email: Email
+    name: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]] = None
+    role: Optional[str] = None
+    designation: Optional[ShortText] = None
+    department: Optional[ShortText] = None
+    manager_email: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=320)]] = None
+    teams: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]] = None
+    phone: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
+    employee_code: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
+    date_of_joining: Optional[date] = None
+    date_of_birth: Optional[date] = None
+    marriage_anniversary: Optional[date] = None
+    location: Optional[ShortText] = None
+
+
+class PersonImportIn(BaseModel):
+    rows: List[PersonImportRow] = Field(min_length=1, max_length=1000)
+    dry_run: bool = False
+    send_invites: bool = False
+    start_joiner_checklist: bool = False
+    # Existing people in the file: update their profile, or leave them as they are.
+    update_existing: bool = True
+
+
+class PersonImportRowResult(BaseModel):
+    row: int  # 1-based, as in the spreadsheet (after the header)
+    email: str
+    outcome: Literal["added", "updated", "unchanged", "error"]
+    problems: List[str] = Field(default_factory=list)
+
+
+class PersonImportResult(BaseModel):
+    dry_run: bool
+    added: int
+    updated: int
+    errors: int
+    rows: List[PersonImportRowResult]
+    email_problem: Optional[str] = None
+
+
+class OffboardPreview(BaseModel):
+    person: UserOut
+    hand_over_to: Optional[UserOut]  # the default: their reporting manager
+    open_tasks: int
+    direct_reports: int
+    teams: int
+    joiner_tasks_kept: List[str]
+    joiner_tasks_deleted: List[str]
+
+
+class OffboardIn(BaseModel):
+    hand_over_to: Optional[str] = None  # who gets their open tasks; default their manager; null with keep_tasks
+    keep_tasks: bool = False  # leave open tasks assigned (no hand-over)
+    apply_leaver_rules: bool = True  # SOP: keep birthday task as "Ex – Name", delete their other joiner tasks
+
+
+class OffboardResult(BaseModel):
+    tasks_handed_over: int
+    joiner_tasks_kept: int
+    joiner_tasks_deleted: int
+    direct_reports_moved: int
+
+
+class TransferOwnershipIn(BaseModel):
+    user_id: str
+
+
+class SignInRules(BaseModel):
+    allowed_email_domains: List[Annotated[str, StringConstraints(strip_whitespace=True, to_lower=True, pattern=r"^@?[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")]] = Field(default_factory=list, max_length=20)
+    allow_outside_guests: bool = True
+    require_google_sign_in: bool = False
+    require_two_step: bool = False
+
+
+class EmailStatus(BaseModel):
+    configured: bool
+    host: Optional[str] = None
+    sender: Optional[str] = None
+
+
+class JoinerStep(BaseModel):
+    key: str
+    name: str
+    outcome: Literal["created", "exists", "would_create", "skipped", "problem"]
+    reason: Optional[str] = None
+    task_id: Optional[uuid.UUID] = None
+    list_name: Optional[str] = None
+    due_date: Optional[datetime] = None
+
+
+class AuditEventOut(BaseModel):
+    id: uuid.UUID
+    action: str
+    verb: str
+    actor: Optional[UserOut]
+    target_kind: Optional[str]
+    target_id: Optional[str]
+    target_label: Optional[str]
+    data: Dict[str, Any]
+    created_at: datetime
 
 
 # --- locations ---------------------------------------------------------------
@@ -175,10 +309,18 @@ class SpaceCreate(LocationCreate):
 TaskPrefix = Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=10, pattern=r"^[A-Za-z0-9]+$")]
 
 
+ClickAppName = Literal[
+    "priorities", "tags", "time_tracking", "time_estimates", "custom_task_ids", "multiple_assignees",
+    "sprint_points", "multiple_lists", "email_to_list", "custom_fields",
+]
+
+
 class SpaceUpdate(LocationUpdate):
     description: Optional[str] = Field(default=None, max_length=5000)
     icon: Optional[str] = Field(default=None, max_length=64)
     task_prefix: Optional[TaskPrefix] = None
+    clickapps: Optional[Dict[ClickAppName, bool]] = None
+    discoverable: Optional[bool] = None
 
 
 class FolderCreate(LocationCreate):
@@ -191,6 +333,10 @@ class FolderUpdate(LocationUpdate):
 
 class ListCreate(LocationCreate):
     description: Optional[str] = Field(default=None, max_length=5000)
+    # Hand it over as it is made: the assignees get full access, so it appears in their sidebar.
+    assignees: List[str] = Field(default_factory=list, max_length=20)
+    # Only those people (and whoever assigned it) can see it.
+    private: bool = False
 
 
 class ListUpdate(LocationUpdate):
@@ -204,8 +350,16 @@ class ListUpdate(LocationUpdate):
         return _as_utc(value)
 
 
+class TeamRef(BaseModel):
+    id: uuid.UUID
+    name: str
+    color: Optional[str]
+
+
 class LocationOut(BaseModel):
     id: uuid.UUID
+    # Set when this belongs to a Team: only that Team and the admins see it.
+    team: Optional["TeamRef"] = None
     name: str
     color: Optional[str]
     is_private: bool
@@ -221,12 +375,15 @@ class SpaceOut(LocationOut):
     description: Optional[str]
     icon: Optional[str]
     task_prefix: Optional[str] = None
+    clickapps: Dict[str, bool] = Field(default_factory=dict)
+    discoverable: bool = False
 
 
 class FolderOut(LocationOut):
     space_id: uuid.UUID
     parent_folder_id: Optional[uuid.UUID]
     override_statuses: bool
+    sprint_settings: Optional[Dict[str, Any]] = None
 
 
 class ListOut(LocationOut):
@@ -234,9 +391,12 @@ class ListOut(LocationOut):
     folder_id: Optional[uuid.UUID]
     description: Optional[str]
     override_statuses: bool
+    # The first person it was handed to; `assignees` is everyone it belongs to.
     assignee_id: Optional[str] = None
+    assignees: List[UserOut] = Field(default_factory=list)
     start_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
+    sprint_completed_at: Optional[datetime] = None
 
 
 # --- hierarchy tree ----------------------------------------------------------
@@ -245,6 +405,7 @@ class ListOut(LocationOut):
 class ListNode(BaseModel):
     id: uuid.UUID
     name: str
+    team: Optional["TeamRef"] = None
     color: Optional[str]
     is_private: bool
     archived: bool
@@ -252,9 +413,11 @@ class ListNode(BaseModel):
     permission_level: PermissionLevel
     open_task_count: int
     assignee_id: Optional[str] = None
+    assignee_ids: List[str] = Field(default_factory=list)
     start_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
     description: Optional[str] = None
+    sprint_completed_at: Optional[datetime] = None
 
 
 class FolderNode(BaseModel):
@@ -265,6 +428,7 @@ class FolderNode(BaseModel):
     archived: bool
     orderindex: float
     permission_level: PermissionLevel
+    is_sprint: bool = False
     folders: List["FolderNode"] = []
     lists: List[ListNode] = []
 
@@ -281,6 +445,8 @@ class SpaceNode(BaseModel):
     archived: bool
     orderindex: float
     permission_level: PermissionLevel
+    hidden: bool = False  # left by the caller: kept out of their sidebar
+    clickapps: Dict[str, bool] = Field(default_factory=dict)
     folders: List[FolderNode] = []
     lists: List[ListNode] = []
 
@@ -300,12 +466,21 @@ class SharedWithMe(BaseModel):
     tasks: List[SharedTaskRef] = []
 
 
+class SidebarSectionOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    orderindex: float
+    space_ids: List[uuid.UUID]
+    collapsed: bool
+
+
 class HierarchyOut(BaseModel):
     workspace_id: uuid.UUID
     role: WorkspaceRole
     spaces: List[SpaceNode]
     shared_with_me: SharedWithMe
     personal_list: Optional[ListNode] = None
+    sections: List[SidebarSectionOut] = []
 
 
 # --- statuses ----------------------------------------------------------------
@@ -373,12 +548,6 @@ class ShareCreate(BaseModel):
         return self
 
 
-class TeamRef(BaseModel):
-    id: uuid.UUID
-    name: str
-    color: Optional[str]
-
-
 class ShareOut(BaseModel):
     id: uuid.UUID
     user: Optional[UserOut]
@@ -417,6 +586,7 @@ class TeamCreate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=5000)
     handle: Optional[TeamHandle] = None
     icon: Optional[Annotated[str, StringConstraints(max_length=32)]] = None
+    parent_team_id: Optional[uuid.UUID] = None
 
 
 class TeamUpdate(BaseModel):
@@ -425,6 +595,7 @@ class TeamUpdate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=5000)
     icon: Optional[Annotated[str, StringConstraints(max_length=32)]] = None
     locations: Optional[List[TeamLocation]] = Field(default=None, max_length=50)
+    parent_team_id: Optional[uuid.UUID] = None  # null: a top-level Team
 
 
 class TeamMembersSet(BaseModel):
@@ -443,6 +614,9 @@ class TeamOut(BaseModel):
     handle: Optional[str] = None
     icon: Optional[str] = None
     locations: List[TeamLocation] = Field(default_factory=list)
+    parent_team_id: Optional[uuid.UUID] = None
+    # Everyone in its sub-teams too (they count as members of this Team).
+    all_member_ids: List[str] = Field(default_factory=list)
 
 
 # --- tasks -------------------------------------------------------------------
@@ -521,19 +695,101 @@ class MoveTarget(BaseModel):
         return self
 
 
+class CopyParts(BaseModel):
+    """What a duplicated task carries over. Everything on by default, as ClickUp does it.
+
+    Two are off: a checked checklist item is somebody else's finished work, and comments are a
+    conversation that happened once -- copying either makes the new task lie about its history.
+    """
+
+    assignees: bool = True
+    followers: bool = True
+    attachments: bool = True
+    checklists: bool = True
+    keep_checked_items: bool = False
+    comments: bool = False
+    custom_fields: bool = True
+    dates: bool = True
+    keep_status: bool = True
+    tags: bool = True
+    task_type: bool = True
+    recurrence: bool = True
+    relationships: bool = True
+    subtasks: bool = True
+
+
 class DuplicateIn(BaseModel):
     name: Optional[Name] = None
     include_tasks: bool = True  # Lists and Folders
     include_subtasks: bool = True  # tasks
     list_id: Optional[uuid.UUID] = None  # tasks: copy into another List (default: the same one)
+    # Spaces, Folders and Lists: where the copy goes. A List can go into any Space or any Folder,
+    # a Folder into any Space. Leaving both out puts it beside the original, as it used to.
+    space_id: Optional[uuid.UUID] = None
+    folder_id: Optional[uuid.UUID] = None
+    # Archived tasks are finished work someone chose to put away; a copy meant to be done again
+    # should not arrive carrying them.
+    include_archived: bool = False
+    # The location's own furniture, as against the tasks inside it.
+    statuses: bool = True
+    views: bool = True
+    automations: bool = True
+    # Who the copy is for. Empty means what a Space, Folder or List normally means: everyone in
+    # the workspace who can reach it. Naming people makes the copy private and hands it to just
+    # them, which is the only way to duplicate something for one person without also showing it
+    # to the other sixty.
+    share_with: List[str] = Field(default_factory=list, max_length=100)
+    share_level: PermissionLevel = PermissionLevel.edit
+    # Tasks: which pieces come along. Absent means the old behaviour, so existing callers are safe.
+    parts: Optional[CopyParts] = None
+    # Tasks: a copy each, in these people's Personal Lists. Sharing one task instead is
+    # /tasks/{id}/shared-with -- a copy drifts, a share does not.
+    user_ids: List[str] = Field(default_factory=list, max_length=100)
+
+
+class GiveToTeam(BaseModel):
+    """Hand a Space, Folder or List to a Team. None gives it back to the whole workspace."""
+
+    team_id: Optional[uuid.UUID] = None
 
 
 class ListAssign(BaseModel):
-    """Hand a List to one person. None takes it back."""
+    """Hand a List to one or more people. An empty list (or None) takes it back."""
 
+    # One person, the older way of saying it; `user_ids` wins when both are given.
     user_id: Optional[str] = None
-    # Make the List private so only that person (and whoever assigned it) can see it.
+    user_ids: Optional[List[str]] = Field(default=None, max_length=20)
+    # Make the List private so only those people (and whoever assigned it) can see it.
     private: bool = True
+
+
+Points = Annotated[float, Field(ge=0, le=1000)]
+
+
+class PersonLoadRow(BaseModel):
+    user_id: str
+    planned_per_day: List[int]
+    capacity_per_day: List[int]
+    planned_total: int
+    capacity_total: int
+
+
+class PeopleLoad(BaseModel):
+    """How full some people's days already are, counting only work the viewer can open."""
+
+    days: List[str]
+    rows: List[PersonLoadRow]
+
+
+class TaskDefaults(BaseModel):
+    """What a new task in this List should open pre-filled with, worked out from its history."""
+
+    time_estimate_seconds: Optional[int] = None
+    estimate_basis: Optional[Literal["similar", "list"]] = None
+    estimate_from: int = 0          # how many past tasks the estimate was taken from
+    priority: Optional[int] = None
+    assignees: List[str] = Field(default_factory=list)
+    days_to_due: int = 2
 
 
 class TaskCreate(_DatesMixin):
@@ -549,6 +805,10 @@ class TaskCreate(_DatesMixin):
     group_id: Optional[uuid.UUID] = None
     recurrence: Optional[Recurrence] = None
     type_id: Optional[uuid.UUID] = None
+    points: Optional[Points] = None
+    # The Space's own fields, by field id. Set with the task rather than after it, so a task is
+    # never briefly missing the things this firm actually files work by.
+    custom_fields: Dict[uuid.UUID, Any] = Field(default_factory=dict)
 
 
 class TaskUpdate(_DatesMixin):
@@ -568,6 +828,7 @@ class TaskUpdate(_DatesMixin):
     group_id: Optional[uuid.UUID] = None
     recurrence: Optional[Recurrence] = None
     type_id: Optional[uuid.UUID] = None
+    points: Optional[Points] = None
 
 
 class TaskMove(BaseModel):
@@ -577,7 +838,7 @@ class TaskMove(BaseModel):
 
 FieldTypeName = Literal[
     "text", "long_text", "number", "money", "dropdown", "labels", "date", "checkbox",
-    "email", "phone", "url", "rating", "progress", "people",
+    "email", "phone", "url", "rating", "progress", "people", "location",
 ]
 
 
@@ -668,7 +929,7 @@ class TemplateUpdate(BaseModel):
 
 class TemplateOut(BaseModel):
     id: uuid.UUID
-    kind: Literal["task", "list", "folder"]
+    kind: Literal["task", "list", "folder", "space"]
     name: str
     description: Optional[str]
     is_private: bool
@@ -690,7 +951,7 @@ class TemplateApply(BaseModel):
 
 
 class TemplateApplied(BaseModel):
-    kind: Literal["task", "list", "folder"]
+    kind: Literal["task", "list", "folder", "space"]
     id: uuid.UUID
     list_id: Optional[uuid.UUID] = None
 
@@ -702,7 +963,11 @@ class BulkEdit(_DatesMixin):
     task_ids: List[uuid.UUID] = Field(min_length=1, max_length=500)
     status: Optional[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]] = None
     priority: Optional[Priority] = None
+    # Estimates are required on new work, so a batch of older tasks often needs sizing in one go.
+    time_estimate_seconds: Optional[EstimateSeconds] = None
     group_id: Optional[uuid.UUID] = None
+    # The whole point of a type is that a lot of tasks share one, so it is set a lot at a time.
+    type_id: Optional[uuid.UUID] = None
     archived: Optional[bool] = None
     add_assignees: List[str] = Field(default_factory=list, max_length=100)
     remove_assignees: List[str] = Field(default_factory=list, max_length=100)
@@ -773,6 +1038,8 @@ class TaskOut(BaseModel):
     tags: List[TagOut]
     subtask_count: int
     permission_level: PermissionLevel
+    points: Optional[float] = None
+    extra_list_ids: List[uuid.UUID] = Field(default_factory=list, description="Other Lists this task also appears in")
 
 
 class TaskDetailOut(TaskOut):
@@ -894,12 +1161,14 @@ class TaskTypeIn(BaseModel):
     name_plural: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
     icon: Annotated[str, StringConstraints(max_length=32)] = "circle"
     color: HexColor = "#6366f1"
+    description: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)]] = None
     is_milestone: bool = False
 
 
 class TaskTypeUpdate(BaseModel):
     name: Optional[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]] = None
     name_plural: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
+    description: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)]] = None
     icon: Optional[Annotated[str, StringConstraints(max_length=32)]] = None
     color: Optional[HexColor] = None
     is_milestone: Optional[bool] = None
@@ -914,11 +1183,15 @@ class TaskTypeOut(BaseModel):
     name_plural: Optional[str]
     icon: str
     color: str
+    description: Optional[str] = None
     is_milestone: bool
     orderindex: float
+    # How many tasks wear it. A type nobody uses is one to retire, and a type on 400 tasks is one
+    # to think twice about renaming.
+    task_count: int = 0
 
 
-FavoriteKind = Literal["space", "folder", "list", "task", "dashboard", "view"]
+FavoriteKind = Literal["space", "folder", "list", "task", "dashboard", "view", "goal"]
 
 
 class FavoriteIn(BaseModel):
@@ -1007,6 +1280,8 @@ class WorkloadTask(BaseModel):
     name: str
     list_id: uuid.UUID
     status: StatusOut
+    # Carried so the Workload view can be filtered by it without a second read.
+    priority: Optional[int] = None
     seconds_per_day: List[int]  # aligned with WorkloadOut.days
 
 

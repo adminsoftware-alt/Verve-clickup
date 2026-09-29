@@ -114,7 +114,7 @@ export const GlobalSearch: React.FC = () => {
       if (matches(sp.name, query)) {
         places.push({
           key: `s:${sp.id}`, section: 'Places', label: sp.name, sub: 'Space',
-          icon: <span className="flex h-4 w-4 items-center justify-center rounded bg-indigo-600 text-[9px] font-bold text-white">{sp.name[0]?.toUpperCase()}</span>, go: go(`/s/${sp.id}`),
+          icon: <span className="flex h-4 w-4 items-center justify-center rounded bg-brand-600 text-[9px] font-bold text-white">{sp.name[0]?.toUpperCase()}</span>, go: go(`/s/${sp.id}`),
         });
       }
       walk(sp, [sp.name]);
@@ -176,7 +176,7 @@ export const GlobalSearch: React.FC = () => {
                     <li key={h.key}>
                       <button type="button" role="option" aria-selected={i === active} data-index={i}
                         onMouseEnter={() => setActive(i)} onClick={h.go}
-                        className={`flex w-full items-center gap-3 px-4 py-1.5 text-left ${i === active ? 'bg-indigo-50' : ''}`}>
+                        className={`flex w-full items-center gap-3 px-4 py-1.5 text-left ${i === active ? 'bg-brand-50' : ''}`}>
                         <span className="flex w-5 shrink-0 justify-center text-gray-500">{h.icon}</span>
                         <span className="min-w-0 flex-1 truncate text-sm text-gray-900">{h.label}</span>
                         {h.sub && <span className="max-w-[45%] shrink-0 truncate text-xs text-gray-400">{h.sub}</span>}

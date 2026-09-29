@@ -3,17 +3,20 @@
 
 :root {
   /* Brand Colors */
-  --color-primary: #4F46E5; /* Indigo 600 */
-  --color-primary-hover: #4338CA;
-  --color-primary-light: #EEF2FF;
+  --color-primary: #0F766E; /* Deep teal */
+  --color-primary-hover: #0B5A54;
+  --color-primary-light: #E6F2F0;
+  --color-accent: #F59E0B; /* Amber: the one bright colour, for the main action */
+  --color-accent-hover: #D97706;
+  --color-accent-ink: #1B1205;
   
-  /* Sidebar Colors (Dark Theme) */
-  --color-sidebar-bg: #111827; /* Gray 900 */
-  --color-sidebar-surface: #1F2937;
-  --color-sidebar-text: #9CA3AF;
-  --color-sidebar-text-active: #F9FAFB;
-  --color-sidebar-active-bg: #4F46E5;
-  --color-sidebar-border: #374151;
+  /* Sidebar Colors (light green rail) */
+  --color-sidebar-bg: #EFF9F3;
+  --color-sidebar-surface: #E2F3EA;
+  --color-sidebar-text: #3F6659;
+  --color-sidebar-text-active: #0B4A40;
+  --color-sidebar-active-bg: rgba(16, 185, 129, 0.16);
+  --color-sidebar-border: rgba(15, 118, 110, 0.14);
 
   /* Surface & Background */
   --color-background: #F9FAFB; /* Gray 50 */
@@ -79,6 +82,46 @@
     padding: 0;
   }
 
+  /* Anything you can act on shows a hand.
+
+     Tailwind v4's preflight leaves buttons on the browser default, which is an arrow -- so every
+     button in the app looked like text you happened to be able to press. Rather than remembering
+     a cursor class on each one, the rule is stated once here: if it is a control, it is a hand;
+     if it is a control you cannot use, it says so. */
+  button,
+  summary,
+  select,
+  [role="button"],
+  [role="tab"],
+  [role="option"],
+  [role="menuitem"],
+  [role="switch"],
+  a[href],
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]),
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  input[type="color"],
+  input[type="file"],
+  [draggable="true"] {
+    cursor: pointer;
+  }
+
+  /* A control that cannot be used should not invite the click. */
+  button:disabled,
+  select:disabled,
+  input:disabled,
+  fieldset:disabled button,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
+  /* Dragging a card or a column says so while the pointer is over the handle. */
+  [draggable="true"]:active {
+    cursor: grabbing;
+  }
+
   body {
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     color: var(--color-text-primary);
@@ -110,6 +153,232 @@
   ul {
     list-style: none;
   }
+}
+
+
+/* The palette. `brand-*` is the teal the app is built in -- it used to be spelled `indigo-*`,
+   which meant the code said one colour and the screen showed another, and anything genuinely
+   indigo came out teal by accident. Amber stays amber, and is used for the main action only. */
+@theme {
+  --color-brand-50: #E6F2F0;
+  --color-brand-100: #CCE5E1;
+  --color-brand-200: #99CBC4;
+  --color-brand-300: #66B1A6;
+  --color-brand-400: #33978A;
+  --color-brand-500: #0F8177;
+  --color-brand-600: #0F766E;
+  --color-brand-700: #0B5A54;
+  --color-brand-800: #084540;
+  --color-brand-900: #0F2E2B;
+}
+
+/* The one bright button: "+ Task", "Create", and other primary actions. */
+.btn-accent {
+  background-color: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+.btn-accent:hover { background-color: var(--color-accent-hover); }
+
+/* The sidebar is a light mint green. These rules re-skin the shared utilities inside it, so
+   the sidebar's own components keep their light-theme classes. */
+.app-sidebar {
+  background: linear-gradient(180deg, #F2FBF6 0%, #DDF2E7 100%) !important;
+  border-right: 1px solid rgba(15, 118, 110, 0.14) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+.app-sidebar .text-gray-300 { color: #A3C2B6; }
+.app-sidebar .text-gray-400 { color: #7D9F93; }
+.app-sidebar .text-gray-500 { color: #5C8376; }
+.app-sidebar .text-gray-600,
+.app-sidebar .text-gray-700,
+.app-sidebar .text-gray-800,
+.app-sidebar .text-gray-900 { color: #16352C; }
+.app-sidebar .hover\:bg-black\/5:hover,
+.app-sidebar .hover\:bg-black\/10:hover,
+.app-sidebar .hover\:bg-gray-50:hover,
+.app-sidebar .hover\:bg-gray-100:hover { background-color: rgba(15, 118, 110, 0.09); }
+.app-sidebar .hover\:text-gray-600:hover,
+.app-sidebar .hover\:text-gray-700:hover,
+.app-sidebar .hover\:text-gray-800:hover,
+.app-sidebar .hover\:text-gray-900:hover { color: #0B3A31; }
+.app-sidebar .bg-brand-50 { background-color: rgba(16, 185, 129, 0.16); }
+.app-sidebar .text-brand-600,
+.app-sidebar .text-brand-700 { color: #0F766E; }
+.app-sidebar .border-gray-100,
+.app-sidebar .border-gray-200 { border-color: rgba(15, 118, 110, 0.14); }
+.app-sidebar .bg-amber-50 { background-color: rgba(16, 185, 129, 0.16); }
+
+/* --- dropdowns ----------------------------------------------------------------
+   Every <select> in the app, lifted in one place rather than 119 of them one at a
+   time.
+
+   Two rules, deliberately in different layers:
+
+   * The first is unlayered, so it beats Tailwind's utilities. It carries only what
+     must not be overridden -- the OS caret swapped for ours, and the room that
+     caret needs -- because a component that sets `px-2` would otherwise put its own
+     padding back and the caret would sit on top of the value.
+   * The cosmetics below it sit in @layer base, where any utility a component
+     already carries still wins. That is what keeps this from redesigning controls
+     that were designed on purpose.
+
+   A multiple or sized select is a list box, not a dropdown: no caret, no room for
+   one, and it keeps its own height. */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  padding-inline-end: 1.65rem;
+}
+
+@layer base {
+  select {
+    border-radius: 8px;
+    border: 1px solid #E2E5EA;
+    background-color: #fff;
+    padding-block: 0.3125rem;
+    padding-inline-start: 0.625rem;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: #1F2937;
+    transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+  }
+  select:hover:not(:disabled) { border-color: #C9CFD8; background-color: #FCFCFD; }
+  select:focus-visible {
+    outline: none;
+    border-color: #0F766E;
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+  }
+  select:disabled { color: #9CA3AF; background-color: #F7F8FA; }
+
+  /* The open list is drawn by the operating system, so only its colours are ours to
+     set. On Windows this is what stops the list being a slab of system blue. */
+  select option {
+    background-color: #fff;
+    color: #1F2937;
+    padding: 6px 10px;
+  }
+  select option:checked { background-color: #E6F4F1; color: #0B3A31; }
+  select option:disabled { color: #9CA3AF; }
+}
+
+/* --- the Spaces tree ----------------------------------------------------------
+   A Space, a Folder and a List are three different kinds of thing, and on a single
+   tinted background they all read as the same row. So each level gets its own weight
+   and its own icon colour: a Space is a heading, a Folder is a container, a List is
+   the thing you actually open. */
+.app-sidebar .side-space {
+  margin-top: 2px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+.app-sidebar .side-space > span > span { color: #0B3A31; }
+
+.app-sidebar .side-folder { font-weight: 550; }
+.app-sidebar .side-folder > span > svg { color: #B4791B; }
+.app-sidebar .side-folder:hover > span > svg { color: #8A5B10; }
+
+.app-sidebar .side-list { font-weight: 450; }
+.app-sidebar .side-list > span > svg { color: #0E8F84; }
+.app-sidebar .side-list:hover > span > svg { color: #0B6B63; }
+.app-sidebar .side-list > span > span { color: #2F5951; }
+
+/* What is inside a Folder hangs off a line, so nesting is visible without counting
+   indents. The line stops short at the bottom so it does not run into the next Folder. */
+.app-sidebar .side-branch {
+  position: relative;
+  padding-left: 2px;
+}
+.app-sidebar .side-branch::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 6px;
+  left: 0;
+  width: 1px;
+  background: rgba(15, 118, 110, 0.18);
+}
+
+/* --- the left rail ------------------------------------------------------------
+   One row shape for everything in the rail -- the top pages, My Tasks, the Spaces tree
+   and the actions under it -- so the icons sit in one column, the spacing is even, and
+   every row answers the pointer the same way. Rows without a twisty keep a 16px slot
+   where one would be; that slot is what lines the icons up. */
+.app-sidebar .side-row {
+  position: relative;
+  min-height: 32px;
+  padding-right: 8px;
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.25;
+  color: #2C5349;
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+.app-sidebar .side-row > svg,
+.app-sidebar .side-row > span > svg { flex: none; color: #5F9285; transition: color 120ms ease; }
+.app-sidebar .side-row:hover { background-color: rgba(15, 118, 110, 0.09); color: #0B3A31; }
+.app-sidebar .side-row:hover > svg,
+.app-sidebar .side-row:hover > span > svg { color: #0F766E; }
+.app-sidebar .side-row:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+
+/* Active: a filled block with the accent down its inside edge, so it reads at a glance
+   and stays put whatever the row's indent. */
+.app-sidebar .side-row.is-active,
+.app-sidebar .side-row.is-active:hover {
+  background-color: rgba(16, 185, 129, 0.18);
+  box-shadow: inset 3px 0 0 #0F766E;
+  color: #0B4A40;
+  font-weight: 600;
+}
+.app-sidebar .side-row.is-active > svg,
+.app-sidebar .side-row.is-active > span > svg { color: #0F766E; }
+
+/* Counts and other trailing numbers sit quietly at the end of a row. */
+.app-sidebar .side-row .text-xs { font-variant-numeric: tabular-nums; }
+
+.app-sidebar .side-head {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #5F8B7F;
+}
+/* Children slide in rather than appearing, and hang off a hairline guide. */
+@keyframes side-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.app-sidebar .side-children { animation: side-in 140ms ease-out; }
+/* A divider before the rail's closing actions. */
+.app-sidebar .side-rule { margin: 10px 4px 6px; border-top: 1px solid rgba(15, 118, 110, 0.14); }
+/* The rail is long enough to scroll; give it a thin thumb instead of nothing. */
+.app-sidebar::-webkit-scrollbar { display: block; width: 6px; }
+.app-sidebar::-webkit-scrollbar-thumb { background: rgba(15, 118, 110, 0.22); border-radius: 3px; }
+.app-sidebar::-webkit-scrollbar-track { background: transparent; }
+
+/* --- waiting ------------------------------------------------------------------
+   While something loads, show the shape of what's coming rather than the word
+   "Loading": a soft block with a light sweeping across it. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  background: rgba(15, 46, 43, 0.06);
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85), transparent);
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  100% { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after { animation: none; }
 }
 
 /* Hide scrollbar for Chrome, Safari and Opera */
@@ -176,7 +445,7 @@
 }
 
 .premium-btn-primary {
-  background: linear-gradient(180deg, #4F46E5 0%, #4338CA 100%);
+  background: linear-gradient(135deg, #0B5FFF 0%, #12A89A 55%, #16A34A 100%);
   color: #FFFFFF;
   border: 1px solid rgba(0, 0, 0, 0.1) !important;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.15);
@@ -184,7 +453,7 @@
 }
 
 .premium-btn-primary:hover {
-  background: linear-gradient(180deg, #5850EC 0%, #4F46E5 100%);
+  background: linear-gradient(135deg, #2B76FF 0%, #16B5A6 55%, #1BB255 100%);
   box-shadow: 0 4px 8px rgba(79, 70, 229, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 

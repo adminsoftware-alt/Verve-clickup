@@ -2,6 +2,7 @@
 // Stored in the view's `settings`, so everyone opening the view sees the same thing.
 import type { Task } from '../api';
 import type { GroupBy } from './grouping';
+import { countRules, matchesGroup, readAdvanced, type FilterGroup } from './filterGroups';
 
 export type DueFilter = 'overdue' | 'today' | 'this_week' | 'next_week' | 'no_date' | 'has_date';
 export type SortField = 'manual' | 'name' | 'status' | 'due_date' | 'start_date' | 'priority' | 'created_at' | 'updated_at' | 'time_estimate' | 'time_tracked';
@@ -14,16 +15,23 @@ export interface ViewFilters {
   tags: string[]; // lower-case names
   due: DueFilter[];
   groups: string[]; // task group ids, or 'none'
+  /** Rules joined by AND / OR, with nested groups (ClickUp's advanced filters). */
+  advanced?: FilterGroup;
 }
 
 export interface ViewSettings {
   filters: ViewFilters;
   sort: { field: SortField; dir: 'asc' | 'desc' };
   groupBy: GroupBy;
+  /** The Board's own grouping. A List is read as "what is left"; a Board is read as the flow
+   *  across To do, In progress and Completed, so the two want different defaults. */
+  boardGroupBy: GroupBy;
   hidden: string[]; // column keys, or "cf:<field id>" for custom fields
   showClosed: boolean;
   totals: Record<string, string>; // Table column calculations
 }
+
+const GROUPINGS = ['status', 'progress', 'group', 'assignee', 'priority', 'due', 'tags', 'none'];
 
 export const COLUMNS: { key: ColumnKey; label: string; width: string }[] = [
   { key: 'custom_id', label: 'Task ID', width: '84px' },
@@ -64,6 +72,7 @@ export const DEFAULT_SETTINGS: ViewSettings = {
   filters: EMPTY_FILTERS,
   sort: { field: 'manual', dir: 'asc' },
   groupBy: 'status',
+  boardGroupBy: 'progress',
   hidden: ['custom_id', 'tags', 'created_at'],
   showClosed: false,
   totals: {},
@@ -85,9 +94,11 @@ export function readSettings(raw: Record<string, unknown> | undefined, viewType?
       tags: arr<string>(f.tags, isStr),
       due: arr<DueFilter>(f.due, (x) => DUE_FILTERS.some((d) => d.key === x)),
       groups: arr<string>(f.groups, isStr),
+      ...(readAdvanced(f.advanced) && countRules(readAdvanced(f.advanced)) > 0 ? { advanced: readAdvanced(f.advanced) } : {}),
     },
     sort: { field: sortField, dir: r.sort?.dir === 'desc' ? 'desc' : 'asc' },
-    groupBy: ['status', 'group', 'assignee', 'priority', 'due', 'tags', 'none'].includes(r.groupBy) ? r.groupBy : 'status',
+    groupBy: GROUPINGS.includes(r.groupBy) ? r.groupBy : 'status',
+    boardGroupBy: GROUPINGS.includes(r.boardGroupBy) ? r.boardGroupBy : 'progress',
     hidden: Array.isArray(r.hidden) ? arr<string>(r.hidden, (x) => typeof x === 'string' && x.length <= 64) : viewType === 'table' ? [] : DEFAULT_SETTINGS.hidden,
     showClosed: r.showClosed === true,
     totals: r.totals && typeof r.totals === 'object' ? Object.fromEntries(Object.entries(r.totals as Record<string, unknown>).filter(([, v]) => typeof v === 'string')) as Record<string, string> : {},
@@ -97,7 +108,7 @@ export function readSettings(raw: Record<string, unknown> | undefined, viewType?
 export const sameSettings = (a: ViewSettings, b: ViewSettings) => JSON.stringify(a) === JSON.stringify(b);
 
 export function filterCount(f: ViewFilters): number {
-  return f.statuses.length + f.assignees.length + f.priorities.length + f.tags.length + f.due.length + f.groups.length;
+  return f.statuses.length + f.assignees.length + f.priorities.length + f.tags.length + f.due.length + f.groups.length + countRules(f.advanced);
 }
 
 // --- dates ---------------------------------------------------------------------------------------
@@ -149,6 +160,7 @@ export function applyFilters(tasks: Task[], f: ViewFilters, me: string | undefin
     if (f.tags.length && !t.tags.some((tag) => f.tags.includes(tag.name.toLowerCase()))) return false;
     if (f.due.length && !f.due.some((d) => matchesDue(t, d))) return false;
     if (f.groups.length && !f.groups.includes(t.group?.id ?? 'none')) return false;
+    if (f.advanced && !matchesGroup(t, f.advanced, me, (task, key) => matchesDue(task, key as DueFilter))) return false;
     return true;
   });
 }

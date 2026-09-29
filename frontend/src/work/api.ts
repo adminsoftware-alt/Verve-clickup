@@ -1,5 +1,6 @@
 // Client for the v2 work hierarchy API (spaces, folders, lists, tasks, views).
 import { auth } from '../core/firebase';
+import { devUser } from '../core/devSession';
 
 const V1 = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
 export const API_V2 = V1.replace(/\/api\/v1\/?$/, '/api/v2');
@@ -12,10 +13,17 @@ export class ApiError extends Error {
   }
 }
 
-export async function request<T>(method: string, path: string, body?: unknown, params?: Record<string, string | number | boolean | undefined>): Promise<T> {
+/** The bearer token for this session: the signed-in person's, or a local testing one. */
+async function bearer(): Promise<string> {
+  const pretending = devUser();
+  if (pretending) return `dev:${pretending.id}`;
   const user = auth.currentUser;
   if (!user) throw new ApiError(401, 'Not signed in');
-  const token = await user.getIdToken();
+  return user.getIdToken();
+}
+
+export async function request<T>(method: string, path: string, body?: unknown, params?: Record<string, string | number | boolean | undefined>): Promise<T> {
+  const token = await bearer();
   const query = params
     ? '?' + Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')
     : '';
@@ -32,16 +40,27 @@ export async function request<T>(method: string, path: string, body?: unknown, p
   return res.status === 204 ? (undefined as T) : res.json();
 }
 
+/** Send a multipart form (file uploads) with the user's token. */
+export async function upload<T>(method: string, path: string, form: FormData): Promise<T> {
+  const res = await fetch(`${API_V2}${path}`, { method, headers: { Authorization: `Bearer ${await bearer()}` }, body: form });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, (typeof data.detail === 'string' && data.detail) || `Upload failed (${res.status})`);
+  }
+  return res.status === 204 ? (undefined as T) : res.json();
+}
+
 // --- types -------------------------------------------------------------------
 
 export type Level = 'view' | 'comment' | 'edit' | 'full';
-export type Role = 'owner' | 'admin' | 'member' | 'guest';
+export type Role = 'owner' | 'admin' | 'member' | 'limited' | 'guest';
 export type StatusGroup = 'not_started' | 'active' | 'done' | 'closed';
-export type ViewType = 'list' | 'board' | 'calendar' | 'dashboard' | 'workload' | 'overview' | 'table' | 'team' | 'gantt' | 'timeline' | 'activity' | 'form';
+export type ViewType = 'list' | 'board' | 'calendar' | 'dashboard' | 'workload' | 'overview' | 'table' | 'team' | 'gantt' | 'timeline' | 'activity' | 'form'
+  | 'doc' | 'whiteboard' | 'mind_map' | 'map' | 'chat' | 'embed';
 
 export type FieldType =
   | 'text' | 'long_text' | 'number' | 'money' | 'dropdown' | 'labels' | 'date' | 'checkbox'
-  | 'email' | 'phone' | 'url' | 'rating' | 'progress' | 'people';
+  | 'email' | 'phone' | 'url' | 'rating' | 'progress' | 'people' | 'location';
 export interface FieldOption { id: string; name: string; color: string }
 export interface FieldConfig { options?: FieldOption[]; currency?: string; precision?: number; max?: number; include_time?: boolean }
 export interface CustomField {
@@ -49,30 +68,64 @@ export interface CustomField {
 }
 export type LocationKind = 'space' | 'folder' | 'list';
 
-export interface Workspace { id: string; name: string; role: Role }
-export interface UserRef { id: string; email: string; display_name: string | null }
-export interface Member { user: UserRef; role: Role; joined_at: string }
+export interface Workspace { id: string; name: string; role: Role; access_problem?: string | null }
+export interface UserRef { id: string; email: string; display_name: string | null; avatar?: string | null }
+export interface TaskDefaults {
+  time_estimate_seconds: number | null;
+  estimate_basis: 'similar' | 'list' | null;
+  estimate_from: number;
+  priority: number | null;
+  assignees: string[];
+  days_to_due: number;
+}
+
+export interface PersonLoadRow {
+  user_id: string;
+  planned_per_day: number[];
+  capacity_per_day: number[];
+  planned_total: number;
+  capacity_total: number;
+}
+
+export interface PeopleLoad { days: string[]; rows: PersonLoadRow[] }
+
+export interface Member { user: UserRef; role: Role; joined_at: string; deactivated?: boolean }
 
 export interface ListNode {
   id: string; name: string; color: string | null; is_private: boolean; archived: boolean;
   orderindex: number; permission_level: Level; open_task_count: number;
   /** The person this List was handed to. */
   assignee_id: string | null;
+  /** The Team this List belongs to, when it was given to one. */
+  team?: TeamRef | null;
+  /** Everyone the List was handed to. */
+  assignee_ids?: string[];
   start_date?: string | null; due_date?: string | null; description?: string | null;
+  /** A sprint List that was completed. */
+  sprint_completed_at?: string | null;
 }
 export interface FolderNode {
   id: string; name: string; color: string | null; is_private: boolean; archived: boolean;
   orderindex: number; permission_level: Level; folders: FolderNode[]; lists: ListNode[];
+  /** A Sprint Folder: its Lists are sprints. */
+  is_sprint?: boolean;
 }
+export type ClickApp = 'priorities' | 'tags' | 'time_tracking' | 'time_estimates' | 'custom_task_ids' | 'multiple_assignees'
+  | 'sprint_points' | 'multiple_lists' | 'email_to_list' | 'custom_fields';
 export interface SpaceNode {
   id: string; name: string; color: string | null; icon: string | null; is_private: boolean; archived: boolean;
   orderindex: number; permission_level: Level; folders: FolderNode[]; lists: ListNode[];
+  /** Left by you: kept out of your sidebar (find it on the All Spaces page). */
+  hidden?: boolean;
+  clickapps?: Partial<Record<ClickApp, boolean>>;
 }
+export interface SidebarSection { id: string; name: string; orderindex: number; space_ids: string[]; collapsed: boolean }
 export interface Hierarchy {
   workspace_id: string; role: Role; spaces: SpaceNode[];
   shared_with_me: { folders: FolderNode[]; lists: ListNode[]; tasks: { id: string; name: string; list_id: string; permission_level: Level }[] };
   /** The caller's own Personal List, once they have opened it. Never shown as a Space. */
   personal_list: ListNode | null;
+  sections?: SidebarSection[];
 }
 
 export interface Status { id: string; name: string; color: string; group: StatusGroup; orderindex: number }
@@ -91,6 +144,9 @@ export interface Task {
   custom_id?: string | null; type_id?: string | null;
   waiting_on_open?: number; blocking_count?: number; link_count?: number;
   custom_fields?: Record<string, unknown>;
+  points?: number | null;
+  /** Other Lists this task also shows in. */
+  extra_list_ids?: string[];
 }
 export interface TaskGroupRef { id: string; name: string; color: string }
 export interface TaskGroup extends TaskGroupRef { location: LocationKind; location_id: string; orderindex: number }
@@ -116,9 +172,12 @@ export interface BulkEdit {
   task_ids: string[]; status?: string; priority?: number | null; due_date?: string | null; start_date?: string | null;
   group_id?: string | null; archived?: boolean; add_assignees?: string[]; remove_assignees?: string[];
   add_tags?: string[]; remove_tags?: string[]; list_id?: string; delete?: boolean;
+  time_estimate_seconds?: number | null;
+  /** null puts them back to the plain built-in Task. */
+  type_id?: string | null;
 }
 export interface BulkResult { updated: string[]; skipped: { id: string; name: string; reason: string }[] }
-export type TemplateKind = 'task' | 'list' | 'folder';
+export type TemplateKind = 'task' | 'list' | 'folder' | 'space';
 export interface Template {
   id: string; kind: TemplateKind; name: string; description: string | null; is_private: boolean; created_by: string | null;
   created_at: string; use_count: number; task_count: number; list_count: number; field_count: number;
@@ -138,7 +197,14 @@ export interface View {
   id: string; type: ViewType; name: string; orderindex: number; is_required: boolean; settings: Record<string, unknown>;
   private?: boolean; protected?: boolean; is_default?: boolean; created_by?: string | null;
 }
-export interface TaskType { id: string; name: string; name_plural: string | null; icon: string; color: string; is_milestone: boolean; orderindex: number }
+export interface TaskType {
+  id: string; name: string; name_plural: string | null; icon: string; color: string;
+  is_milestone: boolean; orderindex: number;
+  /** One line saying what the type is for. */
+  description?: string | null;
+  /** How many live tasks wear it: a type nobody uses is one to retire. */
+  task_count?: number;
+}
 export interface LinkedTask { link_id: string; id: string; name: string; list_id: string; status: Status; due_date: string | null; finished: boolean }
 export interface TaskLinks { waiting_on: LinkedTask[]; blocking: LinkedTask[]; linked: LinkedTask[] }
 export type LinkKind = 'waiting_on' | 'blocking' | 'relates';
@@ -149,7 +215,7 @@ export interface LocationActivity {
 }
 export interface FormField { key: string; label: string; required: boolean; help: string | null; type: string; field: CustomField | null }
 export interface FormDef { view_id: string; list_id: string; list_name: string; title: string; description: string | null; active: boolean; fields: FormField[]; success: string }
-export type FavoriteKind = 'space' | 'folder' | 'list' | 'task' | 'dashboard' | 'view';
+export type FavoriteKind = 'space' | 'folder' | 'list' | 'task' | 'dashboard' | 'view' | 'goal';
 export interface Favorite {
   id: string; kind: FavoriteKind; target_id: string; name: string; orderindex: number;
   list_id: string | null; location_kind: LocationKind | null; location_id: string | null;
@@ -174,7 +240,7 @@ export interface Share {
 export interface Sharing { is_private: boolean; your_level: Level; shares: Share[] }
 export type ShareKind = LocationKind | 'task';
 
-export interface WorkloadTask { id: string; name: string; list_id: string; status: Status; seconds_per_day: number[] }
+export interface WorkloadTask { id: string; name: string; list_id: string; status: Status; priority: number | null; seconds_per_day: number[] }
 export interface WorkloadRow { user: UserRef | null; capacity_seconds: number[]; scheduled_seconds: number[]; tasks: WorkloadTask[] }
 export interface Workload { days: string[]; rows: WorkloadRow[]; unscheduled: TaskSummary[]; no_estimate: TaskSummary[] }
 
@@ -189,7 +255,7 @@ export type TaskInput = Partial<{
   name: string; description: string | null; status_id: string; priority: number | null;
   start_date: string | null; due_date: string | null; time_estimate_seconds: number | null;
   assignees: string[]; tags: string[]; parent_id: string | null; is_private: boolean; archived: boolean; orderindex: number;
-  group_id: string | null; recurrence: Recurrence | null; type_id: string | null;
+  group_id: string | null; recurrence: Recurrence | null; type_id: string | null; points: number | null;
 }>;
 
 const seg = (kind: ShareKind) =>
@@ -230,13 +296,16 @@ export const workApi = {
     request<TaskPage>('GET', `/workspaces/${workspaceId}/my-tasks`, undefined, { include_closed: includeClosed }),
   openPersonalList: (workspaceId: string) => request<ListNode>('POST', `/workspaces/${workspaceId}/personal-list`),
   members: (workspaceId: string) => request<Member[]>('GET', `/workspaces/${workspaceId}/members`),
+  /** Who can be given work here: the people who can open this Space, Folder or List. */
+  assignable: (kind: LocationKind, id: string) => request<UserRef[]>('GET', `/${seg(kind)}/${id}/assignable`),
 
   createSpace: (workspaceId: string, name: string, is_private = false) =>
     request<{ id: string }>('POST', `/workspaces/${workspaceId}/spaces`, { name, is_private }),
   createFolder: (parent: { kind: 'space' | 'folder'; id: string }, name: string, is_private = false) =>
     request<{ id: string }>('POST', `/${seg(parent.kind)}/${parent.id}/folders`, { name, is_private }),
-  createList: (parent: { kind: 'space' | 'folder'; id: string }, name: string, is_private = false) =>
-    request<{ id: string }>('POST', `/${seg(parent.kind)}/${parent.id}/lists`, { name, is_private }),
+  /** `assignees` hands the List over as it is made: they get full access and it appears for them. */
+  createList: (parent: { kind: 'space' | 'folder'; id: string }, name: string, is_private = false, assignees: string[] = []) =>
+    request<{ id: string }>('POST', `/${seg(parent.kind)}/${parent.id}/lists`, { name, is_private, assignees, private: is_private }),
   renameLocation: (kind: LocationKind, id: string, name: string) => request('PATCH', `/${seg(kind)}/${id}`, { name }),
   deleteLocation: (kind: LocationKind, id: string) => request('DELETE', `/${seg(kind)}/${id}`),
 
@@ -268,7 +337,7 @@ export const workApi = {
   searchTasks: (ws: string, q: string, limit = 20) => request<Task[]>('GET', `/workspaces/${ws}/search/tasks`, undefined, { q, limit }),
   templates: (ws: string, kind?: TemplateKind) => request<Template[]>('GET', `/workspaces/${ws}/templates`, undefined, kind ? { kind } : undefined),
   saveTemplate: (kind: TemplateKind, id: string, body: TemplateSave) =>
-    request<Template>('POST', `/${kind === 'task' ? 'tasks' : kind === 'list' ? 'lists' : 'folders'}/${id}/save-template`, body),
+    request<Template>('POST', `/${kind === 'task' ? 'tasks' : kind === 'list' ? 'lists' : kind === 'space' ? 'spaces' : 'folders'}/${id}/save-template`, body),
   updateTemplate: (id: string, body: { name?: string; description?: string | null; is_private?: boolean }) => request<Template>('PATCH', `/templates/${id}`, body),
   deleteTemplate: (id: string) => request('DELETE', `/templates/${id}`),
   applyTemplate: (id: string, body: { name?: string; list_id?: string; space_id?: string; folder_id?: string }) =>
@@ -277,6 +346,9 @@ export const workApi = {
     request<ImportResult>('POST', `/lists/${listId}/import`, { rows, tz_offset: new Date().getTimezoneOffset() }),
   bulkEdit: (body: BulkEdit) => request<BulkResult>('POST', '/tasks/bulk', body),
 
+  /** Your own week across every Space you can open, for the Workload view on My Tasks. */
+  myWorkload: (workspaceId: string, start: string, days: number) =>
+    request<Workload>('GET', `/workspaces/${workspaceId}/my-workload?start=${start}&days=${days}&tz_offset=${new Date().getTimezoneOffset()}`),
   workload: (kind: LocationKind, id: string, start: string, days: number, teamId?: string) =>
     request<Workload>('GET', `/${seg(kind)}/${id}/workload`, undefined, {
       start, days, tz_offset: new Date().getTimezoneOffset(), team_id: teamId,
@@ -284,8 +356,17 @@ export const workApi = {
 
   // Time tracking
   taskTime: (taskId: string) => request<TaskTime>('GET', `/tasks/${taskId}/time`),
-  logTime: (taskId: string, duration_seconds: number, description?: string) =>
-    request<TimeEntry>('POST', `/tasks/${taskId}/time`, { duration_seconds, description: description || null }),
+  /** What a new task in this List should open pre-filled with, from what the List has done before. */
+  taskDefaults: (listId: string, name?: string) =>
+    request<TaskDefaults>('GET', `/lists/${listId}/task-defaults${name ? `?name=${encodeURIComponent(name)}` : ''}`),
+  /** How full some people's days already are, for the moment before more work is handed over. */
+  peopleLoad: (workspaceId: string, userIds: string[], start: string, days = 7) =>
+    request<PeopleLoad>('GET', `/workspaces/${workspaceId}/people-load?${
+      userIds.map((id) => `user_ids=${encodeURIComponent(id)}`).join('&')}&start=${start}&days=${days}`),
+  logTime: (taskId: string, duration_seconds: number, description?: string, span?: { started_at: string; ended_at: string }) =>
+    request<TimeEntry>('POST', `/tasks/${taskId}/time`, span
+      ? { ...span, description: description || null }
+      : { duration_seconds, description: description || null }),
   deleteTime: (entryId: string) => request('DELETE', `/time/${entryId}`),
   startTimer: (taskId: string) => request<TimeEntry>('POST', `/tasks/${taskId}/timer`),
   stopTimer: () => request<TimeEntry>('POST', '/timer/stop'),
@@ -318,6 +399,12 @@ export const workApi = {
     request<TaskGroup>('POST', `/${seg(kind)}/${id}/groups`, { name, color }),
   updateGroup: (groupId: string, body: { name: string; color?: string }) => request<TaskGroup>('PATCH', `/groups/${groupId}`, body),
   deleteGroup: (groupId: string) => request('DELETE', `/groups/${groupId}`),
+  /** Hand a Space, Folder or List to a Team; null gives it back to everyone. */
+  giveToTeam: (kind: LocationKind, id: string, teamId: string | null) =>
+    request('PUT', `/${seg(kind)}/${id}/team`, { team_id: teamId }),
+  /** Hand a List to one or more people; an empty list takes it back. */
+  assignListTo: (listId: string, userIds: string[], isPrivate = true) =>
+    request<ListNode & { assignees: UserRef[] }>('PUT', `/lists/${listId}/assignee`, { user_ids: userIds, private: isPrivate }),
   assignList: (listId: string, userId: string | null, isPrivate = true) =>
     request('PUT', `/lists/${listId}/assignee`, { user_id: userId, private: isPrivate }),
 

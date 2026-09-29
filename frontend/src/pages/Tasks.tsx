@@ -16,6 +16,7 @@ import { CustomSelect } from '../components/CustomSelect';
 import { formatHoursCompact, parseEstimatedTime, formatHours } from '../lib/utils';
 import { RichTextEditor } from '../components/RichTextEditor';
 import { KanbanBoard } from '../components/KanbanBoard';
+import { ask } from '../components/ask';
 
 interface SortableRowProps {
   task: Task;
@@ -845,7 +846,7 @@ export const Tasks: React.FC = () => {
   }, [logTimeTaskId]);
 
   const handleDeleteTimeEntry = async (entryId: string) => {
-    if (window.confirm("Are you sure you want to delete this time entry?")) {
+    if (await ask.confirm("Are you sure you want to delete this time entry?")) {
       try {
         await timeService.deleteTimeEntry(entryId);
         setPastTimeEntries(prev => prev.filter(e => e.id !== entryId));

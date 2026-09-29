@@ -9,6 +9,7 @@ import { TeamView } from '../views/TeamView';
 import { peopleApi, personName, type TeamLocation, type TeamOverview } from './peopleApi';
 import { OrgChart } from './OrgChart';
 import { TeamBadge, useHub } from './TeamsHub';
+import { ask } from '../../components/ask';
 
 type Tab = 'overview' | 'work' | 'members' | 'chart';
 
@@ -30,7 +31,7 @@ const Card: React.FC<{ title: string; action?: React.ReactNode; children: React.
 /** ClickUp's team overview: who's in the team, where it works, what it's doing. */
 export const TeamPage: React.FC = () => {
   const { id = '' } = useParams();
-  const { people, me, isAdmin, reload, openPerson } = useHub();
+  const { people, me, isAdmin, reload, openPerson, teams } = useHub();
   const { hierarchy, locate } = useWork();
   const navigate = useNavigate();
   const [data, setData] = useState<TeamOverview | null>(null);
@@ -82,14 +83,31 @@ export const TeamPage: React.FC = () => {
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-xl font-semibold text-gray-900">
             {team.name}
-            {isAdmin && <button type="button" title="Rename team" onClick={() => { const n = window.prompt('Team name', team.name); if (n && n.trim() !== team.name) run(() => peopleApi.updateTeam(id, { name: n.trim() })); }} className="text-gray-300 hover:text-gray-600"><Pencil size={14} /></button>}
+            {isAdmin && <button type="button" title="Rename team" onClick={async () => { const n = await ask.prompt('Team name', team.name); if (n && n.trim() !== team.name) run(() => peopleApi.updateTeam(id, { name: n.trim() })); }} className="text-gray-300 hover:text-gray-600"><Pencil size={14} /></button>}
           </h2>
-          <p className="text-sm text-gray-500">{team.handle ? `@${team.handle} · ` : ''}{team.members.length} member{team.members.length === 1 ? '' : 's'}</p>
+          <p className="text-sm text-gray-500">{team.handle ? `@${team.handle} · ` : ''}{team.members.length} member{team.members.length === 1 ? '' : 's'}
+            {(team.all_member_ids?.length ?? 0) > team.members.length && ` · ${team.all_member_ids!.length} counting sub-teams`}</p>
+          <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-gray-500">
+            {isAdmin ? (
+              <label className="flex items-center gap-1">Sub-team of
+                <select aria-label="Sub-team of" value={team.parent_team_id ?? ''} onChange={(e) => run(() => peopleApi.updateTeam(id, { parent_team_id: e.target.value || null }))}
+                  className="rounded border border-gray-200 px-1 py-0.5 text-xs">
+                  <option value="">nothing (top level)</option>
+                  {teams.filter((t) => t.id !== id).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </label>
+            ) : team.parent_team_id ? <>Sub-team of {teams.find((t) => t.id === team.parent_team_id)?.name}</> : null}
+            {teams.some((t) => t.parent_team_id === id) && (
+              <span>· Sub-teams: {teams.filter((t) => t.parent_team_id === id).map((t) => (
+                <Link key={t.id} to={`/people/teams/${t.id}`} className="ml-1 text-brand-600 hover:underline">{t.name}</Link>
+              ))}</span>
+            )}
+          </p>
         </div>
         <span className="ml-auto flex gap-2">
-          {isAdmin && <button type="button" onClick={() => setAdding(true)} className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"><Plus size={14} /> Add member</button>}
+          {isAdmin && <button type="button" onClick={() => setAdding(true)} className="flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"><Plus size={14} /> Add member</button>}
           {isAdmin && (
-            <button type="button" title="Delete team" onClick={() => { if (window.confirm(`Delete the team “${team.name}”? Its members stay in the workspace; things shared with the team lose that sharing.`)) run(() => peopleApi.deleteTeam(id)).then(() => navigate('/people/teams')); }}
+            <button type="button" title="Delete team" onClick={async () => { if (await ask.confirm({ danger: true, title: `Delete the team “${team.name}”? Its members stay in the workspace; things shared with the team lose that sharing.` })) run(() => peopleApi.deleteTeam(id)).then(() => navigate('/people/teams')); }}
               className="rounded-md border border-gray-200 p-1.5 text-gray-400 hover:text-red-600"><Trash2 size={15} /></button>
           )}
         </span>
@@ -97,20 +115,20 @@ export const TeamPage: React.FC = () => {
       {error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       <nav className="mb-4 flex gap-5 border-b border-gray-200" aria-label="Team tabs">
         {tabs.map(([k, label]) => (
-          <button key={k} type="button" onClick={() => setTab(k)} className={`-mb-px border-b-2 pb-2 text-sm ${tab === k ? 'border-indigo-600 font-medium text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>{label}</button>
+          <button key={k} type="button" onClick={() => setTab(k)} className={`-mb-px border-b-2 pb-2 text-sm ${tab === k ? 'border-brand-600 font-medium text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>{label}</button>
         ))}
       </nav>
 
       {tab === 'overview' && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="space-y-4 lg:col-span-2">
-            <Card title="About" action={canDescribe && !editingDesc && <button type="button" onClick={() => { setDesc(team.description ?? ''); setEditingDesc(true); }} className="text-xs text-indigo-600 hover:underline">Edit</button>}>
+            <Card title="About" action={canDescribe && !editingDesc && <button type="button" onClick={() => { setDesc(team.description ?? ''); setEditingDesc(true); }} className="text-xs text-brand-600 hover:underline">Edit</button>}>
               {editingDesc ? (
                 <>
                   <textarea aria-label="Team description" autoFocus rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
                   <div className="mt-2 flex justify-end gap-2">
                     <button type="button" onClick={() => setEditingDesc(false)} className="rounded-md px-2 py-1 text-xs text-gray-600 hover:bg-gray-100">Cancel</button>
-                    <button type="button" onClick={() => run(() => peopleApi.updateTeam(id, { description: desc.trim() || null })).then(() => setEditingDesc(false))} className="rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white">Save</button>
+                    <button type="button" onClick={() => run(() => peopleApi.updateTeam(id, { description: desc.trim() || null })).then(() => setEditingDesc(false))} className="rounded-md bg-brand-600 px-2 py-1 text-xs font-medium text-white">Save</button>
                   </div>
                 </>
               ) : <p className="whitespace-pre-wrap text-sm text-gray-700">{team.description || <span className="text-gray-400">No description yet.</span>}</p>}
@@ -130,7 +148,7 @@ export const TeamPage: React.FC = () => {
                       {f.user ? <Avatar user={f.user} size={22} /> : <span className="h-[22px] w-[22px] rounded-full bg-gray-200" />}
                       <span className="min-w-0 flex-1">
                         <span className="text-gray-800"><b className="font-medium">{f.user ? personName(f.user) : 'Someone'}</b> {describeActivity({ ...f }, (uid) => personName(people.find((p) => p.user.id === uid) ?? null) || 'someone')}</span>
-                        <Link to={`/l/${f.task.list_id}?task=${f.task.id}`} className="flex items-center gap-1 truncate text-xs text-indigo-700 no-underline hover:underline">
+                        <Link to={`/l/${f.task.list_id}?task=${f.task.id}`} className="flex items-center gap-1 truncate text-xs text-brand-700 no-underline hover:underline">
                           {f.task.status && <StatusDot status={f.task.status} size={9} />}{f.task.name}
                         </Link>
                       </span>
@@ -142,7 +160,7 @@ export const TeamPage: React.FC = () => {
             </Card>
           </div>
           <div className="space-y-4">
-            <Card title="Members" action={<button type="button" onClick={() => setTab('members')} className="text-xs text-indigo-600 hover:underline">View all</button>}>
+            <Card title="Members" action={<button type="button" onClick={() => setTab('members')} className="text-xs text-brand-600 hover:underline">View all</button>}>
               <ul className="space-y-1.5">
                 {team.members.slice(0, 8).map((u) => {
                   const p = people.find((x) => x.user.id === u.id);
@@ -159,13 +177,13 @@ export const TeamPage: React.FC = () => {
                 {team.members.length === 0 && <li className="text-sm text-gray-400">No members yet.</li>}
               </ul>
             </Card>
-            <Card title="Where the team works" action={canDescribe && <button type="button" onClick={() => setAddingPlace(true)} className="text-xs text-indigo-600 hover:underline">Add</button>}>
+            <Card title="Where the team works" action={canDescribe && <button type="button" onClick={() => setAddingPlace(true)} className="text-xs text-brand-600 hover:underline">Add</button>}>
               {team.locations.length === 0 ? <p className="text-sm text-gray-400">Pin the Spaces, Folders or Lists this team works in.</p> : (
                 <ul className="space-y-1">
                   {team.locations.map((l) => (
                     <li key={l.id} className="group flex items-center gap-2 text-sm">
-                      {l.kind === 'space' ? <span className="h-4 w-4 rounded bg-indigo-500" /> : l.kind === 'folder' ? <Folder size={15} className="text-gray-400" /> : <ListIcon size={15} className="text-gray-400" />}
-                      <Link to={`/${l.kind === 'space' ? 's' : l.kind === 'folder' ? 'f' : 'l'}/${l.id}`} className="min-w-0 flex-1 truncate text-indigo-700 no-underline hover:underline">{locName(l) ?? 'A place you can\'t open'}</Link>
+                      {l.kind === 'space' ? <span className="h-4 w-4 rounded bg-brand-500" /> : l.kind === 'folder' ? <Folder size={15} className="text-gray-400" /> : <ListIcon size={15} className="text-gray-400" />}
+                      <Link to={`/${l.kind === 'space' ? 's' : l.kind === 'folder' ? 'f' : 'l'}/${l.id}`} className="min-w-0 flex-1 truncate text-brand-700 no-underline hover:underline">{locName(l) ?? 'A place you can\'t open'}</Link>
                       {canDescribe && <button type="button" title="Unpin" onClick={() => run(() => peopleApi.updateTeam(id, { locations: team.locations.filter((x) => x.id !== l.id) }))} className="text-gray-300 opacity-0 hover:text-red-600 group-hover:opacity-100"><X size={13} /></button>}
                     </li>
                   ))}
@@ -226,12 +244,12 @@ export const TeamPage: React.FC = () => {
               {people.filter((p) => !memberIds.includes(p.user.id)).map((p) => (
                 <li key={p.user.id}>
                   <button type="button" onClick={() => setMembers([...memberIds, p.user.id], team.lead_ids)} className="flex w-full items-center gap-2 border-t border-gray-100 px-3 py-1.5 text-left text-sm first:border-t-0 hover:bg-gray-50">
-                    <Avatar user={p.user} size={22} /><span className="min-w-0 flex-1 truncate">{personName(p)}</span><span className="text-xs text-gray-400">{p.designation ?? ''}</span><Plus size={14} className="text-indigo-600" />
+                    <Avatar user={p.user} size={22} /><span className="min-w-0 flex-1 truncate">{personName(p)}</span><span className="text-xs text-gray-400">{p.designation ?? ''}</span><Plus size={14} className="text-brand-600" />
                   </button>
                 </li>
               ))}
             </ul>
-            <div className="mt-3 flex justify-end"><button type="button" onClick={() => setAdding(false)} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white">Done</button></div>
+            <div className="mt-3 flex justify-end"><button type="button" onClick={() => setAdding(false)} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white">Done</button></div>
           </div>
         </div>
       )}

@@ -186,8 +186,11 @@ def submit_form(db: Session, access: Access, view_id: uuid.UUID, answers: Dict[s
     kwargs["assignees"] = [str(u) for u in settings.get("assignee_ids") or []]
     if settings.get("status_id"):
         kwargs["status_id"] = uuid.UUID(str(settings["status_id"]))
-    # The form itself is the permission: submitters needn't have access to the List.
-    task = task_service.create_task(db, Opened(lst, access, PermissionLevel.full), s.TaskCreate(**kwargs))
+    # The form itself is the permission: submitters needn't have access to the List, and whoever set the
+    # form up already chose who the requests go to, so those assignees aren't re-checked here.
+    task = task_service.create_task(
+        db, Opened(lst, access, PermissionLevel.full), s.TaskCreate(**kwargs), check_assignee_access=False,
+    )
     for f in form.fields:
         if f.key.startswith("cf:") and f.field is not None and answers.get(f.key) not in (None, "", []):
             field = next((x for x in customfields.available(db, lst) if str(x.id) == f.key[3:]), None)

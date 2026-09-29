@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, false, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, false, func, text, true
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +28,11 @@ class User(TimestampMixin, Base):
     display_name: Mapped[Optional[str]] = mapped_column(String(255))
     # The name was set by an admin or in the profile, so signing in doesn't replace it.
     name_from_profile: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
+    # Profile photo, stored under UPLOAD_DIR/avatars/<key>; the key is random so its URL can be public.
+    avatar_key: Mapped[Optional[str]] = mapped_column(String(64))
+    # How they last signed in, for workspace sign-in rules (e.g. "google.com", two-step on).
+    last_sign_in_provider: Mapped[Optional[str]] = mapped_column(String(40))
+    last_second_factor: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
 
 
 class Workspace(TimestampMixin, Base):
@@ -38,6 +43,13 @@ class Workspace(TimestampMixin, Base):
     created_by: Mapped[Optional[str]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
+    # Sign-in rules. Empty domains = anyone the admins add.
+    allowed_email_domains: Mapped[List[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"), nullable=False, default=list)
+    allow_outside_guests: Mapped[bool] = mapped_column(Boolean, server_default=true(), nullable=False, default=True)
+    require_google_sign_in: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False, default=False)
+    require_two_step: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False, default=False)
+    # The joiner checklist (Verve's SOP by default when null); see services/work/onboarding.py.
+    joiner_plan: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
 
 
 class WorkspaceMember(Base):
@@ -65,6 +77,21 @@ class WorkspaceMember(Base):
     location: Mapped[Optional[str]] = mapped_column(String(100))
     added_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     invite_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # Dates the joiner checklist uses for HR reminders.
+    date_of_birth: Mapped[Optional[date]] = mapped_column(Date)
+    marriage_anniversary: Mapped[Optional[date]] = mapped_column(Date)
+    takes_interviews: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False, default=False)
+    # Offboarded: kept for history, but can no longer open the workspace.
+    deactivated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    deactivated_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    # How they hear about things outside the app.
+    email_notifications: Mapped[str] = mapped_column(String(10), server_default=text("'daily'"), nullable=False, default="daily")  # off | instant | daily
+    digest_hour: Mapped[int] = mapped_column(server_default=text("8"), nullable=False, default=8)
+    timezone: Mapped[str] = mapped_column(String(64), server_default=text("'Asia/Kolkata'"), nullable=False, default="Asia/Kolkata")
+    last_digest_on: Mapped[Optional[date]] = mapped_column(Date)
+    weekly_team_digest: Mapped[bool] = mapped_column(Boolean, server_default=true(), nullable=False, default=True)
+    last_team_digest_on: Mapped[Optional[date]] = mapped_column(Date)
+    whatsapp_opt_in: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False, default=False)
     # My Tasks home: which cards show, in what order and size (null = the standard layout).
     home_layout: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSONB)
     # Secret address of this person's task calendar (.ics), for Google/Outlook to subscribe to.

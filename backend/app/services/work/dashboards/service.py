@@ -28,6 +28,7 @@ from app.services.work.dashboards.access import (
     resolve,
     shares_by_dashboard,
 )
+from app.services.work.dashboards import standard
 from app.services.work.dashboards.templates import template_cards
 from app.services.work.errors import Forbidden, Invalid, NotFound
 from app.services.work.teams import team_or_404
@@ -46,6 +47,10 @@ DEFAULT_TITLES = {
     "behind": "Who's behind",
     "completed": "Completed tasks",
     "notes": "Notes",
+    "worked_on": "Worked on",
+    "battery": "Battery",
+    "goal": "Goals",
+    "sprint": "Sprint",
 }
 
 
@@ -73,6 +78,7 @@ def _summary_fields(dash: Dashboard, level: PermissionLevel, relation: str, shar
     return dict(
         id=dash.id,
         name=dash.name,
+        standard=dash.standard,
         owner=s.UserOut.model_validate(owner) if owner else None,
         team=s.TeamRef(id=team.id, name=team.name, color=team.color) if team else None,
         your_level=level.value,
@@ -86,6 +92,7 @@ def _summary_fields(dash: Dashboard, level: PermissionLevel, relation: str, shar
 
 def list_dashboards(db: Session, access: Access) -> List[d.DashboardSummary]:
     standing = Standing.load(db, access)
+    standard.ensure(db, access, standing)  # "My work", the Teams they lead, and (for admins) "Company"
     # Dashboards behind a location's Dashboard view live with that location, not in the hub.
     dashboards = list(db.scalars(select(Dashboard).where(Dashboard.workspace_id == access.workspace_id, Dashboard.view_id.is_(None))))
     shares = shares_by_dashboard(db, [x.id for x in dashboards])
@@ -98,13 +105,35 @@ def list_dashboards(db: Session, access: Access) -> List[d.DashboardSummary]:
     ) if dashboards else {}
     users = _users(db, [x.owner_id for x in dashboards])
     teams = _teams(db, [x.team_id for x in dashboards])
+    # The ones made for them come first: their own work, then their Teams, then the company.
+    rank = {"my_work": 0, "team": 1, "company": 2}
     out = []
     for dash in dashboards:
         level, relation = resolve(standing, dash, shares[dash.id])
         if level is None:
             continue
-        out.append(d.DashboardSummary(**_summary_fields(dash, level, relation, shares[dash.id], users, teams, counts.get(dash.id, 0))))
-    return sorted(out, key=lambda x: x.updated_at, reverse=True)
+        summary = d.DashboardSummary(**_summary_fields(dash, level, relation, shares[dash.id], users, teams, counts.get(dash.id, 0)))
+        theirs = 0 if dash.owner_id == access.user_id else 1
+        out.append(((rank.get(dash.standard or "", 3), theirs, -dash.updated_at.timestamp()), summary))
+    return [summary for _, summary in sorted(out, key=lambda pair: pair[0])]
+
+
+def home_dashboard(db: Session, access: Access) -> OpenedDashboard:
+    """The caller's own "My work" Dashboard: what the app opens on. Made now if they haven't got one."""
+    standing = Standing.load(db, access)
+    if standing.is_guest:
+        raise Forbidden("Guests don't have a Dashboard of their own")
+    standard.ensure(db, access, standing)
+    dash = db.scalars(
+        select(Dashboard).where(
+            Dashboard.workspace_id == access.workspace_id,
+            Dashboard.standard == standard.MY_WORK,
+            Dashboard.owner_id == access.user_id,
+        )
+    ).first()
+    if dash is None:
+        raise NotFound("Dashboard not found")
+    return OpenedDashboard(dash, standing, PermissionLevel.full, "mine")
 
 
 def cards_of(db: Session, dashboard_id: uuid.UUID) -> List[DashboardCard]:

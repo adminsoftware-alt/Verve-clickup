@@ -16,3 +16,7 @@ class Forbidden(WorkError):
 
 class Invalid(WorkError):
     """The request breaks a rule of the hierarchy or task model."""
+
+
+class Conflict(WorkError):
+    """Someone else changed the item first (e.g. a newer saved version)."""

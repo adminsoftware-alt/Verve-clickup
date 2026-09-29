@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from pydantic import BaseModel
@@ -202,4 +202,82 @@ def update_rule(rule_id: uuid.UUID, data: p.AutomationUpdate, user: User = Depen
 @router.delete("/automations/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_rule(rule_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
     automations.remove_rule(db, user.id, rule_id)
+    db.commit()
+
+
+# --- two-way calendar sync (Google, Outlook) -------------------------------------------------------
+
+
+@router.get("/calendar-sync/providers", response_model=p.CalendarProviders)
+def calendar_providers():
+    from app.services.work import calendar_sync
+
+    return calendar_sync.configured()
+
+
+@router.get("/workspaces/{workspace_id}/calendar-connections", response_model=List[p.CalendarConnectionOut])
+def calendar_connections(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.work import calendar_sync
+
+    return [calendar_sync.connection_out(c) for c in calendar_sync.connections(db, Access.for_workspace(db, user.id, workspace_id))]
+
+
+@router.post("/workspaces/{workspace_id}/calendar-connections/{provider}/start")
+def start_calendar_connection(workspace_id: uuid.UUID, provider: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Where to send the browser to sign in to the calendar; it comes back to the callback below."""
+    from app.services.work import calendar_sync
+
+    return {"url": calendar_sync.authorize_url(Access.for_workspace(db, user.id, workspace_id), provider)}
+
+
+@router.get("/calendar-oauth/{provider}/callback")
+def calendar_oauth_callback(provider: str, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None,
+                            db: Session = Depends(get_db)):
+    """The calendar sends the browser back here (no sign-in header: the signed `state` says who it is)."""
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+
+    from app.core.config import settings
+    from app.services.work import calendar_sync
+    from app.services.work.errors import WorkError
+
+    back = f"{settings.APP_URL.rstrip('/')}/planner"
+    if provider not in calendar_sync.PROVIDERS:
+        return RedirectResponse(f"{back}?calendar_error={quote('Unknown calendar')}", status_code=302)
+    if error or not code or not state:
+        return RedirectResponse(f"{back}?calendar_error={quote(error or 'The calendar sign-in was cancelled')}", status_code=302)
+    try:
+        conn = calendar_sync.finish_connect(db, provider, code, state)
+        calendar_sync.sync(db, conn)
+        db.commit()
+    except WorkError as e:
+        db.rollback()
+        return RedirectResponse(f"{back}?calendar_error={quote(e.message)}", status_code=302)
+    return RedirectResponse(f"{back}?calendar=connected", status_code=302)
+
+
+@router.patch("/calendar-connections/{connection_id}", response_model=p.CalendarConnectionOut)
+def update_calendar_connection(connection_id: uuid.UUID, data: p.CalendarConnectionUpdate, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.work import calendar_sync
+
+    conn = calendar_sync.update(db, user.id, connection_id, data)
+    db.commit()
+    return calendar_sync.connection_out(conn)
+
+
+@router.post("/calendar-connections/{connection_id}/sync", response_model=p.SyncResult)
+def sync_calendar_connection(connection_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.work import calendar_sync
+
+    conn = calendar_sync.own(db, user.id, connection_id)
+    stats = calendar_sync.sync(db, conn)
+    db.commit()
+    return p.SyncResult(**stats, connection=calendar_sync.connection_out(conn))
+
+
+@router.delete("/calendar-connections/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_calendar_connection(connection_id: uuid.UUID, remove_events: bool = Query(True), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.work import calendar_sync
+
+    calendar_sync.disconnect(db, user.id, connection_id, remove_events)
     db.commit()

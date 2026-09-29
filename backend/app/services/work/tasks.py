@@ -26,6 +26,7 @@ from app.db.models import (
     WorkspaceMember,
     WorkspaceRole,
 )
+from app.core.config import settings
 from app.schemas import work as s
 from app.services.work.access import (
     Access,
@@ -87,22 +88,55 @@ def renumber(db: Session, rows: Sequence[Task], space_id: uuid.UUID) -> None:
         row.seq = next_seq(db, space_id)
 
 
-def _check_assignees(db: Session, workspace_id: uuid.UUID, user_ids: Sequence[str]) -> List[str]:
+def _check_assignees(
+    db: Session, workspace_id: uuid.UUID, user_ids: Sequence[str], chain: Optional[List[Node]] = None,
+) -> List[str]:
     unique = list(dict.fromkeys(user_ids))
     if not unique:
         return []
-    members = set(
-        db.scalars(
-            select(WorkspaceMember.user_id).where(
+    rows = {
+        m.user_id: m
+        for m in db.scalars(
+            select(WorkspaceMember).where(
                 WorkspaceMember.workspace_id == workspace_id,
                 WorkspaceMember.user_id.in_(unique),
             )
         )
-    )
-    missing = [uid for uid in unique if uid not in members]
+    }
+    missing = [uid for uid in unique if uid not in rows]
     if missing:
         raise Invalid(f"Assignees must be workspace members: {', '.join(missing)}")
+    if chain is not None:
+        # Someone who can't open the List can't be given work in it; share it with them first.
+        blind = [uid for uid in unique if Access(db, uid, workspace_id, rows[uid].role).level(chain) is None]
+        if blind:
+            names = [db.get(User, uid).display_name or uid for uid in blind]
+            raise Invalid(f"{', '.join(names)} can't see this List. Share it with them first, then assign it.")
     return unique
+
+
+def people_who_can_see(db: Session, opened: Opened) -> List[User]:
+    """The workspace members who can open this Space, Folder or List: who work here can be given to."""
+    chain = _chain_of(db, opened.obj)
+    out = []
+    for member, user in db.execute(
+        select(WorkspaceMember, User).join(User, User.id == WorkspaceMember.user_id)
+        .where(WorkspaceMember.workspace_id == opened.access.workspace_id, WorkspaceMember.deactivated_at.is_(None))
+        .order_by(User.display_name, User.email)
+    ):
+        if Access(db, user.id, opened.access.workspace_id, member.role).level(chain) is not None:
+            out.append(user)
+    return out
+
+
+def _chain_of(db: Session, obj) -> List[Node]:
+    from app.services.work.access import chain_for_folder, chain_for_list, chain_for_space
+
+    if isinstance(obj, TaskList):
+        return chain_for_list(db, obj)
+    if isinstance(obj, Folder):
+        return chain_for_folder(db, obj)
+    return chain_for_space(obj)
 
 
 def _resolve_tags(db: Session, access: Access, space_id: uuid.UUID, names: Sequence[str]) -> List[Tag]:
@@ -207,13 +241,62 @@ def _group_of(db: Session, status_id: uuid.UUID):
     return status.group
 
 
+def _check_clickapps(db: Session, space_id: uuid.UUID, data, fields) -> None:
+    """Refuse values for features this Space has switched off (its ClickApps)."""
+    from app.services.work import space_admin
+
+    apps = space_admin.clickapps(db.get(Space, space_id))
+    checks = (
+        ("priority", "priorities", lambda v: v is not None),
+        ("points", "sprint_points", lambda v: v is not None),
+        ("time_estimate_seconds", "time_estimates", lambda v: v is not None),
+        ("tags", "tags", lambda v: bool(v)),
+        ("assignees", "multiple_assignees", lambda v: v is not None and len(set(v)) > 1),
+    )
+    for field, app, used in checks:
+        if field in fields and not apps[app] and used(getattr(data, field)):
+            raise Invalid(f"{space_admin.CLICKAPP_LABELS[app]} is turned off for this Space")
+
+
 # --- create ------------------------------------------------------------------
 
 
-def create_task(db: Session, opened: Opened[TaskList], data: s.TaskCreate) -> Task:
+def _check_details(data: s.TaskCreate) -> None:
+    """A task somebody types in has to say who is on it, when it runs and how big it is.
+
+    Without these, half the Dashboard is guessing: the workload card cannot place the task in a
+    day, the priority chart fills up with "No priority", and the task lands in a backlog nobody
+    revisits. Tasks the system makes for you -- from a template, a recurrence, an import or an
+    incoming email -- are exempt, because there is nobody there to ask.
+    """
+    missing = []
+    if not data.assignees:
+        missing.append("an assignee")
+    if data.start_date is None:
+        missing.append("a start date")
+    if data.due_date is None:
+        missing.append("a due date")
+    if data.time_estimate_seconds is None:
+        missing.append("an estimate")
+    if data.priority is None:
+        missing.append("a priority")
+    if not missing:
+        return
+    if len(missing) > 1:
+        missing[-1] = f"and {missing[-1]}"
+    raise Invalid(f"A new task needs {', '.join(missing) if len(missing) > 2 else ' '.join(missing)}.")
+
+
+def create_task(
+    db: Session, opened: Opened[TaskList], data: s.TaskCreate, *,
+    check_assignee_access: bool = True, require_details: bool = False,
+) -> Task:
     lst, access = opened.obj, opened.access
     if opened.level != PermissionLevel.full:
         raise Forbidden("You need full access to the List to create tasks in it")
+    # Subtasks inherit their parent's plan, so only top-level work has to be filled in.
+    if require_details and settings.REQUIRE_TASK_DETAILS and data.parent_id is None:
+        _check_details(data)
 
     parent: Optional[Task] = None
     if data.parent_id is not None:
@@ -225,9 +308,12 @@ def create_task(db: Session, opened: Opened[TaskList], data: s.TaskCreate) -> Ta
         if _depth(db, parent) + 1 > MAX_SUBTASK_DEPTH:
             raise Invalid(f"Subtasks can be nested at most {MAX_SUBTASK_DEPTH} levels deep")
 
+    _check_clickapps(db, lst.space_id, data, data.model_fields_set | {"assignees", "tags"})
     statuses = effective_statuses(db, lst)
     status = _status_in(statuses, data.status_id) if data.status_id else default_status(statuses)
-    assignees = _check_assignees(db, access.workspace_id, data.assignees)
+    assignees = _check_assignees(
+        db, access.workspace_id, data.assignees, chain_for_list(db, lst) if check_assignee_access else None,
+    )
     tags = _resolve_tags(db, access, lst.space_id, data.tags)
 
     task = Task(
@@ -244,6 +330,7 @@ def create_task(db: Session, opened: Opened[TaskList], data: s.TaskCreate) -> Ta
         is_private=data.is_private,
         group_id=task_groups.check_for_list(db, lst, data.group_id),
         type_id=_check_type(db, access, data.type_id),
+        points=data.points,
         seq=next_seq(db, lst.space_id),
         created_by=access.user_id,
         orderindex=(db.scalar(select(func.max(Task.orderindex)).where(Task.list_id == lst.id)) or 0.0) + 1.0,
@@ -256,6 +343,13 @@ def create_task(db: Session, opened: Opened[TaskList], data: s.TaskCreate) -> Ta
     _set_assignees(db, task, assignees)
     _set_tags(db, task, tags)
     db.flush()
+    if data.custom_fields:
+        from app.services.work import customfields
+
+        opened_task = Opened(task, access, PermissionLevel.full)
+        for field_id, value in data.custom_fields.items():
+            customfields.set_value(db, opened_task, field_id, value)
+        db.flush()
     events.record(db, task, access.user_id, "created", {"list": lst.name})
     events.watch(db, task.id, [access.user_id])
     events.assigned(db, task, access.user_id, assignees)
@@ -315,9 +409,10 @@ def update_task(db: Session, opened: Opened[Task], data: s.TaskUpdate) -> Task:
 
     lst = db.get(TaskList, task.list_id)
     assert lst is not None
+    _check_clickapps(db, lst.space_id, data, fields)
     before = _snapshot(db, task)
 
-    for name in ("name", "description", "priority", "time_estimate_seconds", "orderindex"):
+    for name in ("name", "description", "priority", "time_estimate_seconds", "orderindex", "points"):
         if name in fields:
             setattr(task, name, getattr(data, name))
 
@@ -350,7 +445,7 @@ def update_task(db: Session, opened: Opened[Task], data: s.TaskUpdate) -> Task:
 
     if "assignees" in fields:
         assert data.assignees is not None
-        _set_assignees(db, task, _check_assignees(db, access.workspace_id, data.assignees))
+        _set_assignees(db, task, _check_assignees(db, access.workspace_id, data.assignees, chain_for_task(db, task)))
     if "tags" in fields:
         assert data.tags is not None
         _set_tags(db, task, _resolve_tags(db, access, lst.space_id, data.tags))
@@ -380,6 +475,7 @@ def _snapshot(db: Session, task: Task) -> dict:
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "due_date": task.due_date.isoformat() if task.due_date else None,
         "time_estimate_seconds": task.time_estimate_seconds,
+        "points": task.points,
         "group_id": str(task.group_id) if task.group_id else None,
         "recurrence": task.recurrence,
         "archived": task.archived_at is not None,
@@ -390,7 +486,7 @@ def _snapshot(db: Session, task: Task) -> dict:
 
 
 def _record_changes(db: Session, task: Task, actor: str, old: dict, new: dict) -> None:
-    for key in ("name", "priority", "start_date", "due_date", "time_estimate_seconds", "archived", "parent_id"):
+    for key in ("name", "priority", "start_date", "due_date", "time_estimate_seconds", "points", "archived", "parent_id"):
         if old[key] != new[key]:
             events.record(db, task, actor, key, {"from": old[key], "to": new[key]})
     if old["description"] != new["description"]:
@@ -465,6 +561,9 @@ def move_task(
     db.flush()
     _drop_blind_assignees(db, access.workspace_id, tree)
     db.flush()
+    from app.services.work import multilist
+
+    multilist.forget_home(db, task.id, new_list.id)
     events.record(db, task, access.user_id, "moved", {"from": source_list.name, "to": new_list.name})
     return task
 
@@ -558,6 +657,9 @@ def serialise_tasks(
         for g in db.scalars(select(TaskGroup).where(TaskGroup.id.in_(group_ids)))
     } if group_ids else {}
 
+    from app.services.work import multilist
+
+    extra_lists = multilist.extra_lists_for(db, ids)
     subtask_counts = dict(
         db.execute(
             select(Task.parent_id, func.count())
@@ -610,6 +712,8 @@ def serialise_tasks(
                 tags=[s.TagOut.model_validate(t) for t in tags.get(task.id, [])],
                 subtask_count=subtask_counts.get(task.id, 0),
                 permission_level=levels[task.id],
+                points=task.points,
+                extra_list_ids=extra_lists.get(task.id, []),
             )
         )
     return out
@@ -696,7 +800,15 @@ def visible_tasks(
             .where(Task.list_id.in_(list(chain_by_list)))
         ).all()
     )
-    rows.sort(key=lambda r: (position[r[0].list_id], r[0].orderindex, r[0].created_at, str(r[0].id)))
+    # Tasks whose home is elsewhere but that were added to one of these Lists too.
+    from app.services.work.multilist import linked_rows
+
+    via: Dict[uuid.UUID, uuid.UUID] = {}
+    for task, group, list_id in linked_rows(db, list(chain_by_list)):
+        if task.id not in via:
+            via[task.id] = list_id
+            rows.append((task, group))
+    rows.sort(key=lambda r: (position[via.get(r[0].id, r[0].list_id)], r[0].orderindex, r[0].created_at, str(r[0].id)))
     by_id = {task.id: task for task, _ in rows}
 
     def ancestry(task: Task) -> List[Node]:
@@ -720,7 +832,13 @@ def visible_tasks(
             continue
         if not _in_window(task, f):
             continue
-        level = access.level(ancestry(task) + chain_by_list[task.list_id])
+        if task.id in via:
+            # Seen through the extra List; its home List may still grant more.
+            from app.services.work.access import best_task_level
+
+            level = best_task_level(db, access, task)
+        else:
+            level = access.level(ancestry(task) + chain_by_list[task.list_id])
         if level is None:
             continue
         levels[task.id] = level

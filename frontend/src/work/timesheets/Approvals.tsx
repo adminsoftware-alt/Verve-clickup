@@ -133,7 +133,7 @@ const ApproversDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                       <td className="py-2">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {r.approvers.map((a) => (
-                            <span key={a.id} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${r.is_custom ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}>
+                            <span key={a.id} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${r.is_custom ? 'bg-brand-50 text-brand-700' : 'bg-gray-100 text-gray-600'}`}>
                               {a.display_name || a.email}
                               {r.is_custom && <button type="button" aria-label={`Remove ${a.display_name || a.email}`} onClick={() => save(r.submitter.id, r.approvers.filter((x) => x.id !== a.id).map((x) => x.id))}><X size={11} /></button>}
                             </span>

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Repeat } from 'lucide-react';
 import type { Recurrence } from './api';
 import { Portal } from './ui';
+import { Select } from './Select';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 type Preset = 'none' | 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'yearly' | 'custom';
@@ -84,7 +85,7 @@ export const RecurrenceEditor: React.FC<{
   const input = 'rounded border border-gray-300 px-1.5 py-1 text-sm';
   return (
     <>
-      <button ref={anchor} type="button" disabled={disabled} onClick={openEditor} className={`flex w-full items-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-left text-sm hover:border-gray-200 ${value ? 'text-indigo-700' : 'text-gray-500'}`}>
+      <button ref={anchor} type="button" disabled={disabled} onClick={openEditor} className={`flex w-full items-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-left text-sm hover:border-gray-200 ${value ? 'text-brand-700' : 'text-gray-500'}`}>
         <Repeat size={14} /> {describeRecurrence(value)}
       </button>
       {open && (
@@ -93,7 +94,7 @@ export const RecurrenceEditor: React.FC<{
             <div role="dialog" aria-label="Repeat" onMouseDown={(e) => e.stopPropagation()} className="fixed w-80 space-y-3 rounded-lg border border-gray-200 bg-white p-3 text-sm shadow-lg" style={pos}>
               <div className="flex flex-wrap gap-1.5">
                 {(['none', 'daily', 'weekdays', 'weekly', 'monthly', 'yearly', 'custom'] as Preset[]).map((p) => (
-                  <button key={p} type="button" onClick={() => choose(p)} className={`rounded-full px-2.5 py-0.5 text-xs ${preset === p ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                  <button key={p} type="button" onClick={() => choose(p)} className={`rounded-full px-2.5 py-0.5 text-xs ${preset === p ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
                     {p === 'none' ? "Don't repeat" : p === 'weekdays' ? 'Weekdays' : p[0].toUpperCase() + p.slice(1)}
                   </button>
                 ))}
@@ -104,16 +105,24 @@ export const RecurrenceEditor: React.FC<{
                     <div className="flex items-center gap-2">
                       Every
                       <input type="number" min={1} max={365} aria-label="Interval" value={rule.interval} onChange={(e) => set({ interval: Math.max(1, Number(e.target.value) || 1) })} className={`${input} w-16`} />
-                      <select aria-label="Unit" value={rule.frequency} onChange={(e) => set({ frequency: e.target.value as Recurrence['frequency'], weekdays: e.target.value === 'weekly' ? [(due.getDay() + 6) % 7] : null, month_day: e.target.value === 'monthly' ? due.getDate() : null })} className={input}>
-                        <option value="daily">days</option><option value="weekly">weeks</option><option value="monthly">months</option><option value="yearly">years</option>
-                      </select>
+                      <span className="w-28">
+                        <Select
+                          label="Unit"
+                          value={rule.frequency}
+                          onChange={(v) => set({ frequency: v as Recurrence['frequency'], weekdays: v === 'weekly' ? [(due.getDay() + 6) % 7] : null, month_day: v === 'monthly' ? due.getDate() : null })}
+                          choices={[
+                            { value: 'daily', label: 'days' }, { value: 'weekly', label: 'weeks' },
+                            { value: 'monthly', label: 'months' }, { value: 'yearly', label: 'years' },
+                          ]}
+                        />
+                      </span>
                     </div>
                   )}
                   {rule.frequency === 'weekly' && preset !== 'weekdays' && (
                     <div className="flex gap-1" role="group" aria-label="Days">
                       {DAYS.map((d, i) => (
                         <button key={d} type="button" aria-pressed={!!rule.weekdays?.includes(i)} onClick={() => toggleDay(i)}
-                          className={`h-7 w-9 rounded text-xs ${rule.weekdays?.includes(i) ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}>{d}</button>
+                          className={`h-7 w-9 rounded text-xs ${rule.weekdays?.includes(i) ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-600'}`}>{d}</button>
                       ))}
                     </div>
                   )}
@@ -139,7 +148,7 @@ export const RecurrenceEditor: React.FC<{
               {error && <p className="rounded bg-red-50 px-2 py-1 text-xs text-red-700">{error}</p>}
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={() => setOpen(false)} className="rounded-md px-2.5 py-1 text-gray-600 hover:bg-gray-100">Cancel</button>
-                <button type="button" onClick={save} className="rounded-md bg-indigo-600 px-2.5 py-1 font-medium text-white hover:bg-indigo-700">Save</button>
+                <button type="button" onClick={save} className="rounded-md bg-brand-600 px-2.5 py-1 font-medium text-white hover:bg-brand-700">Save</button>
               </div>
             </div>
           </div>

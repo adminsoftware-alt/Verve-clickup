@@ -10,7 +10,7 @@ from app.db.session import get_db
 from app.schemas import work as s
 from app.services.work import assignment, copying, customfields, groups, hierarchy, sharing
 from app.services.work import tasks as task_service
-from app.services.work.access import open_folder, open_list, open_space, open_task
+from app.services.work.access import open_folder, open_list, open_space, open_task, Opened
 from app.services.work.statuses import (
     StatusInput,
     effective_statuses,
@@ -66,6 +66,12 @@ def create_folderless_list(
     opened = open_space(db, user.id, space_id, VIEW)
     require_level(opened, FULL, "create lists here")
     lst = hierarchy.create_list(db, opened.access, opened.obj, data)
+    if data.assignees:
+        assignment.assign_list(
+            db,
+            Opened(lst, opened.access, PermissionLevel.full),
+            s.ListAssign(user_ids=data.assignees, private=data.private),
+        )
     db.commit()
     return hierarchy.list_out(lst, PermissionLevel.full)
 
@@ -117,6 +123,12 @@ def create_list_in_folder(
     require_level(opened, FULL, "create lists here")
     space = db.get(Space, opened.obj.space_id)
     lst = hierarchy.create_list(db, opened.access, space, data, folder=opened.obj)
+    if data.assignees:
+        assignment.assign_list(
+            db,
+            Opened(lst, opened.access, PermissionLevel.full),
+            s.ListAssign(user_ids=data.assignees, private=data.private),
+        )
     db.commit()
     return hierarchy.list_out(lst, PermissionLevel.full)
 
@@ -181,6 +193,35 @@ def _register_status_routes(path: str, opener: Callable) -> None:
         db.commit()
         return _status_set_out(db, opened.obj)
 
+
+def _register_assignable_routes(path: str, opener: Callable) -> None:
+    @router.get(f"{path}/assignable", response_model=List[s.UserOut])
+    def assignable(obj_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+        """Who can be given work here: the people who can open this location."""
+        from app.services.work.tasks import people_who_can_see
+
+        return [s.UserOut.model_validate(u) for u in people_who_can_see(db, opener(db, user.id, obj_id, VIEW))]
+
+
+def _register_team_routes(path: str, kind: LocationKind, opener: Callable, out: Callable) -> None:
+    @router.put(f"{path}/team", name=f"give_{kind.value}_to_team")
+    def give_to_team(
+        obj_id: uuid.UUID, data: s.GiveToTeam, user: User = Depends(current_user), db: Session = Depends(get_db),
+    ):
+        """Hand this to a Team, so only that Team (and the admins) work in it. None gives it back."""
+        opened = opener(db, user.id, obj_id, VIEW)
+        assignment.give_to_team(db, opened, kind, data.team_id)
+        db.commit()
+        return out(opened.obj, opened.level)
+
+
+_register_team_routes("/spaces/{obj_id}", LocationKind.space, open_space, hierarchy.space_out)
+_register_team_routes("/folders/{obj_id}", LocationKind.folder, open_folder, hierarchy.folder_out)
+_register_team_routes("/lists/{obj_id}", LocationKind.list, open_list, hierarchy.list_out)
+
+_register_assignable_routes("/spaces/{obj_id}", open_space)
+_register_assignable_routes("/folders/{obj_id}", open_folder)
+_register_assignable_routes("/lists/{obj_id}", open_list)
 
 _register_status_routes("/spaces/{obj_id}", open_space)
 _register_status_routes("/folders/{obj_id}", open_folder)
@@ -352,6 +393,15 @@ def _open_parent(db: Session, user: User, obj):
     return open_space(db, user.id, obj.space_id, VIEW)
 
 
+def _open_destination(db: Session, user: User, obj, data: s.DuplicateIn):
+    """Where the copy should go: what was asked for, or beside the original when nothing was."""
+    if data.folder_id is not None:
+        return open_folder(db, user.id, data.folder_id, VIEW)
+    if data.space_id is not None:
+        return open_space(db, user.id, data.space_id, VIEW)
+    return _open_parent(db, user, obj)
+
+
 @router.post("/lists/{list_id}/move", response_model=s.ListOut)
 def move_list(list_id: uuid.UUID, data: s.MoveTarget, user: User = Depends(current_user), db: Session = Depends(get_db)):
     opened = open_list(db, user.id, list_id, VIEW)
@@ -371,7 +421,10 @@ def move_folder(folder_id: uuid.UUID, data: s.MoveTarget, user: User = Depends(c
 @router.post("/lists/{list_id}/duplicate", response_model=s.ListOut, status_code=status.HTTP_201_CREATED)
 def duplicate_list(list_id: uuid.UUID, data: s.DuplicateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     opened = open_list(db, user.id, list_id, VIEW)
-    copy = copying.duplicate_list(db, opened, _open_parent(db, user, opened.obj), data.name, data.include_tasks)
+    copy = copying.duplicate_list(
+        db, opened, _open_destination(db, user, opened.obj, data), data.name, data.include_tasks, data,
+    )
+    copying.hand_to_people(db, opened, LocationKind.list, copy, data.share_with, data.share_level)
     db.commit()
     return hierarchy.list_out(copy, FULL)
 
@@ -379,7 +432,10 @@ def duplicate_list(list_id: uuid.UUID, data: s.DuplicateIn, user: User = Depends
 @router.post("/folders/{folder_id}/duplicate", response_model=s.FolderOut, status_code=status.HTTP_201_CREATED)
 def duplicate_folder(folder_id: uuid.UUID, data: s.DuplicateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     opened = open_folder(db, user.id, folder_id, VIEW)
-    copy = copying.duplicate_folder(db, opened, _open_parent(db, user, opened.obj), data.name, data.include_tasks)
+    copy = copying.duplicate_folder(
+        db, opened, _open_destination(db, user, opened.obj, data), data.name, data.include_tasks, data,
+    )
+    copying.hand_to_people(db, opened, LocationKind.folder, copy, data.share_with, data.share_level)
     db.commit()
     return hierarchy.folder_out(copy, FULL)
 
@@ -388,6 +444,17 @@ def duplicate_folder(folder_id: uuid.UUID, data: s.DuplicateIn, user: User = Dep
 def duplicate_task(task_id: uuid.UUID, data: s.DuplicateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     opened = open_task(db, user.id, task_id, VIEW)
     target = open_list(db, user.id, data.list_id or opened.obj.list_id, VIEW)
-    copy = copying.duplicate_task(db, opened, target, data.name, data.include_subtasks)
+    copy = copying.duplicate_task(db, opened, target, data.name, data.include_subtasks, data.parts)
     db.commit()
     return task_service.task_detail(db, open_task(db, user.id, copy.id, VIEW))
+
+
+@router.post("/tasks/{task_id}/duplicate-to-people", status_code=status.HTTP_201_CREATED)
+def duplicate_task_to_people(
+    task_id: uuid.UUID, data: s.DuplicateIn, user: User = Depends(current_user), db: Session = Depends(get_db)
+):
+    """A copy each, on their own Personal Lists. Several tasks come out, so several ids go back."""
+    opened = open_task(db, user.id, task_id, VIEW)
+    made = copying.duplicate_to_people(db, opened, data.user_ids, data.name, data.include_subtasks, data.parts)
+    db.commit()
+    return {"people": made}

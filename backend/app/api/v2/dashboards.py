@@ -44,7 +44,18 @@ def _engine(db: Session, opened: OpenedDashboard, tz: str) -> Engine:
 
 @router.get("/workspaces/{workspace_id}/dashboards", response_model=List[d.DashboardSummary])
 def list_dashboards(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return service.list_dashboards(db, Access.for_workspace(db, user.id, workspace_id))
+    out = service.list_dashboards(db, Access.for_workspace(db, user.id, workspace_id))
+    db.commit()  # keeps the standard Dashboards made on the caller's first visit
+    return out
+
+
+@router.get("/workspaces/{workspace_id}/dashboards/home", response_model=d.DashboardOut)
+def home_dashboard(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """What the app opens on: the caller's own "My work" Dashboard."""
+    opened = service.home_dashboard(db, Access.for_workspace(db, user.id, workspace_id))
+    out = service.dashboard_out(db, opened)
+    db.commit()  # keeps it if this was their first visit
+    return out
 
 
 @router.post("/workspaces/{workspace_id}/dashboards", response_model=d.DashboardOut, status_code=status.HTTP_201_CREATED)

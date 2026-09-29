@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Square } from 'lucide-react';
 import { useAuth } from '../components/AuthContext';
 import { workApi, type RunningTimer } from './api';
+import { notify } from '../components/notify';
 
 interface TimerContextValue {
   timer: RunningTimer | null;
@@ -78,7 +79,7 @@ export const RunningTimerChip: React.FC = () => {
         {timer.task_name}
       </Link>
       <span className="font-mono text-red-700 tabular-nums">{formatClock(elapsed)}</span>
-      <button type="button" title="Stop timer" onClick={() => stop().catch((e) => window.alert(e.message))} className="rounded-full bg-red-500 p-1 text-white hover:bg-red-600">
+      <button type="button" title="Stop timer" onClick={() => stop().catch((e) => notify.error(e))} className="rounded-full bg-red-500 p-1 text-white hover:bg-red-600">
         <Square size={10} fill="currentColor" />
       </button>
     </div>

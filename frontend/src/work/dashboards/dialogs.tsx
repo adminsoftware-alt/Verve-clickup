@@ -9,6 +9,7 @@ import {
   type DashLevel, type DashboardSharing, type Frequency, type ReportRun, type Schedule, type ScheduleIn, type Source, type Template,
 } from './api';
 import { SourcePicker } from './pickers';
+import { ask } from '../../components/ask';
 
 export const Modal: React.FC<{ label: string; title: React.ReactNode; onClose: () => void; width?: string; children: React.ReactNode; footer?: React.ReactNode }> = ({
   label, title, onClose, width = 'w-[34rem]', children, footer,
@@ -31,7 +32,7 @@ export const Modal: React.FC<{ label: string; title: React.ReactNode; onClose: (
   );
 };
 
-const primary = 'rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50';
+const primary = 'rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50';
 const secondary = 'rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100';
 
 // --- the Teams you can make dashboards for ----------------------------------------------
@@ -52,6 +53,7 @@ const TEMPLATES: { value: Template; label: string; hint: string }[] = [
   { value: 'vapl_review', label: 'VAPL Review', hint: 'The SOP review Dashboard: totals, overdue, unassigned, unscheduled, no estimates, work done today, timesheet, actual vs budgeted time.' },
   { value: 'simple', label: 'Simple', hint: 'Open, due today, overdue and done this week, with status and assignee charts.' },
   { value: 'time_tracking', label: 'Time tracking', hint: 'Timesheet, time by person, billable time by List, estimated vs tracked.' },
+  { value: 'monthly_review', label: 'Monthly review', hint: 'The SOP monthly review: done this month (on time or late), overdue, hours by List and per day. Filter it to one person.' },
 ];
 
 export const NewDashboardDialog: React.FC<{ onClose: () => void; onCreated: (id: string) => void; defaultTeam?: string }> = ({ onClose, onCreated, defaultTeam }) => {
@@ -102,7 +104,7 @@ export const NewDashboardDialog: React.FC<{ onClose: () => void; onCreated: (id:
           <span className="text-xs font-medium text-gray-600">Template</span>
           <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {TEMPLATES.map((t) => (
-              <label key={t.value} className={`flex cursor-pointer gap-2 rounded-lg border p-3 ${template === t.value ? 'border-indigo-400 bg-indigo-50/50' : 'border-gray-200 hover:border-gray-300'}`}>
+              <label key={t.value} className={`flex cursor-pointer gap-2 rounded-lg border p-3 ${template === t.value ? 'border-brand-400 bg-brand-50/50' : 'border-gray-200 hover:border-gray-300'}`}>
                 <input type="radio" name="template" checked={template === t.value} onChange={() => setTemplate(t.value)} className="mt-0.5" />
                 <span><span className="block text-sm font-medium text-gray-900">{t.label}</span><span className="block text-xs text-gray-500">{t.hint}</span></span>
               </label>
@@ -229,7 +231,7 @@ export const ShareDashboardDialog: React.FC<{ dashboardId: string; name: string;
             const g = sh.team ? `team:${sh.team.id}` : `user:${sh.user!.id}`;
             return (
               <li key={sh.id} className="flex items-center gap-3 py-2">
-                {sh.team ? <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-700"><Users size={14} /></span> : <Avatar user={sh.user!} size={28} />}
+                {sh.team ? <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-brand-700"><Users size={14} /></span> : <Avatar user={sh.user!} size={28} />}
                 <span className="min-w-0 flex-1 truncate text-sm text-gray-800">{sh.team ? `${sh.team.name}` : sh.user!.display_name || sh.user!.email}{sh.team && <span className="ml-1.5 text-xs text-gray-400">Team</span>}</span>
                 <select aria-label="Change access" value={sh.level} disabled={!editable} onChange={(e) => run(() => dashApi.share(dashboardId, target(g), e.target.value as DashLevel))} className="rounded-md border border-gray-200 px-1.5 py-1 text-sm disabled:bg-gray-50">
                   {LEVELS.map((l) => <option key={l.value} value={l.value} disabled={RANK[l.value] > mine}>{l.label}</option>)}
@@ -303,12 +305,12 @@ export const ReportsDialog: React.FC<{ dashboardId: string; name: string; canEdi
       )}
       <p className="mb-3 text-xs text-gray-500">A report emails this Dashboard's cards to workspace members on a schedule. The numbers are what the person who set it up can see.</p>
       <div className="mb-3 flex gap-4 border-b border-gray-100 text-sm">
-        <button type="button" onClick={() => setTab('schedules')} className={`-mb-px border-b-2 pb-2 ${tab === 'schedules' ? 'border-indigo-600 font-medium text-gray-900' : 'border-transparent text-gray-500'}`}>Schedules</button>
-        {canEdit && <button type="button" onClick={() => setTab('activity')} className={`-mb-px border-b-2 pb-2 ${tab === 'activity' ? 'border-indigo-600 font-medium text-gray-900' : 'border-transparent text-gray-500'}`}>Activity</button>}
-        <button type="button" onClick={() => dashApi.preview(dashboardId).then((p) => setPreview({ title: 'Preview (as you see it now)', html: p.html })).catch((e) => setError(e.message))} className="ml-auto pb-2 text-indigo-600 hover:underline">Preview email</button>
+        <button type="button" onClick={() => setTab('schedules')} className={`-mb-px border-b-2 pb-2 ${tab === 'schedules' ? 'border-brand-600 font-medium text-gray-900' : 'border-transparent text-gray-500'}`}>Schedules</button>
+        {canEdit && <button type="button" onClick={() => setTab('activity')} className={`-mb-px border-b-2 pb-2 ${tab === 'activity' ? 'border-brand-600 font-medium text-gray-900' : 'border-transparent text-gray-500'}`}>Activity</button>}
+        <button type="button" onClick={() => dashApi.preview(dashboardId).then((p) => setPreview({ title: 'Preview (as you see it now)', html: p.html })).catch((e) => setError(e.message))} className="ml-auto pb-2 text-brand-600 hover:underline">Preview email</button>
       </div>
       {error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {notice && <p className="mb-3 rounded-md bg-indigo-50 px-3 py-2 text-sm text-indigo-800">{notice}</p>}
+      {notice && <p className="mb-3 rounded-md bg-brand-50 px-3 py-2 text-sm text-brand-800">{notice}</p>}
 
       {tab === 'schedules' ? (
         <>
@@ -327,8 +329,8 @@ export const ReportsDialog: React.FC<{ dashboardId: string; name: string; canEdi
                       <div className="flex shrink-0 items-center gap-1">
                         <button type="button" title="Send now" onClick={() => sendNow(s)} className="rounded p-1.5 text-gray-500 hover:bg-gray-100"><Send size={15} /></button>
                         <button type="button" title={s.active ? 'Pause' : 'Resume'} onClick={() => run(() => dashApi.updateReport(s.id, toInput(s, !s.active)))} className="rounded p-1.5 text-gray-500 hover:bg-gray-100">{s.active ? <Pause size={15} /> : <Play size={15} />}</button>
-                        <button type="button" onClick={() => setEditing(s)} className="rounded px-2 py-1 text-xs text-indigo-600 hover:bg-indigo-50">Edit</button>
-                        <button type="button" title="Delete" onClick={() => window.confirm('Delete this email report?') && run(() => dashApi.removeReport(s.id))} className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={15} /></button>
+                        <button type="button" onClick={() => setEditing(s)} className="rounded px-2 py-1 text-xs text-brand-600 hover:bg-brand-50">Edit</button>
+                        <button type="button" title="Delete" onClick={async () => await ask.confirm({ danger: true, title: 'Delete this email report?' }) && run(() => dashApi.removeReport(s.id))} className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={15} /></button>
                       </div>
                     )}
                   </div>
@@ -351,7 +353,7 @@ export const ReportsDialog: React.FC<{ dashboardId: string; name: string; canEdi
                   <span className="block truncate text-gray-800">{when(r.created_at)} · {r.recipients.length} recipient{r.recipients.length === 1 ? '' : 's'}</span>
                   {r.error && <span className="block truncate text-xs text-gray-500" title={r.error}>{r.error}</span>}
                 </span>
-                <button type="button" onClick={() => dashApi.run(r.id).then((x) => setPreview({ title: `Report of ${when(r.created_at)}`, html: x.html })).catch((e) => setError(e.message))} className="text-xs text-indigo-600 hover:underline">View</button>
+                <button type="button" onClick={() => dashApi.run(r.id).then((x) => setPreview({ title: `Report of ${when(r.created_at)}`, html: x.html })).catch((e) => setError(e.message))} className="text-xs text-brand-600 hover:underline">View</button>
               </li>
             ))}
           </ul>

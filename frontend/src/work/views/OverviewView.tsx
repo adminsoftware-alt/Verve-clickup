@@ -43,7 +43,7 @@ export const OverviewView: React.FC<{
 
   const addButton = (label: string, onClick: () => void) =>
     canCreate ? (
-      <button type="button" onClick={onClick} className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700">
+      <button type="button" onClick={onClick} className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-700">
         <Plus size={12} /> {label}
       </button>
     ) : null;

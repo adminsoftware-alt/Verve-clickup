@@ -46,11 +46,21 @@ export const Popover: React.FC<{
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
   }, [pos]);
   useLayoutEffect(() => {
-    // Keep it on screen vertically.
-    if (pos && panel.current) {
-      const h = panel.current.offsetHeight;
-      if (pos.top + h > window.innerHeight - 8) setPos({ ...pos, top: Math.max(8, window.innerHeight - h - 8) });
-    }
+    // Keep it on screen vertically -- and keep doing so while it grows, because the contents
+    // (search results, for one) arrive after it is first placed.
+    const node = panel.current;
+    if (!pos || !node) return;
+    const fit = () => {
+      const height = node.offsetHeight;
+      const room = window.innerHeight - 8;
+      const top = pos.top + height > room ? Math.max(8, room - height) : pos.top;
+      if (top !== pos.top) setPos({ ...pos, top });
+    };
+    fit();
+    const watch = new ResizeObserver(fit);
+    watch.observe(node);
+    window.addEventListener('resize', fit);
+    return () => { watch.disconnect(); window.removeEventListener('resize', fit); };
   }, [pos]);
   return (
     <>

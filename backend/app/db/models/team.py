@@ -31,6 +31,8 @@ class Team(TimestampMixin, Base):
     icon: Mapped[Optional[str]] = mapped_column(String(32))
     locations: Mapped[List[Dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    # A sub-team: its people count as members of the parent Team too (shares, mentions, dashboards).
+    parent_team_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"), index=True)
 
 
 Index(

@@ -6,6 +6,7 @@ in a hidden Space of its own so it gets statuses and views like any other List, 
 is kept out of the sidebar tree.
 """
 
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Union
 
@@ -28,23 +29,26 @@ def is_personal(db: Session, obj: Union[Space, Folder, TaskList]) -> bool:
     return space is not None and space.personal_owner_id is not None
 
 
-def personal_list(db: Session, access: Access, create: bool = False) -> Optional[TaskList]:
-    """The caller's Personal List in this workspace, created on first use when asked."""
+def personal_list_of(
+    db: Session, workspace_id: uuid.UUID, user_id: str, create: bool = False
+) -> Optional[TaskList]:
+    """One person's Personal List, made on first use when asked.
+
+    Named by whose it is rather than by who is asking, because a task shared with someone has to
+    land in their List, not in the List of the admin doing the sharing.
+    """
     space = db.scalars(
-        select(Space).where(
-            Space.workspace_id == access.workspace_id,
-            Space.personal_owner_id == access.user_id,
-        )
+        select(Space).where(Space.workspace_id == workspace_id, Space.personal_owner_id == user_id)
     ).first()
     if space is None:
         if not create:
             return None
         space = Space(
-            workspace_id=access.workspace_id,
+            workspace_id=workspace_id,
             name="Personal",
             is_private=True,
-            created_by=access.user_id,
-            personal_owner_id=access.user_id,
+            created_by=user_id,
+            personal_owner_id=user_id,
             orderindex=0,
         )
         db.add(space)
@@ -54,15 +58,20 @@ def personal_list(db: Session, access: Access, create: bool = False) -> Optional
             space_id=space.id,
             name=PERSONAL_LIST_NAME,
             is_private=True,
-            created_by=access.user_id,
+            created_by=user_id,
             orderindex=0,
         )
         db.add(lst)
         db.flush()
-        add_required_views(db, lst, access.user_id)
+        add_required_views(db, lst, user_id)
         db.flush()
         return lst
     return db.scalars(select(TaskList).where(TaskList.space_id == space.id)).first()
+
+
+def personal_list(db: Session, access: Access, create: bool = False) -> Optional[TaskList]:
+    """The caller's own Personal List in this workspace."""
+    return personal_list_of(db, access.workspace_id, access.user_id, create)
 
 
 def my_tasks(db: Session, access: Access, include_closed: bool) -> List[s.TaskOut]:

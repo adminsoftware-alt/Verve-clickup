@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import { CustomSelect } from '../components/CustomSelect';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { ask } from '../components/ask';
 
 export const TimeEntries: React.FC = () => {
   const { timers, stopTimer, getLiveElapsedSeconds } = useTimer();
@@ -362,7 +363,7 @@ export const TimeEntries: React.FC = () => {
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
                           <Edit2 size={14} color="#6B7280" style={{ cursor: 'pointer' }} />
                           <Trash2 size={14} color="#EF4444" style={{ cursor: 'pointer' }} onClick={async () => {
-                            if(window.confirm('Delete entry?')) {
+                            if(await ask.confirm({ danger: true, title: 'Delete entry?' })) {
                               await timeService.deleteTimeEntry(entry.id);
                               setEntries(prev => prev.filter(e => e.id !== entry.id));
                             }

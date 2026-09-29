@@ -21,8 +21,8 @@ async def lifespan(app: FastAPI):
     reports.stop_scheduler()
 
 app = FastAPI(
-    title="Timetriq API",
-    description="Backend API for the Timetriq Work Intelligence Platform",
+    title="Verve Workflow API",
+    description="Backend API for the Verve Workflow Work Intelligence Platform",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -48,5 +48,5 @@ app.add_exception_handler(WorkError, work_error_handler)
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "Timetriq API"}
+    return {"status": "ok", "service": "Verve Workflow API"}
 

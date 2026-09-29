@@ -52,7 +52,7 @@ def order_favorites(workspace_id: uuid.UUID, data: FavoriteOrder, user: User = D
 
 @router.get("/workspaces/{workspace_id}/task-types", response_model=List[s.TaskTypeOut])
 def task_types(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    rows = organise.list_types(db, Access.for_workspace(db, user.id, workspace_id))
+    rows = organise.types_out(db, Access.for_workspace(db, user.id, workspace_id))
     db.commit()
     return rows
 

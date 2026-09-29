@@ -59,6 +59,160 @@ def test_team_leads_are_set_with_members(api, org):
 # --- who sees which Dashboard ---------------------------------------------------------------
 
 
+def test_everyone_gets_their_own_work_and_leads_get_their_team(api, org):
+    # A member opening the Hub finds their own work waiting, made once.
+    first = ok(api.get(f"/workspaces/{org['ws']}/dashboards", "member"))
+    assert [(x["name"], x["standard"], x["your_level"]) for x in first] == [("My work", "my_work", "full")]
+    again = ok(api.get(f"/workspaces/{org['ws']}/dashboards", "member"))
+    assert [x["id"] for x in again] == [x["id"] for x in first]
+    mine = ok(api.get(f"/dashboards/{first[0]['id']}", "member"))
+    assert mine["filters"]["assignees"] == ["me"] and len(mine["cards"]) >= 6
+
+    # The lead of HR also gets HR, person by person; a plain member never sees it.
+    for_lead = {x["standard"]: x for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", "lead"))}
+    team = for_lead["team"]
+    assert (team["name"], team["team"]["id"], team["your_level"]) == ("HR – people", org["team"]["id"], "full")
+    board = ok(api.get(f"/dashboards/{team['id']}", "lead"))
+    assert board["filters"]["assignees"] == [f"team:{org['team']['id']}"]
+    assert "assignee" in {c["config"]["group_by"] for c in board["cards"] if c["type"] == "bar"}
+    assert api.get(f"/dashboards/{team['id']}", "member2").status_code == 404
+    assert "team" not in {x["standard"] for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", "member2"))}
+
+    # Owners and admins get the whole company, managers included; guests get nothing made for them.
+    for boss in ("owner", "admin"):
+        kinds = {x["standard"] for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", boss))}
+        assert {"my_work", "company"} <= kinds
+    company = [x for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", "owner")) if x["standard"] == "company"]
+    assert len(company) == 1  # one for the whole workspace, however many admins open the Hub
+    assert ok(api.get(f"/dashboards/{company[0]['id']}", "owner"))["filters"]["assignees"] is None  # everyone
+    assert ok(api.get(f"/workspaces/{org['ws']}/dashboards", "guest")) == []
+
+
+def test_home_opens_on_your_own_dashboard(api, org):
+    url = f"/workspaces/{org['ws']}/dashboards/home"
+    home = ok(api.get(url, "member"))
+    assert (home["standard"], home["relation"], home["your_level"]) == ("my_work", "mine", "full")
+    assert home["owner"]["id"] == "member" and home["filters"]["assignees"] == ["me"]
+    assert "timesheet" in {c["type"] for c in home["cards"]}  # their week's hours sit on it
+    assert ok(api.get(url, "member"))["id"] == home["id"]  # the same one every time
+    # It is the very Dashboard the Hub lists for them, and everyone gets their own.
+    assert [x["id"] for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", "member"))] == [home["id"]]
+    assert ok(api.get(url, "lead"))["id"] != home["id"]
+    assert api.get(url, "guest").status_code == 403
+
+
+def test_workload_card_weighs_planned_work_against_the_hours_people_have(api, org):
+    dash = new_dashboard(api, org, "owner", name="Capacity")
+    card = ok(api.post(f"/dashboards/{dash['id']}/cards", "owner", {
+        "type": "capacity", "title": "This week", "config": {"period": {"preset": "this_week"}},
+    }), 201)
+    today = datetime.now(timezone.utc).replace(hour=9, minute=0, second=0, microsecond=0)
+    task = ok(api.post(f"/lists/{org['list']['id']}/tasks", "owner", {
+        "name": "Payroll", "assignees": ["owner"], "time_estimate_seconds": 4 * HOUR,
+        "start_date": today.isoformat(), "due_date": today.isoformat(),
+    }), 201)
+    ok(api.post(f"/tasks/{task['id']}/time", "owner", {"duration_seconds": HOUR}), 201)
+    got = next(c for c in data(api, dash, "owner") if c["card_id"] == card["id"])["data"]
+    assert got["planned_seconds"] == 4 * HOUR and got["logged_seconds"] == HOUR
+    assert got["capacity_seconds"] >= 8 * HOUR  # a working week for the one person involved
+    assert got["remaining_seconds"] == got["capacity_seconds"] - got["planned_seconds"]
+    assert (got["tasks"], got["scheduled_tasks"], got["people"]) == (1, 1, 1)
+    # Work with no due date can't be planned into a day, so it doesn't count against the week.
+    ok(api.post(f"/lists/{org['list']['id']}/tasks", "owner", {
+        "name": "Someday", "assignees": ["owner"], "time_estimate_seconds": 9 * HOUR,
+    }), 201)
+    again = next(c for c in data(api, dash, "owner") if c["card_id"] == card["id"])["data"]
+    assert (again["planned_seconds"], again["tasks"], again["scheduled_tasks"]) == (4 * HOUR, 2, 1)
+
+
+def test_cards_can_group_by_and_add_up_a_custom_field(api, org):
+    """Defining a field and then not being able to report on it is why nobody fills them in."""
+    space = org["space"]["id"]
+    review = ok(api.post(f"/spaces/{space}/fields", "owner", {
+        "name": "Review month", "type": "dropdown",
+        "config": {"options": [{"id": "sep", "name": "September"}, {"id": "oct", "name": "October"}]},
+    }), 201)
+    fee = ok(api.post(f"/spaces/{space}/fields", "owner", {"name": "Fee", "type": "money"}), 201)
+
+    # Option ids are generated by the server, so read them back rather than assuming.
+    options = {o["name"]: o["id"] for o in review["config"]["options"]}
+    for month, amount in (("September", 100), ("September", 250), ("October", 400)):
+        task = ok(api.post(f"/lists/{org['list']['id']}/tasks", "owner", {"name": f"Job {amount}"}), 201)
+        ok(api.put(f"/tasks/{task['id']}/fields/{review['id']}", "owner", {"value": options[month]}))
+        ok(api.put(f"/tasks/{task['id']}/fields/{fee['id']}", "owner", {"value": amount}))
+
+    dash = new_dashboard(api, org, "owner", name="Fields")
+    pie = ok(api.post(f"/dashboards/{dash['id']}/cards", "owner", {
+        "type": "pie", "title": "By review month", "config": {"group_by": f"custom:{review['id']}"},
+    }), 201)
+    total = ok(api.post(f"/dashboards/{dash['id']}/cards", "owner", {
+        "type": "calculation", "title": "Fees", "config": {"measure": f"custom:{fee['id']}", "fn": "sum"},
+    }), 201)
+
+    rows = {c["card_id"]: c["data"] for c in data(api, dash, "owner")}
+    by_label = {seg["label"]: seg for seg in rows[pie["id"]]["segments"]}
+    assert by_label["September"]["value"] == 2
+    assert by_label["October"]["value"] == 1
+
+    # Money is a number, not a duration: 750 seconds would be a nonsense reading of 750 rupees.
+    assert rows[total["id"]]["value"] == 750 and rows[total["id"]]["format"] == "number"
+
+    # And the segment still opens the tasks behind it.
+    page = ok(api.get(f"/dashboards/{dash['id']}/cards/{pie['id']}/tasks?segment={options['September']}", "owner"))
+    assert sorted(t["name"] for t in page["tasks"]) == ["Job 100", "Job 250"]
+
+
+def test_estimate_against_actual_covers_only_work_finished_in_the_period(api, org):
+    """Both sides must describe the same tasks, or the card compares two different things.
+
+    Counting every open task's estimate against only the hours logged inside the period used to
+    report most of a month's estimates as "unused" after a single day.
+    """
+    dash = new_dashboard(api, org, "owner", name="Variance")
+    card = ok(api.post(f"/dashboards/{dash['id']}/cards", "owner", {
+        "type": "variance", "title": "This week", "config": {"period": {"preset": "this_week"}},
+    }), 201)
+    shared = ok(api.post(f"/lists/{org['list']['id']}/tasks", "owner", {
+        "name": "Shared job", "assignees": ["member", "lead"], "time_estimate_seconds": 4 * HOUR,
+    }), 201)
+    ok(api.post(f"/tasks/{shared['id']}/time", "member", {"duration_seconds": 3 * HOUR}), 201)
+
+    # Still open: its estimate is not a result yet, so the card stays empty.
+    got = next(c for c in data(api, dash, "owner") if c["card_id"] == card["id"])["data"]
+    assert got["rows"] == [] and got["expected_seconds"] == 0
+
+    ok(api.patch(f"/tasks/{shared['id']}", "owner",
+                 {"status_id": statuses(api, org["list"]["id"])["closed"]["id"]}))
+    got = next(c for c in data(api, dash, "owner") if c["card_id"] == card["id"])["data"]
+    rows = {r["user"]["id"]: r for r in got["rows"]}
+    # The estimate is split between the two people on it; the hours are whoever tracked them.
+    assert rows["member"]["expected_seconds"] == 2 * HOUR and rows["member"]["logged_seconds"] == 3 * HOUR
+    assert rows["member"]["difference_seconds"] == HOUR
+    assert rows["lead"]["expected_seconds"] == 2 * HOUR and rows["lead"]["difference_seconds"] == -2 * HOUR
+    assert got["expected_seconds"] == 4 * HOUR and got["logged_seconds"] == 3 * HOUR
+
+
+def test_the_dashboards_made_for_people_answer_the_old_home_page(api, org):
+    """Every question the first Dashboard page answered has a card on the new ones.
+
+    "Completed tasks" is not among them any more: what was finished is answered by the "Done this
+    week" figure and, in detail, by the estimate-against-actual card, which lists the same work
+    with the hours beside it.
+    """
+    home = ok(api.get(f"/workspaces/{org['ws']}/dashboards/home", "member"))
+    mine = {c["type"] for c in home["cards"]}
+    assert {"calculation", "capacity", "bar", "pie", "timesheet", "variance"} <= mine
+    assert "completed" not in mine
+    # "To do" came off it too: the status pie answers what is still open, and My Tasks is where
+    # that list is actually worked from.
+    assert "task_list" not in mine
+    for_lead = {x["standard"]: x for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", "lead"))}
+    team = ok(api.get(f"/dashboards/{for_lead['team']['id']}", "lead"))
+    theirs = {c["type"] for c in team["cards"]}
+    assert {"capacity", "behind", "timesheet", "bar", "pie", "task_list", "variance"} <= theirs
+    assert "completed" not in theirs
+
+
 def test_members_see_only_their_own_dashboards(api, org):
     new_dashboard(api, org, "member", name="Mine")
     assert "Mine" not in listed(api, org, "member2")
@@ -253,7 +407,12 @@ def test_timesheet_has_a_column_per_day_and_capacity(api, seeded):
     ok(api.post(f"/dashboards/{dash['id']}/cards", "admin", {"type": "timesheet", "config": {"period": {"preset": "this_week"}}}), 201)
     sheet = data(api, dash, "admin")[0]["data"]
     assert len(sheet["days"]) == 7 and sheet["capacity_per_day"] == [8 * HOUR] * 5 + [0, 0]
-    assert sheet["rows"][0]["user"]["id"] == "member" and sheet["rows"][0]["total"] == 2 * HOUR
+    row = sheet["rows"][0]
+    assert row["user"]["id"] == "member" and row["total"] == 2 * HOUR
+    # A row opens up into the tasks the hours went to, so they can be read and opened.
+    assert [t["id"] for t in row["tasks"]] == [seeded["tasks"]["A"]["id"]]
+    assert row["tasks"][0]["total"] == 2 * HOUR and sum(row["tasks"][0]["seconds_per_day"]) == 2 * HOUR
+    assert row["tasks"][0]["name"] == seeded["tasks"]["A"]["name"] and row["tasks"][0]["status"]
 
 
 # --- building -----------------------------------------------------------------------------

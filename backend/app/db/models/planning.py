@@ -74,8 +74,8 @@ class Automation(Base):
     __tablename__ = "automations"
     __table_args__ = (
         CheckConstraint("num_nonnulls(space_id, folder_id, list_id) = 1", name="one_location"),
-        CheckConstraint("trigger IN ('task_created', 'status_changed')", name="trigger_kind"),
-        CheckConstraint("action IN ('assign', 'notify', 'set_priority', 'set_status')", name="action_kind"),
+        CheckConstraint("trigger IN ('task_created', 'status_changed', 'due_soon', 'overdue', 'priority_changed', 'assignee_added')", name="trigger_kind"),
+        CheckConstraint("action IN ('assign', 'notify', 'set_priority', 'set_status', 'escalate', 'add_tag')", name="action_kind"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

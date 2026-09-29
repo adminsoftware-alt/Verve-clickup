@@ -5,6 +5,8 @@ class WorkspaceRole(str, enum.Enum):
     owner = "owner"
     admin = "admin"
     member = "member"
+    # Internal staff who see only what is shared with them (ClickUp's "limited member").
+    limited = "limited"
     guest = "guest"
 
 
@@ -54,6 +56,12 @@ class ViewType(str, enum.Enum):
     timeline = "timeline"
     activity = "activity"
     form = "form"
+    doc = "doc"
+    whiteboard = "whiteboard"
+    mind_map = "mind_map"
+    map = "map"
+    chat = "chat"
+    embed = "embed"
 
 
 class LocationKind(str, enum.Enum):

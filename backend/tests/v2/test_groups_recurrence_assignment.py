@@ -219,6 +219,31 @@ def test_admins_assign_to_anyone_and_taking_it_back_removes_access(api, org):
     ok(api.get(f"/lists/{org['other']['id']}/tasks", "owner"))
 
 
+def test_a_list_can_belong_to_several_people_at_once(api, org):
+    url = f"/lists/{org['other']['id']}/assignee"
+    out = ok(api.put(url, "admin", {"user_ids": ["member", "member2"]}))
+    assert [u["id"] for u in out["assignees"]] == ["member", "member2"]
+    assert out["assignee_id"] == "member"  # the first of them, for anything that reads one owner
+    # Both can open it and work in it.
+    for who in ("member", "member2"):
+        task(api, org["other"], who=who, name=f"{who}'s job")
+    tree = ok(api.get(f"/workspaces/{org['ws']}/hierarchy", "admin"))
+    node = next(n for sp in tree["spaces"] for n in sp["lists"] if n["id"] == str(org["other"]["id"]))
+    assert node["assignee_ids"] == ["member", "member2"]
+
+    # Dropping one takes their access back and leaves the other in place.
+    kept = ok(api.put(url, "admin", {"user_ids": ["member2"]}))
+    assert [u["id"] for u in kept["assignees"]] == ["member2"]
+    assert api.get(f"/lists/{org['other']['id']}/tasks", "member").status_code == 404
+    ok(api.get(f"/lists/{org['other']['id']}/tasks", "member2"))
+
+    # Guests still can't be given a List, and neither can a crowd.
+    assert api.put(url, "admin", {"user_ids": ["member2", "guest"]}).status_code == 400
+    assert api.put(url, "admin", {"user_ids": [f"nobody{i}" for i in range(21)]}).status_code == 422
+    # Handing it back to nobody clears everyone.
+    assert ok(api.put(url, "admin", {"user_ids": []}))["assignees"] == []
+
+
 def test_members_cannot_assign_lists_they_do_not_manage(api, org):
     assert api.put(f"/lists/{org['daily']['id']}/assignee", "member", {"user_id": "member2"}).status_code == 403
     # ...but may take a List on themselves when they have full access.

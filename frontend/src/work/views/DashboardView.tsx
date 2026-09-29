@@ -11,7 +11,7 @@ const CARDS: { key: BucketKey; label: string; icon: React.ReactNode; tone: strin
   { key: 'overdue', label: 'Overdue', icon: <AlertTriangle size={18} />, tone: 'text-red-600' },
   { key: 'unassigned', label: 'Unassigned', icon: <UserX size={18} />, tone: 'text-amber-600' },
   { key: 'no_estimate', label: 'Without estimate', icon: <Clock3 size={18} />, tone: 'text-sky-600' },
-  { key: 'unscheduled', label: 'Unscheduled', icon: <CalendarX size={18} />, tone: 'text-violet-600' },
+  { key: 'unscheduled', label: 'Unscheduled', icon: <CalendarX size={18} />, tone: 'text-brand-600' },
 ];
 
 export const DashboardView: React.FC<{
@@ -44,7 +44,7 @@ export const DashboardView: React.FC<{
     <div className="space-y-5 px-6 py-5">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <div className="flex items-center gap-2 text-sm text-gray-500"><ListTodo size={18} className="text-indigo-600" />Open tasks</div>
+          <div className="flex items-center gap-2 text-sm text-gray-500"><ListTodo size={18} className="text-brand-600" />Open tasks</div>
           <div className="mt-2 text-3xl font-semibold text-gray-900">{data.total_open}</div>
         </div>
         {CARDS.map((card) => (
@@ -52,7 +52,7 @@ export const DashboardView: React.FC<{
             key={card.key}
             type="button"
             onClick={() => setOpenBucket(openBucket === card.key ? null : card.key)}
-            className={`rounded-xl border bg-white p-4 text-left transition hover:shadow-sm ${openBucket === card.key ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-gray-200'}`}
+            className={`rounded-xl border bg-white p-4 text-left transition hover:shadow-sm ${openBucket === card.key ? 'border-brand-400 ring-2 ring-brand-100' : 'border-gray-200'}`}
           >
             <div className="flex items-center gap-2 text-sm text-gray-500"><span className={card.tone}>{card.icon}</span>{card.label}</div>
             <div className="mt-2 text-3xl font-semibold text-gray-900">{data[card.key].count}</div>

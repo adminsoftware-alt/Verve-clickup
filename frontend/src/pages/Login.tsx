@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, sendPasswordResetEmail } from 'firebase/auth';
+import { DevSignIn } from '../components/DevSignIn';
 import { auth } from '../core/firebase';
 import { isAllowedDomain } from '../utils/auth';
 import { Eye, EyeOff } from 'lucide-react';
@@ -115,36 +116,31 @@ export const Login: React.FC = () => {
       display: 'flex', 
       height: '100vh', 
       width: '100vw', 
-      background: 'linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%)', 
-      alignItems: 'center', 
-      justifyContent: 'center', 
-      padding: '20px', 
-      boxSizing: 'border-box' 
+      background: '#FFFFFF',
+      alignItems: 'stretch',
+      justifyContent: 'center',
+      overflow: 'hidden',
+      boxSizing: 'border-box'
     }}>
       <motion.div 
-        initial={{ opacity: 0, y: 20, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
-        style={{ 
-          display: 'flex', 
-          width: '100%', 
-          maxWidth: '1100px', 
-          height: '80vh',
-          minHeight: '650px',
-          maxHeight: '850px',
-          background: 'rgba(255, 255, 255, 0.85)',
-          backdropFilter: 'blur(30px)',
-          WebkitBackdropFilter: 'blur(30px)',
-          borderRadius: '24px', 
-          boxShadow: '0 40px 80px -20px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255,255,255,0.5) inset', 
-          overflow: 'hidden' 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5, ease: 'easeOut' }}
+        style={{
+          display: 'flex',
+          width: '100%',
+          height: '100%',
+          background: '#FFFFFF',
+          overflow: 'hidden'
         }}
       >
       {/* Left Side - Branding */}
       <div style={{ 
         flex: 1, 
         backgroundColor: '#1E1B4B', 
-        backgroundImage: 'linear-gradient(rgba(30, 27, 75, 0.75), rgba(79, 70, 229, 0.75)), url("/image.png")',
+        // The still stays as poster and fallback: if the video cannot play -- blocked
+        // autoplay, data saver, an unsupported codec -- the panel still looks finished.
+        backgroundImage: 'url("/image.png")',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         display: 'flex',
@@ -153,57 +149,77 @@ export const Login: React.FC = () => {
         alignItems: 'center',
         padding: '40px',
         color: 'white',
-        position: 'relative'
+        position: 'relative',
+        overflow: 'hidden'
       }}>
-        <div style={{ zIndex: 1, textAlign: 'center', maxWidth: '85%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-           <h1 style={{ fontFamily: '"SF Pro Display", -apple-system, sans-serif', fontSize: '3.5rem', fontWeight: 800, marginBottom: '3rem', letterSpacing: '-0.04em', textShadow: '0 4px 15px rgba(0,0,0,0.3)' }}>
-             Timetriq
-           </h1>
+        <video
+          src="/login-side-video.mp4"
+          poster="/image.png"
+          autoPlay
+          muted
+          loop
+          playsInline
+          aria-hidden="true"
+          tabIndex={-1}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0 }}
+        />
+        {/* The brand wash, so the logo and wording stay readable whatever frame is showing. */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute', inset: 0, zIndex: 0,
+            background: 'linear-gradient(135deg, rgba(8, 47, 122, 0.88) 0%, rgba(13, 148, 136, 0.78) 55%, rgba(21, 128, 61, 0.88) 100%)',
+          }}
+        />
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute', left: 0, right: 0, bottom: 0, height: '55%', zIndex: 0,
+            background: 'linear-gradient(to top, rgba(4, 38, 60, 0.72), rgba(4, 38, 60, 0))',
+          }}
+        />
+        {/* An explicit width: the rotating block inside is width:100%, which collapses if its
+            parent is only as wide as its content. */}
+        <div style={{ zIndex: 1, textAlign: 'center', width: '100%', maxWidth: '480px', display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 'auto', paddingBottom: '12px' }}>
            
-           <div style={{ position: 'relative', height: '140px', width: '100%', maxWidth: '450px' }}>
+           {/* Just the headline, low and small: the video carries the picture, so a paragraph
+               over it competes with both the footage and the form on the right. */}
+           <div style={{ position: 'relative', height: '44px', width: '100%' }}>
              <AnimatePresence mode="wait">
-               <motion.div
+               <motion.h3
                  key={currentFeatureIndex}
-                 initial={{ opacity: 0, y: 15 }}
+                 initial={{ opacity: 0, y: 10 }}
                  animate={{ opacity: 1, y: 0 }}
-                 exit={{ opacity: 0, y: -15 }}
-                 transition={{ duration: 0.5, ease: "easeOut" }}
-                 style={{ position: 'absolute', top: 0, left: 0, width: '100%' }}
+                 exit={{ opacity: 0, y: -10 }}
+                 transition={{ duration: 0.45, ease: 'easeOut' }}
+                 style={{
+                   position: 'absolute', top: 0, left: 0, width: '100%', margin: 0,
+                   fontSize: '1.15rem',
+                   fontWeight: 600,
+                   letterSpacing: '0.01em',
+                   textShadow: '0 2px 12px rgba(0,0,0,0.35)',
+                 }}
                >
-                 <h3 style={{ 
-                   fontSize: '1.75rem', 
-                   fontWeight: 700, 
-                   marginBottom: '1rem',
-                   textShadow: '0 2px 10px rgba(0,0,0,0.2)',
-                   letterSpacing: '-0.02em'
-                 }}>
-                   {features[currentFeatureIndex].title}
-                 </h3>
-                 <p style={{ 
-                   fontSize: '1.1rem', 
-                   lineHeight: 1.6,
-                   textShadow: '0 1px 5px rgba(0,0,0,0.2)',
-                   fontWeight: 400,
-                   opacity: 0.9
-                 }}>
-                   {features[currentFeatureIndex].description}
-                 </p>
-               </motion.div>
+                 {features[currentFeatureIndex].title}
+               </motion.h3>
              </AnimatePresence>
            </div>
         </div>
       </div>
 
       {/* Right Side - Form */}
-      <div style={{ 
-        flex: 1, 
+      <div style={{
+        flex: 1,
         display: 'flex',
         justifyContent: 'center',
-        alignItems: 'center',
+        // Not `center`: when the form is taller than the window, centring pushes its top above
+        // the scroll origin and the heading can never be reached. `margin: auto` on the child
+        // centres it when it fits and behaves like flex-start when it does not.
+        alignItems: 'flex-start',
         padding: '40px',
         overflowY: 'auto'
       }}>
-        <div style={{ width: '100%', maxWidth: '380px' }}>
+        <div style={{ width: '100%', maxWidth: '380px', margin: 'auto 0' }}>
           <AnimatePresence mode="wait">
             <motion.div
               key={isRegistering ? "signup" : "login"}
@@ -212,6 +228,13 @@ export const Login: React.FC = () => {
               exit={{ opacity: 0, x: 10 }}
               transition={{ duration: 0.3 }}
             >
+              {/* On the white form side the logo's own white background disappears, so it sits
+                  cleanly above the heading whether or not the file is transparent. */}
+              <img
+                src="/verve-workflow-logo.png"
+                alt="Verve Workflow"
+                style={{ width: '200px', height: 'auto', display: 'block', margin: '0 auto 1.5rem' }}
+              />
               <h2 style={{ marginBottom: '0.5rem', textAlign: 'center', color: '#111827', fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.03em' }}>
                 {isRegistering ? 'Create Account' : 'Welcome Back'}
               </h2>
@@ -241,7 +264,7 @@ export const Login: React.FC = () => {
               onChange={(e) => setEmail(e.target.value)} 
               required
               style={{ width: '100%', padding: '10px 14px', border: '1px solid rgba(0,0,0,0.1)', borderRadius: '12px', backgroundColor: 'rgba(255,255,255,0.7)', fontSize: '0.9rem', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)', outline: 'none', transition: 'border-color 0.2s ease' }}
-              onFocus={(e) => e.currentTarget.style.borderColor = '#4F46E5'}
+              onFocus={(e) => e.currentTarget.style.borderColor = '#0F766E'}
               onBlur={(e) => e.currentTarget.style.borderColor = 'rgba(0,0,0,0.1)'}
             />
           </div>
@@ -256,7 +279,7 @@ export const Login: React.FC = () => {
                 required
                 minLength={6}
                 style={{ width: '100%', padding: '10px 14px', paddingRight: '40px', border: '1px solid rgba(0,0,0,0.1)', borderRadius: '12px', backgroundColor: 'rgba(255,255,255,0.7)', fontSize: '0.9rem', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)', outline: 'none', transition: 'border-color 0.2s ease' }}
-                onFocus={(e) => e.currentTarget.style.borderColor = '#4F46E5'}
+                onFocus={(e) => e.currentTarget.style.borderColor = '#0F766E'}
                 onBlur={(e) => e.currentTarget.style.borderColor = 'rgba(0,0,0,0.1)'}
               />
               <button
@@ -284,7 +307,7 @@ export const Login: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleForgotPassword}
-                  style={{ background: 'none', border: 'none', color: '#4F46E5', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                  style={{ background: 'none', border: 'none', color: '#0F766E', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: 0 }}
                 >
                   Forgot Password?
                 </button>
@@ -357,7 +380,7 @@ export const Login: React.FC = () => {
           {isRegistering ? "Already have an account? " : "Don't have an account? "}
           <button 
             onClick={() => setIsRegistering(!isRegistering)}
-            style={{ background: 'none', border: 'none', color: '#4F46E5', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+            style={{ background: 'none', border: 'none', color: '#0F766E', fontWeight: 600, cursor: 'pointer', padding: 0 }}
           >
             {isRegistering ? 'Log in' : 'Sign up'}
           </button>
@@ -366,6 +389,8 @@ export const Login: React.FC = () => {
         <div style={{ marginTop: '24px', textAlign: 'center', fontSize: '0.75rem', color: '#9CA3AF', fontWeight: 500 }}>
           Only @verveadvisory.com email accounts are permitted.
         </div>
+
+        <DevSignIn />
         </div>
       </div>
       </motion.div>

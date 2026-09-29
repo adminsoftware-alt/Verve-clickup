@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArchiveRestore, ArrowDown, ArrowUp, Folder, List as ListIcon, Plus, Trash2, X } from 'lucide-react';
 import { useWork } from './WorkContext';
+import { DuplicateLocation } from './DuplicateLocation';
 import { collabApi } from './collabApi';
 import { workApi, type FolderNode, type Hierarchy, type ListNode, type LocationKind, type SpaceNode, type StatusGroup } from './api';
 import { Portal } from './ui';
 
-const Dialog: React.FC<{ title: string; wide?: boolean; onClose: () => void; children: React.ReactNode }> = ({ title, wide, onClose, children }) => (
+export const Dialog: React.FC<{ title: string; wide?: boolean; onClose: () => void; children: React.ReactNode }> = ({ title, wide, onClose, children }) => (
   <Portal>
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30" onMouseDown={onClose}>
       <div role="dialog" aria-label={title} onMouseDown={(e) => e.stopPropagation()}
@@ -20,12 +21,12 @@ const Dialog: React.FC<{ title: string; wide?: boolean; onClose: () => void; chi
   </Portal>
 );
 
-const Buttons: React.FC<{ onClose: () => void; onOk: () => void; ok: string; disabled?: boolean; error?: string | null }> = ({ onClose, onOk, ok, disabled, error }) => (
+export const Buttons: React.FC<{ onClose: () => void; onOk: () => void; ok: string; disabled?: boolean; error?: string | null }> = ({ onClose, onOk, ok, disabled, error }) => (
   <>
     {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
     <div className="mt-4 flex justify-end gap-2">
       <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-      <button type="button" disabled={disabled} onClick={onOk} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">{ok}</button>
+      <button type="button" disabled={disabled} onClick={onOk} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">{ok}</button>
     </div>
   </>
 );
@@ -116,7 +117,7 @@ export const StatusEditorDialog: React.FC<{ kind: LocationKind; id: string; name
                     <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">{g.label}</h4>
                     <span className="text-[11px] text-gray-400">{g.hint}</span>
                     {g.key !== 'closed' && (
-                      <button type="button" onClick={() => add(g.key)} className="ml-auto flex items-center gap-0.5 rounded px-1.5 text-xs text-indigo-600 hover:bg-indigo-50"><Plus size={12} /> Add status</button>
+                      <button type="button" onClick={() => add(g.key)} className="ml-auto flex items-center gap-0.5 rounded px-1.5 text-xs text-brand-600 hover:bg-brand-50"><Plus size={12} /> Add status</button>
                     )}
                   </div>
                   {rows.filter((r) => r.group === g.key).map((r) => (
@@ -187,9 +188,9 @@ export const MoveLocationDialog: React.FC<{ kind: 'folder' | 'list'; node: Folde
         {targets.map((t) => (
           <li key={t.key}>
             <button type="button" role="option" aria-selected={t.key === target} onClick={() => setTarget(t.key)}
-              className={`flex w-full items-center gap-2 py-1.5 pr-3 text-left text-sm ${t.key === target ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
+              className={`flex w-full items-center gap-2 py-1.5 pr-3 text-left text-sm ${t.key === target ? 'bg-brand-50 text-brand-700' : 'hover:bg-gray-50'}`}
               style={{ paddingLeft: `${0.75 + t.depth * 1}rem` }}>
-              {t.space_id ? <span className="flex h-4 w-4 items-center justify-center rounded bg-indigo-600 text-[9px] font-bold text-white">{t.label[0]?.toUpperCase()}</span> : <Folder size={14} className="text-gray-400" />}
+              {t.space_id ? <span className="flex h-4 w-4 items-center justify-center rounded bg-brand-600 text-[9px] font-bold text-white">{t.label[0]?.toUpperCase()}</span> : <Folder size={14} className="text-gray-400" />}
               {t.label}
             </button>
           </li>
@@ -201,27 +202,17 @@ export const MoveLocationDialog: React.FC<{ kind: 'folder' | 'list'; node: Folde
   );
 };
 
-export const DuplicateLocationDialog: React.FC<{ kind: 'folder' | 'list'; node: FolderNode | ListNode; onClose: () => void; onDone: (id: string) => void }> = ({ kind, node, onClose, onDone }) => {
-  const [name, setName] = useState(`${node.name} (copy)`);
-  const [tasks, setTasks] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const go = async () => {
-    try {
-      const out = await collabApi.duplicateLocation(kind, node.id, { name: name.trim() || undefined, include_tasks: tasks });
-      onDone(out.id);
-    } catch (e) { setError((e as Error).message); }
-  };
-  return (
-    <Dialog title={`Duplicate ${KIND_LABEL[kind]}`} onClose={onClose}>
-      <label className="block text-xs font-medium text-gray-600">Name
-        <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal" />
-      </label>
-      <label className="mt-3 flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={tasks} onChange={(e) => setTasks(e.target.checked)} /> Include tasks</label>
-      <p className="mt-2 text-xs text-gray-500">Statuses, task groups{kind === 'folder' ? ', Lists' : ''}, and tasks with their subtasks, assignees, tags and repeat rules are copied. Time entries, comments and sharing are not; the copy is yours.</p>
-      <Buttons onClose={onClose} onOk={go} ok="Duplicate" disabled={!name.trim()} error={error} />
-    </Dialog>
-  );
-};
+export const DuplicateLocationDialog: React.FC<{ kind: 'folder' | 'list'; node: FolderNode | ListNode; onClose: () => void; onDone: (id: string) => void }> = ({ kind, node, onClose, onDone }) => (
+  // One dialog for Spaces, Folders and Lists; this is just the way in for two of them.
+  <DuplicateLocation
+    kind={kind}
+    id={node.id}
+    name={node.name}
+    onClose={onClose}
+    onDone={onDone}
+    run={(body) => collabApi.duplicateLocation(kind, node.id, body as unknown as Record<string, unknown>)}
+  />
+);
 
 // --- archived ---------------------------------------------------------------------------------------
 

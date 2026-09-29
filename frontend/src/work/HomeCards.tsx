@@ -97,8 +97,8 @@ export const LineupCard: React.FC<{ className?: string; onOpenTask: (id: string)
 
   return (
     <HomeCardShell label="LineUp" className={className}
-      title={<span className="flex items-center gap-1.5"><ListOrdered size={16} className="text-indigo-600" /> LineUp <span className="text-xs font-normal text-gray-400">your top tasks, in your order</span></span>}
-      action={<button type="button" onClick={() => setAdding(!adding)} className="rounded-md px-2 py-0.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50">{adding ? 'Done' : '+ Add task'}</button>}>
+      title={<span className="flex items-center gap-1.5"><ListOrdered size={16} className="text-brand-600" /> LineUp <span className="text-xs font-normal text-gray-400">your top tasks, in your order</span></span>}
+      action={<button type="button" onClick={() => setAdding(!adding)} className="rounded-md px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-50">{adding ? 'Done' : '+ Add task'}</button>}>
       {adding && (
         <div className="mb-2 px-2">
           <TaskPicker autoFocus placeholder="Find a task to add to your LineUp" exclude={(tasks ?? []).map((t) => t.id)}
@@ -115,7 +115,7 @@ export const LineupCard: React.FC<{ className?: string; onOpenTask: (id: string)
               onDragOver={(e) => { if (dragging) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); dropOn(t.id); setDragging(null); }}
               className={`group flex items-center gap-1 ${dragging === t.id ? 'opacity-40' : ''}`}>
               <GripVertical size={13} className="shrink-0 cursor-grab text-gray-300 group-hover:text-gray-500" />
-              <span className="w-5 shrink-0 text-center text-xs font-semibold text-indigo-600">{i + 1}</span>
+              <span className="w-5 shrink-0 text-center text-xs font-semibold text-brand-600">{i + 1}</span>
               <div className="min-w-0 flex-1">
                 <SimpleTaskRow task={t} onOpen={onOpenTask} extra={t.due_date ? <span className={`shrink-0 text-xs ${t.is_overdue ? 'text-red-600' : 'text-gray-500'}`}>{formatDue(t.due_date)}</span> : undefined} />
               </div>
@@ -145,8 +145,8 @@ export const TodaysPlanCard: React.FC<{ className?: string; onOpenTask: (id: str
   const time = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   return (
     <HomeCardShell label="Today's plan" className={className}
-      title={<span className="flex items-center gap-1.5"><CalendarDays size={16} className="text-indigo-600" /> Today's plan</span>}
-      action={<Link to="/planner" className="text-xs font-medium text-indigo-700 no-underline hover:underline">Open Planner</Link>}>
+      title={<span className="flex items-center gap-1.5"><CalendarDays size={16} className="text-brand-600" /> Today's plan</span>}
+      action={<Link to="/planner" className="text-xs font-medium text-brand-700 no-underline hover:underline">Open Planner</Link>}>
       {blocks === null ? <p className="px-2 text-sm text-gray-400">Loading…</p> : blocks.length === 0 ? (
         <Empty>Nothing planned today. Drag tasks into time slots in the Planner.</Empty>
       ) : blocks.map((b) => (
@@ -233,7 +233,7 @@ export const ManageCardsDialog: React.FC<{ layout: HomeCard[]; onClose: () => vo
       footer={<>
         <button type="button" disabled={busy} onClick={() => save(null)} className="mr-auto rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Reset to standard</button>
         <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-        <button type="button" disabled={busy} onClick={() => save(cards)} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Save</button>
+        <button type="button" disabled={busy} onClick={() => save(cards)} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">Save</button>
       </>}>
       <p className="mb-3 text-xs text-gray-500">Choose the cards on your My Tasks home, their order and their width. Only you see this layout.</p>
       <ul className="space-y-1.5">

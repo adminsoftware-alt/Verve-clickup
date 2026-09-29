@@ -4,6 +4,7 @@ import { Sparkles, CheckCircle2, ShieldAlert, Trash2, Users, User, UserSquare } 
 import { useAuth } from '../components/AuthContext';
 import { UserManagementTab } from '../components/settings/UserManagementTab';
 import { MyTeamTab } from '../components/settings/MyTeamTab';
+import { ask } from '../components/ask';
 
 export const Settings: React.FC = () => {
   const [activeTab, setActiveTab] = useState('profile');
@@ -57,8 +58,8 @@ export const Settings: React.FC = () => {
     }
   };
 
-  const handleResetLocalData = () => {
-    if (window.confirm("Are you sure you want to clear all tasks, timer history, and reset to defaults? This action cannot be undone.")) {
+  const handleResetLocalData = async () => {
+    if (await ask.confirm("Are you sure you want to clear all tasks, timer history, and reset to defaults? This action cannot be undone.")) {
       localStorage.clear();
       setMessage({ type: 'success', text: 'All local data has been successfully reset! Please refresh the page.' });
       setTimeout(() => {
@@ -67,8 +68,8 @@ export const Settings: React.FC = () => {
     }
   };
 
-  const handleLoadDemoData = () => {
-    if (window.confirm("This will clear your current local data and load sample spaces, folders, tasks, and time entries for presentation. Continue?")) {
+  const handleLoadDemoData = async () => {
+    if (await ask.confirm("This will clear your current local data and load sample spaces, folders, tasks, and time entries for presentation. Continue?")) {
       localStorage.clear();
       const uid = 'guest'; // or from auth, assuming guest for demo if no backend
       

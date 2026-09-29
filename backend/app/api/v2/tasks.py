@@ -9,8 +9,8 @@ from app.api.v2.deps import current_user
 from app.db.models import PermissionLevel, User
 from app.db.session import get_db
 from app.schemas import work as s
-from app.services.work import bulk, importing, search, tasks, timetracking, views, workload
-from app.services.work.access import open_folder, open_list, open_space, open_task
+from app.services.work import bulk, defaults, importing, load, search, tasks, timetracking, views, workload
+from app.services.work.access import Access, open_folder, open_list, open_space, open_task
 
 router = APIRouter()
 VIEW = PermissionLevel.view
@@ -103,11 +103,56 @@ def delete_view(view_id: uuid.UUID, user: User = Depends(current_user), db: Sess
     db.commit()
 
 
+@router.get("/workspaces/{workspace_id}/my-workload", response_model=s.WorkloadOut)
+def my_workload(
+    workspace_id: uuid.UUID,
+    start: date = Query(..., description="First day shown, in the viewer's local calendar"),
+    days: int = Query(14, ge=1, le=62),
+    tz_offset: int = Query(0, description="The viewer's JS getTimezoneOffset(), in minutes"),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Your own week across every Space you can open, for the Workload view on My Tasks."""
+    access = Access.for_workspace(db, user.id, workspace_id)
+    return workload.my_workload(db, access, start, days, tz_offset)
+
+
+@router.get("/workspaces/{workspace_id}/people-load", response_model=s.PeopleLoad)
+def people_load(
+    workspace_id: uuid.UUID,
+    user_ids: List[str] = Query(..., max_length=20, description="Whose load to report"),
+    start: date = Query(..., description="First day, in the viewer's local calendar"),
+    days: int = Query(7, ge=1, le=31),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """What is already planned into these people's days, so work is not piled onto a full week."""
+    access = Access.for_workspace(db, user.id, workspace_id)
+    return load.people_load(db, access, user_ids, start, days)
+
+
+@router.get("/lists/{list_id}/task-defaults", response_model=s.TaskDefaults)
+def task_defaults(
+    list_id: uuid.UUID,
+    name: Optional[str] = Query(None, max_length=500, description="What the task is called, to match against similar work"),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Suggested values for a new task, so the mandatory fields arrive already answered."""
+    opened = open_list(db, user.id, list_id, VIEW)
+    return defaults.suggest(db, opened.access, opened.obj, name)
+
+
 @router.post("/lists/{list_id}/tasks", response_model=s.TaskDetailOut, status_code=status.HTTP_201_CREATED)
 def create_task(
     list_id: uuid.UUID, data: s.TaskCreate, user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
     opened_list = open_list(db, user.id, list_id, VIEW)
+    # Typing a name and pressing Enter has to make a task. Refusing until five fields are
+    # filled turned the quickest way to capture work into the slowest, and work that cannot be
+    # captured in one breath gets written on paper instead. What is still missing is said on the
+    # row, in red, where it can be fixed in place -- see _check_details, which is still here and
+    # still describes the rule.
     task = tasks.create_task(db, opened_list, data)
     db.commit()
     return tasks.task_detail(db, open_task(db, user.id, task.id, VIEW))

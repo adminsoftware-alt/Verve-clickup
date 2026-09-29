@@ -4,8 +4,10 @@ import { useAuth } from '../components/AuthContext';
 import { useWork } from './WorkContext';
 import { workApi, type Role, type Team } from './api';
 import { Avatar, NameDialog, Portal } from './ui';
+import { ListSkeleton } from './Skeleton';
+import { ask } from '../components/ask';
 
-const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member', guest: 'Guest' };
+const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member', limited: 'Limited member', guest: 'Guest' };
 
 export const PeoplePage: React.FC = () => {
   const { workspace, hierarchy, members, teams, refresh } = useWork();
@@ -16,7 +18,7 @@ export const PeoplePage: React.FC = () => {
   const [dialog, setDialog] = useState<{ mode: 'create' } | { mode: 'rename'; team: Team } | null>(null);
   const [editingMembers, setEditingMembers] = useState<Team | null>(null);
 
-  if (!workspace || !hierarchy) return <div className="p-10 text-center text-sm text-gray-500">Loading…</div>;
+  if (!workspace || !hierarchy) return <div className="p-10"><ListSkeleton rows={6} label="Loading people" /></div>;
   const myRole = hierarchy.role;
   const canManage = myRole === 'owner' || myRole === 'admin';
   const isOwner = myRole === 'owner';
@@ -58,15 +60,15 @@ export const PeoplePage: React.FC = () => {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="name@verveadvisory.com"
               type="email"
-              className="min-w-64 flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
+              className="min-w-64 flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none"
             />
             <select aria-label="Role" value={role} onChange={(e) => setRole(e.target.value as Role)} className="rounded-md border border-gray-300 px-2 py-1.5 text-sm">
               {assignable.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
             </select>
-            <button type="submit" disabled={!email.trim()} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+            <button type="submit" disabled={!email.trim()} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
               Add member
             </button>
-            <p className="w-full text-xs text-gray-400">People need to sign in to Timetriq once before they can be added.</p>
+            <p className="w-full text-xs text-gray-400">People need to sign in to Verve Workflow once before they can be added.</p>
           </form>
         )}
         <div className="overflow-hidden rounded-lg border border-gray-200">
@@ -96,7 +98,7 @@ export const PeoplePage: React.FC = () => {
                   <button
                     type="button"
                     title={self ? 'Leave workspace' : 'Remove from workspace'}
-                    onClick={() => window.confirm(self ? 'Leave this workspace?' : `Remove ${m.user.email} from the workspace?`) && run(() => workApi.removeMember(workspace.id, m.user.id))}
+                    onClick={async () => await ask.confirm(self ? 'Leave this workspace?' : `Remove ${m.user.email} from the workspace?`) && run(() => workApi.removeMember(workspace.id, m.user.id))}
                     className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
                   >
                     <Trash2 size={15} />
@@ -112,7 +114,7 @@ export const PeoplePage: React.FC = () => {
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Teams <span className="font-normal">{teams.length}</span></h2>
           {canManage && (
-            <button type="button" onClick={() => setDialog({ mode: 'create' })} className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">
+            <button type="button" onClick={() => setDialog({ mode: 'create' })} className="flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">
               <Plus size={14} /> New Team
             </button>
           )}
@@ -122,7 +124,7 @@ export const PeoplePage: React.FC = () => {
           {teams.map((team) => (
             <div key={team.id} className="rounded-lg border border-gray-200 p-4">
               <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-indigo-700"><Users size={15} /></span>
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-brand-700"><Users size={15} /></span>
                 <h3 className="min-w-0 flex-1 truncate font-medium text-gray-900">{team.name}</h3>
                 {canManage && (
                   <>
@@ -130,7 +132,7 @@ export const PeoplePage: React.FC = () => {
                     <button
                       type="button"
                       title={`Delete ${team.name}`}
-                      onClick={() => window.confirm(`Delete the ${team.name} Team? Anything shared with it loses that access.`) && run(() => workApi.deleteTeam(team.id))}
+                      onClick={async () => await ask.confirm({ danger: true, title: `Delete the ${team.name} Team? Anything shared with it loses that access.` }) && run(() => workApi.deleteTeam(team.id))}
                       className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
                     >
                       <Trash2 size={14} />
@@ -151,7 +153,7 @@ export const PeoplePage: React.FC = () => {
                   </span>
                 )}
                 {canManage && (
-                  <button type="button" onClick={() => setEditingMembers(team)} className="ml-auto text-xs font-medium text-indigo-600 hover:underline">
+                  <button type="button" onClick={() => setEditingMembers(team)} className="ml-auto text-xs font-medium text-brand-600 hover:underline">
                     Manage members
                   </button>
                 )}
@@ -231,7 +233,7 @@ const TeamMembersDialog: React.FC<{ team: Team; onClose: () => void; onSave: (id
             <button
               type="button"
               onClick={() => onSave([...selected], [...leads].filter((id) => selected.has(id))).catch((e) => setError(e.message))}
-              className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+              className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
             >
               Save members
             </button>

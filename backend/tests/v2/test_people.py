@@ -105,6 +105,7 @@ def test_teams_hub_details_and_overview(api, workspace):
     lst = ok(api.post(f"/spaces/{space['id']}/lists", "owner", {"name": "Hiring"}), 201)
     secret = ok(api.post(f"/spaces/{space['id']}/lists", "owner", {"name": "Salaries", "is_private": True}), 201)
     t = ok(api.post(f"/lists/{lst['id']}/tasks", "owner", {"name": "Screen CVs", "assignees": ["member"]}), 201)
+    ok(api.post(f"/lists/{secret['id']}/shares", "owner", {"user_id": "admin", "level": "full"}), 201)
     ok(api.post(f"/lists/{secret['id']}/tasks", "owner", {"name": "Revise pay bands", "assignees": ["admin"]}), 201)
     ok(api.patch(f"/tasks/{t['id']}", "owner", {"priority": 1}))
     view = ok(api.get(f"/teams/{hr['id']}/overview", "member"))

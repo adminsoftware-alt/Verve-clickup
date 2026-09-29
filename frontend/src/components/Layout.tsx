@@ -17,17 +17,16 @@ import { RunningTimerChip } from '../work/RunningTimer';
 import { StatusSelector } from './StatusSelector';
 import { FEATURES } from '../config/features';
 import { HeaderInboxBell } from '../work/InboxPages';
+import { HelpMenu, ProfileChip, RecentMenu } from './HeaderBits';
+import { useWork } from '../work/WorkContext';
 import { presenceService, type UserPresence } from '../services/presenceService';
 
 export const Layout: React.FC = () => {
-  const { logout, hasRole } = useAuth();
+  const { hasRole, user } = useAuth();  // signing out moved into the profile menu
   const location = useLocation();
-  const isLocationPage = /^\/((s|f|l)\/|my-tasks|dashboards|timesheets|inbox|replies|assigned-comments|reminders|people|all-tasks|forms|planner)/.test(location.pathname);
+  const isLocationPage = /^\/((s|f|l)\/|my-tasks|dashboards|timesheets|inbox|replies|assigned-comments|reminders|people|all-tasks|forms|planner|leave|billing|team-week|compliance|all-spaces|goals)/.test(location.pathname);
   const { timers, stopTimer, getLiveElapsedSeconds, focusSession, stopFocus } = useTimer();
   const { notifications, unreadCount, markAsRead, markAllAsRead, clearAll } = useNotifications();
-  
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const profileMenuRef = useRef<HTMLDivElement>(null);
   
   const [showTimersDropdown, setShowTimersDropdown] = useState(false);
   const timersDropdownRef = useRef<HTMLDivElement>(null);
@@ -35,13 +34,9 @@ export const Layout: React.FC = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const notificationsRef = useRef<HTMLDivElement>(null);
 
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const { workspace } = useWork();
+  const workspaceName = workspace?.name ?? 'Verve Workflow';
   const [onlineUsers, setOnlineUsers] = useState<UserPresence[]>([]);
-
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     // Start presence tracking for the current user
@@ -52,6 +47,7 @@ export const Layout: React.FC = () => {
       const now = Date.now();
       const activeUsers = users.filter(u => {
         if (u.currentStatus === 'Offline') return false;
+        if (u.userId === user?.uid) return false;  // you're the chip on the right, not a teammate
         const lastSeen = new Date(u.lastSeen).getTime();
         return now - lastSeen < 5 * 60 * 1000;
       });
@@ -64,9 +60,6 @@ export const Layout: React.FC = () => {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
-        setShowProfileMenu(false);
-      }
       if (timersDropdownRef.current && !timersDropdownRef.current.contains(event.target as Node)) {
         setShowTimersDropdown(false);
       }
@@ -87,14 +80,14 @@ export const Layout: React.FC = () => {
   };
 
   const baseNavItems = [
-    { name: 'Dashboard', path: '/', icon: <LayoutDashboard size={18} /> },
-    ...(FEATURES.legacyTasks ? [{ name: 'My Tasks', path: '/tasks', icon: <CheckSquare size={18} /> }] : []),
-    ...(FEATURES.chat ? [{ name: 'Chat', path: '/chat', icon: <MessageSquare size={18} /> }] : []),
-    ...(FEATURES.legacyTimeTracking ? [{ name: 'Time Tracking', path: '/time-entries', icon: <Clock size={18} /> }] : []),
-    ...(FEATURES.legacyCalendar ? [{ name: 'Calendar', path: '/calendar', icon: <Calendar size={18} /> }] : []),
-    ...(FEATURES.legacyTeams ? [{ name: hasRole(['Admin']) ? 'Teams' : 'My Team', path: '/teams', icon: <Users size={18} /> }] : []),
-    ...(FEATURES.legacyReports ? [{ name: 'Reports', path: '/reports', icon: <BarChart2 size={18} /> }] : []),
-    ...(FEATURES.legacyWorkload ? [{ name: 'Workload', path: '/workload', icon: <Activity size={18} /> }] : []),
+    { name: 'Dashboard', path: '/', icon: <LayoutDashboard size={16} /> },
+    ...(FEATURES.legacyTasks ? [{ name: 'My Tasks', path: '/tasks', icon: <CheckSquare size={16} /> }] : []),
+    ...(FEATURES.chat ? [{ name: 'Chat', path: '/chat', icon: <MessageSquare size={16} /> }] : []),
+    ...(FEATURES.legacyTimeTracking ? [{ name: 'Time Tracking', path: '/time-entries', icon: <Clock size={16} /> }] : []),
+    ...(FEATURES.legacyCalendar ? [{ name: 'Calendar', path: '/calendar', icon: <Calendar size={16} /> }] : []),
+    ...(FEATURES.legacyTeams ? [{ name: hasRole(['Admin']) ? 'Teams' : 'My Team', path: '/teams', icon: <Users size={16} /> }] : []),
+    ...(FEATURES.legacyReports ? [{ name: 'Reports', path: '/reports', icon: <BarChart2 size={16} /> }] : []),
+    ...(FEATURES.legacyWorkload ? [{ name: 'Workload', path: '/workload', icon: <Activity size={16} /> }] : []),
   ];
 
   const adminManagerNavItems: any[] = [
@@ -103,40 +96,23 @@ export const Layout: React.FC = () => {
   const mainNavItems = hasRole(['Admin', 'Manager']) ? [...baseNavItems, ...adminManagerNavItems] : baseNavItems;
 
   const settingsItems = [
-    { name: 'Settings', path: '/settings', icon: <SettingsIcon size={18} /> },
-    { name: 'Integrations', path: '/integrations', icon: <Briefcase size={18} /> },
+    { name: 'Settings', path: '/settings', icon: <SettingsIcon size={16} /> },
+    { name: 'Integrations', path: '/integrations', icon: <Briefcase size={16} /> },
   ];
 
   const renderNavGroup = (items: typeof mainNavItems) => (
-    <nav style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+    <nav style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
       {items.map((item) => {
         const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
         return (
-          <Link 
-            key={item.name} 
-            to={item.path} 
-            className="premium-icon-btn"
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '12px', 
-              padding: '10px 14px', 
-              borderRadius: '12px',
-              textDecoration: 'none',
-              color: isActive ? '#111827' : '#4B5563',
-              backgroundColor: isActive ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
-              fontWeight: isActive ? 600 : 500,
-              fontSize: '0.9rem',
-              width: '100%',
-              justifyContent: 'flex-start',
-              border: isActive ? '1px solid rgba(0,0,0,0.04)' : '1px solid transparent',
-              boxShadow: isActive ? '0 1px 2px rgba(0,0,0,0.02)' : 'none'
-            }}
+          <Link
+            key={item.name}
+            to={item.path}
+            className={`side-row flex w-full items-center gap-2 pl-1.5 no-underline${isActive ? ' is-active' : ''}`}
           >
-            <span style={{ color: isActive ? '#4F46E5' : '#6B7280', display: 'flex' }}>
-              {item.icon}
-            </span>
-            {item.name}
+            <span className="w-4 shrink-0" aria-hidden />
+            {item.icon}
+            <span className="truncate">{item.name}</span>
           </Link>
         )
       })}
@@ -147,32 +123,32 @@ export const Layout: React.FC = () => {
     <div style={{ 
       display: 'flex', 
       height: '100vh', 
-      background: 'linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%)', 
+      background: 'linear-gradient(135deg, #FAFBFB 0%, #EEF2F1 100%)', 
       overflow: 'hidden' 
     }}>
       
       {/* Sidebar (Premium Glass Theme) */}
-      <aside className="glass-panel no-print" style={{ 
+      <aside className="glass-panel app-sidebar no-print" style={{ 
         width: '240px', 
         borderRight: '1px solid rgba(255,255,255,0.4)',
         display: 'flex',
         flexDirection: 'column',
-        padding: '24px 16px',
+        padding: '20px 12px',
         zIndex: 10,
         overflowY: 'auto'
       }}>
         {/* Logo Area */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0 8px', marginBottom: '32px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '0 6px', marginBottom: '20px' }}>
           <div style={{ display: 'flex' }}>
-            <img src="/timetriq%20logo.png" alt="Timetriq" style={{ width: '32px', height: '32px', objectFit: 'contain', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' }} />
-          </div>
-          <div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#111827', lineHeight: 1.2, letterSpacing: '-0.02em' }}>Timetriq</div>
-            <div style={{ fontSize: '0.7rem', color: '#6B7280', fontWeight: 500 }}>Work Intelligence</div>
+            <img
+              src="/verve-workflow-logo.png"
+              alt="Verve Workflow"
+              style={{ width: '186px', height: 'auto', display: 'block' }}
+            />
           </div>
         </div>
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {renderNavGroup(mainNavItems)}
 
           <MyTasksNav />
@@ -182,7 +158,7 @@ export const Layout: React.FC = () => {
 
           {FEATURES.sidebarSettings && (
             <div>
-              <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', color: '#9CA3AF', letterSpacing: '0.05em', marginBottom: '8px', paddingLeft: '14px' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-sidebar-text)', letterSpacing: '0.05em', marginBottom: '8px', paddingLeft: '14px' }}>
                 Settings
               </div>
               {renderNavGroup(settingsItems)}
@@ -208,7 +184,7 @@ export const Layout: React.FC = () => {
                 </div>
                 <div style={{ textAlign: 'left' }}>
                   <div style={{ fontSize: '0.65rem', color: '#6B7280', fontWeight: 500 }}>Workspace</div>
-                  <div style={{ fontSize: '0.85rem', color: '#111827', fontWeight: 600 }}>Timetriq Team</div>
+                  <div style={{ fontSize: '0.85rem', color: '#111827', fontWeight: 600 }}>Verve Workflow Team</div>
                 </div>
               </div>
               </div>
@@ -229,26 +205,10 @@ export const Layout: React.FC = () => {
           padding: '0 24px',
           zIndex: 5
         }}>
-          {/* Left: Clock / Date */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-6)' }}>
-            <div style={{ 
-              display: 'flex', 
-              flexDirection: 'column',
-              justifyContent: 'center'
-            }}>
-              <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Today's Focus
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                  {currentTime.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
-                </span>
-                <span style={{ color: 'var(--color-border)' }}>|</span>
-                <span style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-primary)' }}>
-                  {currentTime.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
-                </span>
-              </div>
-            </div>
+          {/* Left: where you are, and where you've just been */}
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="max-w-[220px] truncate text-[0.95rem] font-semibold text-gray-800">{workspaceName}</span>
+            <RecentMenu />
           </div>
 
           {/* Right: Actions */}
@@ -575,96 +535,8 @@ export const Layout: React.FC = () => {
 
             {FEATURES.availabilityStatus && <StatusSelector />}
 
-            {/* User Account Dropdown */}
-            <div style={{ position: 'relative' }} ref={profileMenuRef}>
-              <button
-                onClick={() => setShowProfileMenu(!showProfileMenu)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: '4px 8px',
-                  borderRadius: '20px',
-                  backgroundColor: '#F3F4F6',
-                  transition: 'background-color 0.15s ease'
-                }}
-              >
-                <div style={{
-                  width: '24px',
-                  height: '24px',
-                  borderRadius: '50%',
-                  backgroundColor: '#4F46E5',
-                  color: 'white',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 700,
-                  fontSize: '0.75rem'
-                }}>
-                  U
-                </div>
-                <ChevronDown size={14} color="var(--color-text-secondary)" />
-              </button>
-              
-              {showProfileMenu && (
-                <div style={{
-                  position: 'absolute',
-                  right: 0,
-                  top: '100%',
-                  marginTop: '8px',
-                  backgroundColor: 'white',
-                  borderRadius: '8px',
-                  border: '1px solid var(--color-border)',
-                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-                  minWidth: '160px',
-                  zIndex: 100,
-                  overflow: 'hidden'
-                }}>
-                  <Link 
-                    to="/settings" 
-                    onClick={() => setShowProfileMenu(false)}
-                    style={{
-                      display: 'block',
-                      padding: '10px 16px',
-                      fontSize: '0.875rem',
-                      color: '#374151',
-                      textDecoration: 'none',
-                      transition: 'background-color 0.15s ease',
-                      borderBottom: '1px solid #F3F4F6'
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#F9FAFB'}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                  >
-                    Settings
-                  </Link>
-                  <button 
-                    onClick={() => {
-                      setShowProfileMenu(false);
-                      logout();
-                    }}
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      textAlign: 'left',
-                      border: 'none',
-                      background: 'none',
-                      padding: '10px 16px',
-                      fontSize: '0.875rem',
-                      color: '#EF4444',
-                      cursor: 'pointer',
-                      transition: 'background-color 0.15s ease'
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#FEF2F2'}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                  >
-                    Sign Out
-                  </button>
-                </div>
-              )}
-            </div>
+            <HelpMenu />
+            <ProfileChip />
           </div>
         </header>
 

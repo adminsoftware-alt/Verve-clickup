@@ -55,7 +55,9 @@ def people_led_by(db: Session, workspace_id: uuid.UUID, user_id: str) -> set:
     teams = led_team_ids(db, workspace_id, user_id)
     if not teams:
         return set()
-    return set(db.scalars(select(TeamMember.user_id).where(TeamMember.team_id.in_(teams))))
+    from app.services.work import team_tree
+
+    return team_tree.people(db, teams)
 
 
 def members_of(db: Session, team_ids: Sequence[uuid.UUID]) -> Dict[uuid.UUID, List[User]]:
@@ -73,8 +75,10 @@ def members_of(db: Session, team_ids: Sequence[uuid.UUID]) -> Dict[uuid.UUID, Li
     return result
 
 
-def team_out(team: Team, members: List[User], lead_ids: Sequence[str] = ()) -> s.TeamOut:
+def team_out(team: Team, members: List[User], lead_ids: Sequence[str] = (), all_member_ids: Sequence[str] = ()) -> s.TeamOut:
     return s.TeamOut(
+        parent_team_id=team.parent_team_id,
+        all_member_ids=sorted(set(all_member_ids) | {u.id for u in members}),
         id=team.id,
         name=team.name,
         color=team.color,
@@ -93,7 +97,33 @@ def list_teams(db: Session, access: Access) -> List[s.TeamOut]:
     )
     ids = [t.id for t in teams]
     members, leads = members_of(db, ids), leads_of(db, ids)
-    return [team_out(t, members[t.id], leads[t.id]) for t in teams]
+    children: Dict[uuid.UUID, List[uuid.UUID]] = {}
+    for t in teams:
+        if t.parent_team_id:
+            children.setdefault(t.parent_team_id, []).append(t.id)
+
+    def everyone(tid: uuid.UUID, guard: int = 0) -> set:
+        out = {u.id for u in members.get(tid, [])}
+        for c in children.get(tid, []) if guard < 10 else []:
+            out |= everyone(c, guard + 1)
+        return out
+
+    return [team_out(t, members[t.id], leads[t.id], everyone(t.id)) for t in teams]
+
+
+def _check_parent(db: Session, access: Access, team: Optional[Team], parent_id: Optional[uuid.UUID]) -> Optional[uuid.UUID]:
+    """A parent must be another Team in this workspace, not one of this Team's own sub-teams, and not too deep."""
+    from app.services.work import team_tree
+
+    if parent_id is None:
+        return None
+    parent = team_or_404(db, access, parent_id)
+    if team is not None and parent.id in team_tree.descendants(db, [team.id]):
+        raise Invalid("A Team can't sit inside itself or one of its own sub-teams")
+    own_height = team_tree.height(db, team.id) if team is not None else 1
+    if team_tree.depth(db, parent.id) + own_height > team_tree.MAX_DEPTH:
+        raise Invalid(f"Teams can be nested at most {team_tree.MAX_DEPTH} levels deep")
+    return parent.id
 
 
 def _check_unique_name(db: Session, access: Access, name: str, exclude: Optional[uuid.UUID] = None) -> None:
@@ -127,6 +157,7 @@ def create_team(db: Session, access: Access, data: s.TeamCreate) -> Team:
     team = Team(
         workspace_id=access.workspace_id, name=data.name, color=data.color, created_by=access.user_id,
         description=data.description, icon=data.icon, handle=data.handle or _free_handle(db, access, data.name), locations=[],
+        parent_team_id=_check_parent(db, access, None, data.parent_team_id),
     )
     db.add(team)
     try:
@@ -135,6 +166,9 @@ def create_team(db: Session, access: Access, data: s.TeamCreate) -> Team:
         raise Invalid(f"A Team called {data.name} already exists")
     if data.member_ids or data.lead_ids:
         set_members(db, access, team, list(dict.fromkeys([*data.member_ids, *data.lead_ids])), data.lead_ids)
+    from app.services.work import audit
+
+    audit.record(db, access.workspace_id, access.user_id, "team.created", "team", team.id, team.name)
     return team
 
 
@@ -157,12 +191,17 @@ def update_team(db: Session, access: Access, team: Team, data: s.TeamUpdate) -> 
         team.icon = data.icon
     if "locations" in fields and data.locations is not None:
         team.locations = [{"kind": x.kind, "id": str(x.id)} for x in data.locations]
+    if "parent_team_id" in fields:
+        team.parent_team_id = _check_parent(db, access, team, data.parent_team_id)
     db.flush()
     return team
 
 
 def delete_team(db: Session, access: Access, team: Team) -> None:
     _require_manager(access)
+    from app.services.work import audit
+
+    audit.record(db, access.workspace_id, access.user_id, "team.deleted", "team", team.id, team.name)
     db.delete(team)  # memberships and the Team's shares cascade
     db.flush()
 

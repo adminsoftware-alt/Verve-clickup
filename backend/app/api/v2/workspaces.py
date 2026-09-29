@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.v2.deps import current_user
-from app.db.models import PermissionLevel, Team, User, WorkspaceRole
+from app.db.models import PermissionLevel, Team, User, WorkspaceMember, WorkspaceRole
 from app.db.session import get_db
 from app.schemas import work as s
 from app.services.work import accounts, hierarchy, mywork, teams
@@ -17,10 +17,13 @@ router = APIRouter()
 
 @router.get("/workspaces", response_model=List[s.WorkspaceOut])
 def list_workspaces(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return [
-        s.WorkspaceOut(id=ws.id, name=ws.name, role=role)
-        for ws, role in accounts.list_workspaces(db, user.id)
-    ]
+    from app.services.work.access import access_problem
+
+    out = []
+    for ws, role in accounts.list_workspaces(db, user.id):
+        member = db.get(WorkspaceMember, (ws.id, user.id))
+        out.append(s.WorkspaceOut(id=ws.id, name=ws.name, role=role, access_problem=access_problem(db, member) if member else None))
+    return out
 
 
 @router.post("/workspaces", response_model=s.WorkspaceOut, status_code=status.HTTP_201_CREATED)
@@ -71,7 +74,8 @@ def me(user: User = Depends(current_user)):
 
 def _member_out(member, member_user) -> s.MemberOut:
     return s.MemberOut(
-        user=s.UserOut.model_validate(member_user), role=member.role, joined_at=member.joined_at
+        user=s.UserOut.model_validate(member_user), role=member.role, joined_at=member.joined_at,
+        deactivated=member.deactivated_at is not None,
     )
 
 
@@ -137,7 +141,9 @@ def _open_team(db: Session, user_id: str, team_id: uuid.UUID):
 
 
 def _team_out(db: Session, team: Team) -> s.TeamOut:
-    return teams.team_out(team, teams.members_of(db, [team.id])[team.id], teams.leads_of(db, [team.id])[team.id])
+    from app.services.work import team_tree
+
+    return teams.team_out(team, teams.members_of(db, [team.id])[team.id], teams.leads_of(db, [team.id])[team.id], team_tree.people(db, [team.id]))
 
 
 @router.get("/workspaces/{workspace_id}/teams", response_model=List[s.TeamOut])

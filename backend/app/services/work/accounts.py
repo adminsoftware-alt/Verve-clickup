@@ -41,7 +41,8 @@ def _claim_added_person(db: Session, uid: str, email: str) -> Optional[User]:
 
 
 def ensure_user(
-    db: Session, uid: str, email: Optional[str], display_name: Optional[str], email_verified: bool = True
+    db: Session, uid: str, email: Optional[str], display_name: Optional[str], email_verified: bool = True,
+    provider: Optional[str] = None, second_factor: bool = False,
 ) -> Tuple[User, bool]:
     """Return the user for a verified token, and whether anything was written.
 
@@ -54,12 +55,18 @@ def ensure_user(
     if user is None:
         claimed = _claim_added_person(db, uid, email) if email_verified else None
         if claimed is not None:
+            claimed.last_sign_in_provider, claimed.last_second_factor = provider, second_factor
             return claimed, True
         insert_user_if_missing(db, uid, email, display_name)
         user = db.scalars(select(User).where(User.auth_uid == uid)).first()
         assert user is not None
+        user.last_sign_in_provider, user.last_second_factor = provider, second_factor
         return user, True
     changed = False
+    # Remembered for the workspace sign-in rules (only when the token says; test tokens don't).
+    if provider is not None and (user.last_sign_in_provider != provider or user.last_second_factor != second_factor):
+        user.last_sign_in_provider, user.last_second_factor = provider, second_factor
+        changed = True
     if email and user.email != email:
         user.email = email
         changed = True
@@ -151,9 +158,13 @@ def remove_member(db: Session, access: Access, user_id: str) -> None:
     if user_id != access.user_id:  # anyone but the owner may leave on their own
         _check_can_manage(access, member.role)
     remove_from_workspace_teams(db, access.workspace_id, user_id)
+    from app.services.work import audit
     from app.services.work.people import clear_reports_to
 
     clear_reports_to(db, access.workspace_id, user_id)
+    gone = db.get(User, user_id)
+    audit.record(db, access.workspace_id, access.user_id, "person.removed", "person", user_id,
+                 (gone.display_name or gone.email) if gone else user_id, {"left": user_id == access.user_id})
     db.delete(member)
     db.flush()
 

@@ -3,6 +3,7 @@ import { Lock, Trash2, Users, X } from 'lucide-react';
 import { useWork } from './WorkContext';
 import { workApi, type Level, type ShareKind, type Sharing } from './api';
 import { Avatar, Portal } from './ui';
+import { PublicLinks } from './PublicLinks';
 
 const LEVELS: { value: Level; label: string; hint: string }[] = [
   { value: 'view', label: 'View only', hint: 'Can see it' },
@@ -111,7 +112,7 @@ export const ShareDialog: React.FC<{
                   <select aria-label="Access level" value={level} onChange={(e) => setLevel(e.target.value as Level)} className="rounded-md border border-gray-300 px-2 py-1.5 text-sm">
                     {allowedLevels.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
                   </select>
-                  <button type="submit" disabled={!grantee} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Share</button>
+                  <button type="submit" disabled={!grantee} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">Share</button>
                 </form>
               )}
 
@@ -128,7 +129,7 @@ export const ShareDialog: React.FC<{
                     return (
                       <li key={sh.id} className="flex items-center gap-3 py-2">
                         {sh.team ? (
-                          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-700"><Users size={14} /></span>
+                          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-brand-700"><Users size={14} /></span>
                         ) : (
                           <Avatar user={sh.user!} size={28} />
                         )}
@@ -155,6 +156,8 @@ export const ShareDialog: React.FC<{
                   })}
                 </ul>
               )}
+
+              {(kind === 'list' || kind === 'task') && <PublicLinks kind={kind} id={id} canCreate={canShare} />}
 
               <details className="mt-4 text-xs text-gray-500">
                 <summary className="cursor-pointer">How access works</summary>
