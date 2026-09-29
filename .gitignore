@@ -41,6 +41,7 @@ Thumbs.db
 
 # Markdown notes
 *.md
+!README.md
 
 # Task attachments (v2)
 backend/uploads/
