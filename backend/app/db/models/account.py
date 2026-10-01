@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, false, func, text, true
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, SmallInteger, String, UniqueConstraint, false, func, text, true
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -52,6 +52,30 @@ class Workspace(TimestampMixin, Base):
     joiner_plan: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
 
 
+class BlockedEmail(Base):
+    """An address an admin has barred from this workspace.
+
+    Turning someone's access off stops them today; removing them takes the row that said so
+    away. Neither stops them being added again -- by the next admin who does not know, or by an
+    import of last quarter's spreadsheet. This does: the address is refused wherever a person
+    can be added, and the refusal says who barred it and when.
+
+    The email is the key rather than the user, because the user row may be gone, and because
+    someone who signs up fresh with the same address is the same person.
+    """
+
+    __tablename__ = "blocked_emails"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(String(300))
+    blocked_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    blocked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (UniqueConstraint("workspace_id", "email", name="uq_blocked_email"),)
+
+
 class WorkspaceMember(Base):
     __tablename__ = "workspace_members"
 
@@ -69,6 +93,9 @@ class WorkspaceMember(Base):
     )
     # Profile inside this workspace (ClickUp's People page and Org Chart).
     designation: Mapped[Optional[str]] = mapped_column(String(100))
+    # The rung, 1 upwards, apart from the job title. "Executive" and "Senior Executive" are two
+    # designations at two levels; two people can share a level and carry different titles.
+    level: Mapped[Optional[int]] = mapped_column(SmallInteger)
     department: Mapped[Optional[str]] = mapped_column(String(100))
     manager_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     phone: Mapped[Optional[str]] = mapped_column(String(40))

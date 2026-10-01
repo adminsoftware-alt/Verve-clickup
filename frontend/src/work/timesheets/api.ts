@@ -163,9 +163,6 @@ export const sheetApi = {
   tags: (ws: string) => request<TimeTag[]>('GET', `/workspaces/${ws}/time-tags`),
   createTag: (ws: string, name: string) => request<TimeTag>('POST', `/workspaces/${ws}/time-tags`, { name }),
 
-  /** One entry at a stated period, rather than a duration ending at the moment you typed it. */
-  addEntry: (taskId: string, body: { started_at: string; ended_at: string; description?: string | null; user_id?: string }) =>
-    request('POST', `/tasks/${taskId}/time`, body),
   updateEntry: (entryId: string, body: EntryUpdate) =>
     request('PATCH', `/time/${entryId}`, body),
   deleteEntry: (entryId: string) => request('DELETE', `/time/${entryId}`),

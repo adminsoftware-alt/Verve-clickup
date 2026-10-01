@@ -41,9 +41,9 @@ export const Popover: React.FC<{
       if (!panel.current?.contains(e.target as Node) && !anchor.current?.contains(e.target as Node)) close();
     };
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
-    document.addEventListener('mousedown', onDown);
+    document.addEventListener('mousedown', onDown, true);
     document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+    return () => { document.removeEventListener('mousedown', onDown, true); document.removeEventListener('keydown', onKey); };
   }, [pos]);
   useLayoutEffect(() => {
     // Keep it on screen vertically -- and keep doing so while it grows, because the contents

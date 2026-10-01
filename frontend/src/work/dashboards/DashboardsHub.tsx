@@ -36,10 +36,14 @@ export const DashboardsHub: React.FC = () => {
   // A manager has their own work and their Team; an admin also has the whole firm.
   const tabs: { key: Tab; label: string; show: boolean; hint: string }[] = [
     { key: 'all', label: 'All Dashboards', show: true, hint: 'Everything you can open' },
-    { key: 'mine', label: 'My Dashboard', show: !isGuest, hint: 'Your own work' },
+    // An admin has no personal board -- the Company one is theirs -- so the tab would be empty.
+    { key: 'mine', label: 'My Dashboard', show: !isGuest && !isAdmin, hint: 'Your own work' },
     { key: 'team', label: 'Team Dashboards', show: led.length > 0 || isAdmin, hint: 'The Teams you look after, person by person' },
     { key: 'everyone', label: 'Company', show: isAdmin, hint: 'Everyone in the firm, managers included' },
-    { key: 'shared', label: 'Shared with me', show: !isGuest, hint: 'Dashboards others shared with you or your Team' },
+    // "Shared with me" came off the Hub: everything you can open is already in All Dashboards,
+    // and a second list of a subset of the same rows is a tab people check to see if they missed
+    // something. The sharing itself, and the "shared" relation the rows carry, are untouched.
+    ...(FEATURES.dashboardsSharedTab ? [{ key: 'shared' as Tab, label: 'Shared with me', show: !isGuest, hint: 'Dashboards others shared with you or your Team' }] : []),
   ];
 
   const visible = useMemo(() => {

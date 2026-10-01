@@ -92,6 +92,8 @@ export const OffboardDialog: React.FC<{ ws: string; person: Person; people: Pers
   const [handTo, setHandTo] = useState('');
   const [keepTasks, setKeepTasks] = useState(false);
   const [leaverRules, setLeaverRules] = useState(true);
+  const [block, setBlock] = useState(false);
+  const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -103,8 +105,14 @@ export const OffboardDialog: React.FC<{ ws: string; person: Person; people: Pers
     setBusy(true);
     setError(null);
     try {
-      const out = await peopleApi.offboard(ws, person.user.id, { hand_over_to: keepTasks ? null : handTo || null, keep_tasks: keepTasks, apply_leaver_rules: leaverRules });
-      setDone(`${personName(person)} is offboarded: ${out.tasks_handed_over} tasks handed over, ${out.joiner_tasks_kept} kept, ${out.joiner_tasks_deleted} deleted, ${out.direct_reports_moved} direct reports moved.`);
+      const out = await peopleApi.offboard(ws, person.user.id, {
+        hand_over_to: keepTasks ? null : handTo || null, keep_tasks: keepTasks, apply_leaver_rules: leaverRules,
+        block_email: block, block_reason: reason.trim() || null,
+      });
+      const barred = out.email_blocked
+        ? ` ${person.user.email} is blocked, so nobody can add them back${out.sign_in_revoked ? ', and their sign-in is disabled' : ''}.`
+        : '';
+      setDone(`${personName(person)} is offboarded: ${out.tasks_handed_over} tasks handed over, ${out.joiner_tasks_kept} kept, ${out.joiner_tasks_deleted} deleted, ${out.direct_reports_moved} direct reports moved.${barred}`);
       onDone();
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
@@ -141,7 +149,25 @@ export const OffboardDialog: React.FC<{ ws: string; person: Person; people: Pers
               </span>
             </span>
           </label>
-          <p className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800"><AlertTriangle size={14} className="mt-0.5 shrink-0" /> Their access is turned off. Comments, time entries and history stay. You can turn access back on later.</p>
+          {/* Turning access off stops them today; it does not stop the next admin adding them
+              back, or an old spreadsheet import doing it silently. This does. */}
+          <label className="mt-3 flex items-start gap-2 text-sm text-gray-700">
+            <input type="checkbox" className="mt-1" checked={block} onChange={(e) => setBlock(e.target.checked)} />
+            <span>Block {person.user.email} from this workspace
+              <span className="block text-xs text-gray-500">
+                The address is refused wherever someone can be added — by hand, by invitation and by spreadsheet import —
+                and their sign-in is disabled. An admin can lift it later under Admin → Blocked addresses.
+              </span>
+            </span>
+          </label>
+          {block && (
+            <input
+              aria-label="Why they are blocked" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300}
+              placeholder="Why (optional) — shown to whoever tries to add them"
+              className="mt-1.5 ml-6 w-[calc(100%-1.5rem)] rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none"
+            />
+          )}
+          <p className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800"><AlertTriangle size={14} className="mt-0.5 shrink-0" /> Their access is turned off. Comments, time entries and history stay. You can turn access back on later{block ? ', though the block has to be lifted first' : ''}.</p>
           {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" onClick={onClose} className={secondary}>Cancel</button>

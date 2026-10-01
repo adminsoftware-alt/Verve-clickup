@@ -201,7 +201,7 @@ export const SpacesSidebar: React.FC = () => {
     ...(FEATURES.listEmail && kind === 'list' && canManage(node.permission_level)
       ? [{ label: 'Email to this List', icon: <Mail size={14} />, onClick: () => setDialog({ type: 'list-email', id: node.id, name: node.name }) }]
       : []),
-    ...(hierarchy?.role !== 'guest'
+    ...(FEATURES.automations && hierarchy?.role !== 'guest'
       ? [{ label: 'Automations', icon: <Zap size={14} />, onClick: () => setDialog({ type: 'automations', kind, id: node.id, name: node.name, canManage: canManage(node.permission_level) }) }]
       : []),
     ...(FEATURES.spaceMenuStatuses && canManage(node.permission_level)
@@ -480,7 +480,7 @@ export const SpacesSidebar: React.FC = () => {
         <DuplicateLocationDialog kind={dialog.kind} node={dialog.node} onClose={() => setDialog(null)}
           onDone={(id) => { const kind = dialog.kind; setDialog(null); refresh().then(() => navigate(pathFor(kind, id))); }} />
       )}
-      {dialog?.type === 'automations' && <AutomationsDialog kind={dialog.kind} id={dialog.id} name={dialog.name} canManage={dialog.canManage} onClose={() => setDialog(null)} />}
+      {FEATURES.automations && dialog?.type === 'automations' && <AutomationsDialog kind={dialog.kind} id={dialog.id} name={dialog.name} canManage={dialog.canManage} onClose={() => setDialog(null)} />}
       {dialog?.type === 'settings' && <LocationSettingsDialog kind={dialog.kind} id={dialog.id} onClose={() => setDialog(null)} />}
       {dialog?.type === 'tags' && <TagManagerDialog spaceId={dialog.id} spaceName={dialog.name} canEdit={dialog.canEdit} onClose={() => setDialog(null)} />}
       {dialog?.type === 'archived' && <ArchivedDialog onClose={() => setDialog(null)} onRestored={refresh} />}

@@ -177,7 +177,7 @@ export const VarianceCard: React.FC<{
   sees_everyone: boolean;
   onDrill: (segment: string | undefined, label: string) => void;
   onOpenTask?: (id: string) => void;
-}> = ({ tasks = [], more_tasks = 0, expected_seconds, logged_seconds, sees_everyone, onOpenTask }) => {
+}> = ({ tasks = [], more_tasks = 0, expected_seconds, logged_seconds, sees_everyone, onDrill, onOpenTask }) => {
   const [shape, setShape] = useState<Shape>('all');
   const [who, setWho] = useState<string>('all');
   const [sort, setSort] = useState<string>('gap');
@@ -222,19 +222,26 @@ export const VarianceCard: React.FC<{
 
   const Tile: React.FC<{
     icon: React.ReactNode; label: string; value: string; skin: keyof typeof SKINS;
-    note?: React.ReactNode; bar?: React.ReactNode;
-  }> = ({ icon, label, value, skin, note, bar }) => {
+    note?: React.ReactNode; bar?: React.ReactNode; onClick?: () => void;
+  }> = ({ icon, label, value, skin, note, bar, onClick }) => {
     const look = SKINS[skin];
     return (
-      <div className={`flex-1 rounded-xl border px-3 py-2 shadow-sm ${look.tile}`}>
-        <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={!onClick}
+        title={onClick ? 'Show the tasks behind this figure' : undefined}
+        className={`flex-1 rounded-xl border px-3 py-2 text-left shadow-sm transition-colors ${look.tile} ${
+          onClick ? 'cursor-pointer hover:brightness-[0.98]' : 'cursor-default'}`}
+      >
+        <span className="flex items-center gap-2">
           <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${look.badge}`}>{icon}</span>
           <span className="truncate text-[11px] font-medium text-gray-600">{label}</span>
-        </div>
-        <p className={`mt-1.5 text-xl font-semibold leading-none ${look.value}`}>{value}</p>
+        </span>
+        <span className={`mt-1.5 block text-xl font-semibold leading-none ${look.value}`}>{value}</span>
         {bar}
-        {note && <p className={`mt-1 truncate text-[11px] ${look.note}`}>{note}</p>}
-      </div>
+        {note && <span className={`mt-1 block truncate text-[11px] ${look.note}`}>{note}</span>}
+      </button>
     );
   };
 
@@ -258,6 +265,7 @@ export const VarianceCard: React.FC<{
           label="Estimated"
           value={hours(expected_seconds)}
           note={tasks.length ? `across ${tasks.length} finished task${tasks.length === 1 ? '' : 's'}` : undefined}
+          onClick={() => onDrill(undefined, 'the work these estimates cover')}
         />
         <Tile
           skin={used > 1 ? 'amber' : 'purple'}
@@ -273,6 +281,7 @@ export const VarianceCard: React.FC<{
             </span>
           ) : undefined}
           note={expected_seconds > 0 ? `${Math.round(used * 100)}% of the estimate` : undefined}
+          onClick={() => onDrill(undefined, 'the work these hours were logged against')}
         />
         <Tile
           skin={total === 0 ? 'slate' : total > 0 ? 'amber' : 'teal'}
@@ -280,6 +289,7 @@ export const VarianceCard: React.FC<{
           label="Difference"
           value={total === 0 ? 'None' : hours(Math.abs(total))}
           note={total === 0 ? 'exactly as estimated' : total > 0 ? 'longer than estimated' : 'quicker than estimated'}
+          onClick={() => onDrill(undefined, 'the work behind this difference')}
         />
       </div>
 

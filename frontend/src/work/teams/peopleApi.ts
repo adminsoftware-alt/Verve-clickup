@@ -3,13 +3,13 @@ import { request, upload, type Role, type Status, type Task, type Team, type Use
 
 export interface Person {
   user: UserRef; role: Role; joined_at: string; pending: boolean;
-  designation: string | null; department: string | null; manager_id: string | null; phone: string | null;
+  designation: string | null; level: number | null; department: string | null; manager_id: string | null; phone: string | null;
   employee_code: string | null; date_of_joining: string | null; location: string | null;
   date_of_birth: string | null; marriage_anniversary: string | null; takes_interviews: boolean;
   team_ids: string[]; direct_reports: number; invite_sent_at: string | null; deactivated_at: string | null; joiner_tasks: number;
 }
 export interface PersonInput {
-  email?: string; name?: string; role?: Role; designation?: string | null; department?: string | null;
+  email?: string; name?: string; role?: Role; designation?: string | null; level?: number | null; department?: string | null;
   manager_id?: string | null; phone?: string | null; employee_code?: string | null; date_of_joining?: string | null;
   location?: string | null; team_ids?: string[]; send_invite?: boolean;
   date_of_birth?: string | null; marriage_anniversary?: string | null; takes_interviews?: boolean; start_joiner_checklist?: boolean;
@@ -23,10 +23,22 @@ export interface ImportResult {
   rows: { row: number; email: string; outcome: 'added' | 'updated' | 'unchanged' | 'error'; problems: string[] }[];
 }
 export interface OffboardPreview {
+  /** Teams where they are the only lead: whoever takes their work takes these too. */
+  sole_lead_of: string[];
+  /** Why they cannot be taken off at all -- the owner, yourself, the last admin. */
+  blocked: string | null;
   person: UserRef; hand_over_to: UserRef | null; open_tasks: number; direct_reports: number; teams: number;
   joiner_tasks_kept: string[]; joiner_tasks_deleted: string[];
 }
-export interface OffboardResult { tasks_handed_over: number; joiner_tasks_kept: number; joiner_tasks_deleted: number; direct_reports_moved: number }
+export interface OffboardResult {
+  tasks_handed_over: number; joiner_tasks_kept: number; joiner_tasks_deleted: number; direct_reports_moved: number;
+  teams_led_moved: number;
+  email_blocked: boolean;
+  /** Whether their sign-in itself was disabled. False where no identity provider is configured. */
+  sign_in_revoked: boolean;
+}
+/** An address an admin has barred: it is refused wherever someone can be added. */
+export interface BlockedEmail { id: string; email: string; reason: string | null; blocked_by: UserRef | null; blocked_at: string }
 export interface JoinerStep {
   key: string; name: string; outcome: 'created' | 'exists' | 'would_create' | 'skipped' | 'problem';
   reason: string | null; task_id: string | null; list_name: string | null; due_date: string | null;
@@ -85,7 +97,11 @@ export const peopleApi = {
   importPeople: (ws: string, body: { rows: ImportRow[]; dry_run: boolean; send_invites?: boolean; start_joiner_checklist?: boolean; update_existing?: boolean }) =>
     request<ImportResult>('POST', `/workspaces/${ws}/people/import`, body),
   offboardPreview: (ws: string, userId: string) => request<OffboardPreview>('GET', `/workspaces/${ws}/people/${encodeURIComponent(userId)}/offboard`),
-  offboard: (ws: string, userId: string, body: { hand_over_to?: string | null; keep_tasks?: boolean; apply_leaver_rules?: boolean }) =>
+  blocked: (ws: string) => request<BlockedEmail[]>('GET', `/workspaces/${ws}/blocked-emails`),
+  block: (ws: string, email: string, reason?: string | null) =>
+    request<BlockedEmail[]>('POST', `/workspaces/${ws}/blocked-emails`, { email, reason: reason || null }),
+  unblock: (ws: string, id: string) => request<BlockedEmail[]>('DELETE', `/workspaces/${ws}/blocked-emails/${id}`),
+  offboard: (ws: string, userId: string, body: { hand_over_to?: string | null; keep_tasks?: boolean; apply_leaver_rules?: boolean; block_email?: boolean; block_reason?: string | null }) =>
     request<OffboardResult>('POST', `/workspaces/${ws}/people/${encodeURIComponent(userId)}/offboard`, body),
   setActive: (ws: string, userId: string, active: boolean) =>
     request<Person>('POST', `/workspaces/${ws}/people/${encodeURIComponent(userId)}/${active ? 'reactivate' : 'deactivate'}`),

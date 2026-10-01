@@ -79,13 +79,29 @@ def test_everyone_gets_their_own_work_and_leads_get_their_team(api, org):
     assert "team" not in {x["standard"] for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", "member2"))}
 
     # Owners and admins get the whole company, managers included; guests get nothing made for them.
+    # They get no personal board of their own -- the Company one is theirs -- though they still
+    # see everyone else's.
     for boss in ("owner", "admin"):
-        kinds = {x["standard"] for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", boss))}
-        assert {"my_work", "company"} <= kinds
+        boards = ok(api.get(f"/workspaces/{org['ws']}/dashboards", boss))
+        assert "company" in {x["standard"] for x in boards}
+        assert not [x for x in boards if x["standard"] == "my_work" and x["owner"]["id"] == boss]
+        assert [x for x in boards if x["standard"] == "my_work"]  # other people's, which they oversee
     company = [x for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", "owner")) if x["standard"] == "company"]
     assert len(company) == 1  # one for the whole workspace, however many admins open the Hub
     assert ok(api.get(f"/dashboards/{company[0]['id']}", "owner"))["filters"]["assignees"] is None  # everyone
     assert ok(api.get(f"/workspaces/{org['ws']}/dashboards", "guest")) == []
+
+
+def test_home_opens_on_the_company_for_an_admin(api, org):
+    """An admin's own open-task count is not the question they open the app with."""
+    url = f"/workspaces/{org['ws']}/dashboards/home"
+    for boss in ("owner", "admin"):
+        home = ok(api.get(url, boss))
+        assert home["standard"] == "company"
+        assert home["filters"].get("assignees") is None  # everyone, not just them
+        assert ok(api.get(url, boss))["id"] == home["id"]  # the same one every time
+    # And the two of them land on the one Company board, not one each.
+    assert ok(api.get(url, "owner"))["id"] == ok(api.get(url, "admin"))["id"]
 
 
 def test_home_opens_on_your_own_dashboard(api, org):

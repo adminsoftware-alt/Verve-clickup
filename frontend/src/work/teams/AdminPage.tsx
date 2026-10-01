@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { History, KeyRound, ListChecks, Mail, RotateCcw, Save } from 'lucide-react';
+import { FileSpreadsheet, History, KeyRound, ListChecks, Mail, RotateCcw, Save, ShieldBan, Trash2, UserMinus, UserPlus } from 'lucide-react';
 import { Avatar } from '../ui';
-import { peopleApi, type AuditEvent, type JoinerPlan, type JoinerRule, type SignInRules } from './peopleApi';
+import { peopleApi, type AuditEvent, type BlockedEmail, type JoinerPlan, type JoinerRule, type SignInRules } from './peopleApi';
 import { useHub } from './TeamsHub';
+import { AddPersonDialog } from './PersonDialogs';
+import { ImportPeopleDialog } from './AdminDialogs';
+import { RemovePersonSection } from './RemovePerson';
 import { ask } from '../../components/ask';
 
 const card = 'rounded-xl border border-gray-200 bg-white p-5';
@@ -25,11 +28,137 @@ export const AdminPage: React.FC = () => {
   return (
     <div className="mx-auto max-w-5xl space-y-5 p-6">
       <h2 className="text-lg font-semibold text-gray-900">Admin</h2>
+      <PeopleSection />
       <EmailSection ws={ws} />
       <SignInSection ws={ws} />
+      <BlockedSection ws={ws} />
       <JoinerPlanSection ws={ws} />
       <AuditSection ws={ws} />
     </div>
+  );
+};
+
+// --- joining and leaving --------------------------------------------------------------------------------------
+
+/**
+ * The two ends of someone's time here.
+ *
+ * Adding someone was a button on a list of people; removing them was a menu item on their own
+ * panel, a click from the controls you press every day. Offboarding hands over live work, moves
+ * other people's reporting lines and can bar an address for good -- that belongs here, with room
+ * to say what it does, not next to "Edit profile".
+ */
+const PeopleSection: React.FC = () => {
+  const { ws, people, teams, me, roles, reload } = useHub();
+  const [dialog, setDialog] = useState<'add' | 'import' | null>(null);
+  return (
+    <Section id="people" icon={<UserPlus size={17} className="text-brand-600" />} title="People"
+      hint="Adding someone who is joining, and taking off someone who is leaving.">
+      <div className={card}>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setDialog('add')} className={primary}><UserPlus size={14} /> Add person</button>
+          <button type="button" onClick={() => setDialog('import')} className="flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50">
+            <FileSpreadsheet size={14} /> Import from a spreadsheet
+          </button>
+        </div>
+      </div>
+
+      {/* Coloured as what it is. The rest of Admin is grey because the rest of Admin can be
+          undone; this hands over live work and can bar an address for good, and it should read
+          that way from across the room rather than at step three. */}
+      <div className="mt-5 overflow-hidden rounded-xl border border-red-200 bg-red-50/40">
+        <h4 className="flex items-center gap-1.5 border-b border-red-200 bg-red-50 px-4 py-2.5 text-[13px] font-semibold text-red-800">
+          <UserMinus size={15} className="text-red-600" /> Removing someone
+          <span className="ml-auto font-normal text-[11px] uppercase tracking-wide text-red-500">Careful</span>
+        </h4>
+        <div className="p-4">
+          <RemovePersonSection ws={ws} people={people} teams={teams} me={me} onChanged={reload} />
+        </div>
+      </div>
+
+      {dialog === 'add' && <AddPersonDialog ws={ws} people={people} teams={teams} roles={roles} onClose={() => setDialog(null)} onDone={() => { reload(); }} />}
+      {dialog === 'import' && <ImportPeopleDialog ws={ws} onClose={() => setDialog(null)} onDone={() => { setDialog(null); reload(); }} />}
+    </Section>
+  );
+};
+
+// --- barred addresses ----------------------------------------------------------------------------------------
+
+/**
+ * Who may never be added back.
+ *
+ * Turning access off stops someone today and removing them takes away the row that said so.
+ * Neither stops the next admin adding them again, or an old spreadsheet import doing it without
+ * anyone noticing. A barred address is refused at all three, and the refusal names who barred it.
+ */
+const BlockedSection: React.FC<{ ws: string }> = ({ ws }) => {
+  const [rows, setRows] = useState<BlockedEmail[] | null>(null);
+  const [email, setEmail] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { peopleApi.blocked(ws).then(setRows).catch((e) => setError(e.message)); }, [ws]);
+
+  const add = async () => {
+    if (!email.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setRows(await peopleApi.block(ws, email.trim(), reason.trim() || null));
+      setEmail('');
+      setReason('');
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+
+  const lift = async (row: BlockedEmail) => {
+    if (!await ask.confirm({
+      title: `Lift the block on ${row.email}?`,
+      body: 'They can be added to the workspace again. It does not restore their old access — they come back as a new person.',
+      confirmLabel: 'Lift the block',
+    })) return;
+    try { setRows(await peopleApi.unblock(ws, row.id)); } catch (e) { setError((e as Error).message); }
+  };
+
+  return (
+    <Section id="blocked" icon={<ShieldBan size={17} className="text-brand-600" />} title="Blocked addresses"
+      hint="Addresses that may not be added to this workspace — by hand, by invitation or by spreadsheet import. Blocking someone still here also turns their access off and disables their sign-in.">
+      <div className={card}>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            aria-label="Address to block" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+            placeholder="name@example.com" className={`${input} w-64`}
+          />
+          <input
+            aria-label="Why" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300}
+            placeholder="Why (optional)" className={`${input} min-w-0 flex-1`}
+          />
+          <button type="button" onClick={add} disabled={busy || !email.trim()} className={primary}><ShieldBan size={14} /> Block</button>
+        </div>
+        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+
+        {rows === null ? <p className="mt-4 text-sm text-gray-400">Loading…</p>
+          : rows.length === 0 ? <p className="mt-4 text-sm text-gray-500">Nobody is blocked. Offboarding someone offers to block them at the same time.</p> : (
+            <ul className="mt-4 divide-y divide-gray-100 rounded-lg border border-gray-200">
+              {rows.map((row) => (
+                <li key={row.id} className="flex items-center gap-3 px-3 py-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-gray-900">{row.email}</span>
+                    <span className="block truncate text-xs text-gray-500">
+                      {row.reason ? `${row.reason} · ` : ''}
+                      blocked {new Date(row.blocked_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
+                      {row.blocked_by ? ` by ${row.blocked_by.display_name || row.blocked_by.email}` : ''}
+                    </span>
+                  </span>
+                  <button type="button" onClick={() => lift(row)} title={`Lift the block on ${row.email}`}
+                    className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 hover:text-red-600">
+                    <Trash2 size={13} /> Lift
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+      </div>
+    </Section>
   );
 };
 

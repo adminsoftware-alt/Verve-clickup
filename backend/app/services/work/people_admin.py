@@ -1,5 +1,6 @@
 """People administration: bulk import, offboarding, ownership, sign-in rules, email set-up, profile photos."""
 
+import logging
 import os
 import secrets
 import uuid
@@ -10,7 +11,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import Task, TaskAssignee, Team, TeamMember, User, Workspace, WorkspaceMember, WorkspaceRole
+from app.db.models import BlockedEmail, Task, TaskAssignee, Team, TeamMember, User, Workspace, WorkspaceMember, WorkspaceRole
 from app.schemas import work as s
 from app.services.work import audit, events, onboarding
 from app.services.work.access import Access, access_problem, chain_for_task, sign_in_problem
@@ -20,6 +21,8 @@ from app.services.work.people import (
     send_invite,
 )
 from app.services.work.permissions import can_manage_workspace
+
+log = logging.getLogger(__name__)
 
 ROLE_WORDS = {
     "owner": None, "admin": WorkspaceRole.admin, "administrator": WorkspaceRole.admin, "member": WorkspaceRole.member,
@@ -83,6 +86,10 @@ def import_people(db: Session, access: Access, data: s.PersonImportIn) -> s.Pers
                     ))
                     res.outcome = "added"
                 elif data.update_existing:
+                    # A blocked address is blocked here too. Without this a spreadsheet could
+                    # quietly edit -- and, with a role change, effectively restore -- someone an
+                    # admin had barred, which is the hole the blocklist exists to close.
+                    check_not_blocked(db, access.workspace_id, email)
                     user = existing
                     if member.role == WorkspaceRole.owner and role != WorkspaceRole.member:
                         pass  # the owner's role never changes by import
@@ -148,6 +155,138 @@ def import_people(db: Session, access: Access, data: s.PersonImportIn) -> s.Pers
 # --- offboarding --------------------------------------------------------------------------------------------
 
 
+# --- barred addresses ------------------------------------------------------------------------------
+
+
+def check_not_blocked(db: Session, workspace_id: uuid.UUID, email: str) -> None:
+    """Refuse an address an admin has barred. Called wherever someone can be added."""
+    row = db.scalars(select(BlockedEmail).where(
+        BlockedEmail.workspace_id == workspace_id, BlockedEmail.email == email.strip().lower())).first()
+    if row is None:
+        return
+    when = row.blocked_at.date().isoformat()
+    who = db.get(User, row.blocked_by) if row.blocked_by else None
+    by = f" by {who.display_name or who.email}" if who else ""
+    because = f" ({row.reason})" if row.reason else ""
+    raise Invalid(f"{email} was blocked from this workspace on {when}{by}{because}. Lift the block in Admin to add them.")
+
+
+def blocked_emails(db: Session, access: Access) -> List[s.BlockedEmailOut]:
+    _require_admin(access, "see blocked addresses")
+    rows = list(db.scalars(
+        select(BlockedEmail).where(BlockedEmail.workspace_id == access.workspace_id).order_by(BlockedEmail.blocked_at.desc())))
+    people = {u.id: u for u in db.scalars(select(User).where(User.id.in_([r.blocked_by for r in rows if r.blocked_by])))} if rows else {}
+    return [
+        s.BlockedEmailOut(
+            id=r.id, email=r.email, reason=r.reason, blocked_at=r.blocked_at,
+            blocked_by=s.UserOut.model_validate(people[r.blocked_by]) if r.blocked_by in people else None,
+        )
+        for r in rows
+    ]
+
+
+def block_email(db: Session, access: Access, email: str, reason: Optional[str]) -> BlockedEmail:
+    """Bar an address. Anyone in the workspace under it is turned off at the same time."""
+    _require_admin(access, "block people")
+    address = email.strip().lower()
+    if address == (db.get(User, access.user_id).email or "").lower():
+        raise Invalid("You can't block your own address")
+    existing = db.scalars(select(BlockedEmail).where(
+        BlockedEmail.workspace_id == access.workspace_id, BlockedEmail.email == address)).first()
+    if existing is not None:
+        return existing
+    # If they are still a member, barring the address alone would leave them signed in.
+    user = db.scalars(select(User).where(func.lower(User.email) == address)).first()
+    if user is not None:
+        member = db.get(WorkspaceMember, (access.workspace_id, user.id))
+        if member is not None:
+            if member.role == WorkspaceRole.owner:
+                raise Invalid("Transfer ownership before blocking the owner's address")
+            if member.role == WorkspaceRole.admin and access.role != WorkspaceRole.owner:
+                raise Forbidden("Only the owner can block an admin")
+            if member.deactivated_at is None:
+                member.deactivated_at = datetime.now(timezone.utc)
+                member.deactivated_by = access.user_id
+            member.ical_token = None  # the calendar feed is a link that works without signing in
+    row = BlockedEmail(workspace_id=access.workspace_id, email=address, reason=reason or None, blocked_by=access.user_id)
+    db.add(row)
+    db.flush()
+    audit.record(db, access.workspace_id, access.user_id, "email.blocked", "person", user.id if user else address, address,
+                 {"reason": reason})
+    return row
+
+
+def unblock_email(db: Session, access: Access, block_id: uuid.UUID) -> None:
+    """Lift a block. It does not put anyone back in the workspace -- they are added again as normal."""
+    _require_admin(access, "block people")
+    row = db.get(BlockedEmail, block_id)
+    if row is None or row.workspace_id != access.workspace_id:
+        raise NotFound("That address is not blocked")
+    audit.record(db, access.workspace_id, access.user_id, "email.unblocked", "person", row.email, row.email, {})
+    db.delete(row)
+    db.flush()
+
+
+def revoke_sign_in(email: str) -> bool:
+    """Disable the identity itself and drop their live sessions. False where none is configured.
+
+    Blocking an address stops them being added back; this stops the session they already hold.
+    Best effort on purpose: a local workspace with no Firebase project must still offboard.
+    """
+    try:
+        from firebase_admin import auth
+
+        from app.core.firebase import init_firebase
+
+        init_firebase()
+        record = auth.get_user_by_email(email)
+        auth.update_user(record.uid, disabled=True)
+        auth.revoke_refresh_tokens(record.uid)
+        return True
+    except Exception:  # no project, no such account, no network -- none of which should stop an offboard
+        log.info("Could not revoke the sign-in for %s; the workspace block still applies", email, exc_info=True)
+        return False
+
+
+# --- what taking someone off must not break ---------------------------------------------------------
+
+
+def _teams_they_lead(db: Session, workspace_id: uuid.UUID, user_id: str) -> List[Team]:
+    """Teams where this person is a lead, in name order."""
+    return list(db.scalars(
+        select(Team)
+        .join(TeamMember, TeamMember.team_id == Team.id)
+        .where(Team.workspace_id == workspace_id, TeamMember.user_id == user_id, TeamMember.is_lead.is_(True))
+        .order_by(Team.name)
+    ))
+
+
+def _sole_lead_of(db: Session, workspace_id: uuid.UUID, user_id: str) -> List[Team]:
+    """The ones where they are the only lead, which would be left with nobody in charge."""
+    out = []
+    for team in _teams_they_lead(db, workspace_id, user_id):
+        others = db.scalar(select(func.count()).select_from(TeamMember).where(
+            TeamMember.team_id == team.id, TeamMember.is_lead.is_(True), TeamMember.user_id != user_id)) or 0
+        if others == 0:
+            out.append(team)
+    return out
+
+
+def _check_not_last_admin(db: Session, access: Access, user_id: str) -> None:
+    """A workspace with nobody who can administer it cannot be rescued from inside it."""
+    member = db.get(WorkspaceMember, (access.workspace_id, user_id))
+    if member is None or member.role not in (WorkspaceRole.owner, WorkspaceRole.admin):
+        return
+    others = db.scalar(select(func.count()).select_from(WorkspaceMember).where(
+        WorkspaceMember.workspace_id == access.workspace_id,
+        WorkspaceMember.user_id != user_id,
+        WorkspaceMember.role.in_([WorkspaceRole.owner, WorkspaceRole.admin]),
+        WorkspaceMember.deactivated_at.is_(None),
+    )) or 0
+    if others == 0:
+        raise Invalid("This is the only active admin. Make someone else an admin first.")
+
+
 def offboard_preview(db: Session, access: Access, user_id: str) -> s.OffboardPreview:
     _require_admin(access, "offboard people")
     member, user = _member(db, access, user_id)
@@ -157,12 +296,32 @@ def offboard_preview(db: Session, access: Access, user_id: str) -> s.OffboardPre
         WorkspaceMember.workspace_id == access.workspace_id, WorkspaceMember.manager_id == user_id)) or 0
     teams = db.scalar(select(func.count()).select_from(TeamMember).join(Team, Team.id == TeamMember.team_id).where(
         Team.workspace_id == access.workspace_id, TeamMember.user_id == user_id)) or 0
+    try:
+        _check_removable(db, access, user_id)
+        blocked = None
+    except (Invalid, Forbidden) as exc:
+        blocked = exc.message
     return s.OffboardPreview(
         person=s.UserOut.model_validate(user), hand_over_to=s.UserOut.model_validate(manager) if manager else None,
         open_tasks=len(onboarding.open_task_ids(db, access.workspace_id, user_id)), direct_reports=reports, teams=teams,
         joiner_tasks_kept=[t.name for _, t, a in items if a in ("retain_birthday", "keep")],
         joiner_tasks_deleted=[t.name for _, t, a in items if a == "delete"],
+        sole_lead_of=[t.name for t in _sole_lead_of(db, access.workspace_id, user_id)],
+        blocked=blocked,
     )
+
+
+def _check_removable(db: Session, access: Access, user_id: str) -> WorkspaceMember:
+    """The rules that hold however someone is taken off: offboard, turn off or remove."""
+    member, _user = _member(db, access, user_id)
+    if member.role == WorkspaceRole.owner:
+        raise Invalid("Transfer ownership to someone else before taking the owner off")
+    if user_id == access.user_id:
+        raise Invalid("You can't take yourself off")
+    if member.role == WorkspaceRole.admin and access.role != WorkspaceRole.owner:
+        raise Forbidden("Only the owner can take an admin off")
+    _check_not_last_admin(db, access, user_id)
+    return member
 
 
 def offboard(db: Session, access: Access, user_id: str, data: s.OffboardIn) -> s.OffboardResult:
@@ -176,14 +335,12 @@ def offboard(db: Session, access: Access, user_id: str, data: s.OffboardIn) -> s
 
     _require_admin(access, "offboard people")
     member, user = _member(db, access, user_id)
-    if member.role == WorkspaceRole.owner:
-        raise Invalid("Transfer ownership to someone else before offboarding the owner")
-    if user_id == access.user_id:
-        raise Invalid("You can't offboard yourself")
-    if member.role == WorkspaceRole.admin and access.role != WorkspaceRole.owner:
-        raise Forbidden("Only the owner can offboard an admin")
+    _check_removable(db, access, user_id)
+    # "Who takes over" is one answer, used for their open tasks and for any team they were the
+    # only lead of. Someone naming a successor while leaving the tasks where they are still gets
+    # the lead role moved, which is why this is resolved whenever a name is given.
     target = None
-    if not data.keep_tasks:
+    if not data.keep_tasks or data.hand_over_to:
         target_id = data.hand_over_to or member.manager_id
         if not target_id:
             raise Invalid("Choose who takes over their open tasks (they have no reporting manager)")
@@ -217,26 +374,51 @@ def offboard(db: Session, access: Access, user_id: str, data: s.OffboardIn) -> s
         .where(WorkspaceMember.workspace_id == access.workspace_id, WorkspaceMember.manager_id == user_id)
         .values(manager_id=member.manager_id)
     ).rowcount or 0
+    # A team whose only lead has left is a team nobody is answering for. Whoever takes their
+    # work takes the lead role with it; without someone to hand to, say so rather than silently
+    # leaving the team headless.
+    orphaned = _sole_lead_of(db, access.workspace_id, user_id)
+    led_moved = 0
+    if orphaned:
+        if target is None:
+            raise Invalid(
+                "They are the only lead of " + ", ".join(t.name for t in orphaned)
+                + ". Choose who takes over, or give the team another lead first."
+            )
+        for team in orphaned:
+            row = db.get(TeamMember, (team.id, target.id))
+            if row is None:
+                db.add(TeamMember(team_id=team.id, user_id=target.id, is_lead=True))
+            else:
+                row.is_lead = True
+            led_moved += 1
+        db.flush()
     remove_from_workspace_teams(db, access.workspace_id, user_id)
     member.deactivated_at = datetime.now(timezone.utc)
     member.deactivated_by = access.user_id
     db.flush()
+    member.ical_token = None  # their subscribed calendar is a link that needs no sign-in
+    blocked = revoked = False
+    if data.block_email and user.email:
+        block_email(db, access, user.email, data.block_reason)
+        blocked = True
+        revoked = revoke_sign_in(user.email)
     audit.record(db, access.workspace_id, access.user_id, "person.offboarded", "person", user_id, _name(user), {
         "handed_over_to": target.id if target else None, "tasks_handed_over": handed,
         "joiner_tasks_kept": kept, "joiner_tasks_deleted": deleted, "direct_reports_moved": moved,
+        "teams_led_moved": led_moved, "email_blocked": blocked, "sign_in_revoked": revoked,
     })
-    return s.OffboardResult(tasks_handed_over=handed, joiner_tasks_kept=kept, joiner_tasks_deleted=deleted, direct_reports_moved=moved)
+    return s.OffboardResult(
+        tasks_handed_over=handed, joiner_tasks_kept=kept, joiner_tasks_deleted=deleted, direct_reports_moved=moved,
+        teams_led_moved=led_moved, email_blocked=blocked, sign_in_revoked=revoked,
+    )
 
 
 def set_active(db: Session, access: Access, user_id: str, active: bool) -> None:
     _require_admin(access, "turn access on or off")
     member, user = _member(db, access, user_id)
-    if member.role == WorkspaceRole.owner:
-        raise Invalid("The owner's access can't be turned off")
-    if user_id == access.user_id:
-        raise Invalid("You can't turn off your own access")
-    if member.role == WorkspaceRole.admin and access.role != WorkspaceRole.owner:
-        raise Forbidden("Only the owner can turn off an admin")
+    if not active:
+        _check_removable(db, access, user_id)
     if active == (member.deactivated_at is None):
         return
     member.deactivated_at = None if active else datetime.now(timezone.utc)

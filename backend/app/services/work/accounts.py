@@ -157,6 +157,25 @@ def remove_member(db: Session, access: Access, user_id: str) -> None:
         raise Invalid("The owner cannot be removed")
     if user_id != access.user_id:  # anyone but the owner may leave on their own
         _check_can_manage(access, member.role)
+        from app.services.work import onboarding, people_admin
+
+        # Deleting the membership takes away the row that recorded anything about them --
+        # including that they were ever turned off -- and leaves whatever they were working on
+        # assigned to somebody who is no longer here. Offboarding exists for that; it hands the
+        # work over first. So this path is only open once there is nothing left to strand.
+        people_admin._check_not_last_admin(db, access, user_id)
+        open_tasks = len(onboarding.open_task_ids(db, access.workspace_id, user_id))
+        if open_tasks:
+            raise Invalid(
+                f"They still have {open_tasks} open task{'' if open_tasks == 1 else 's'}. "
+                "Offboard them instead -- it hands the work over first."
+            )
+        orphaned = people_admin._sole_lead_of(db, access.workspace_id, user_id)
+        if orphaned:
+            raise Invalid(
+                "They are the only lead of " + ", ".join(t.name for t in orphaned)
+                + ". Give the team another lead first, or offboard them and hand it over."
+            )
     remove_from_workspace_teams(db, access.workspace_id, user_id)
     from app.services.work import audit
     from app.services.work.people import clear_reports_to

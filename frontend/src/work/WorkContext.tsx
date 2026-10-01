@@ -36,6 +36,24 @@ const WorkContext = createContext<WorkContextValue | null>(null);
 /** Your user id in Verve Workflow (see WorkContextValue.me). */
 export const useMe = () => useWork().me;
 
+/** Owner or admin. */
+export const useIsAdmin = () => {
+  const { hierarchy } = useWork();
+  return hierarchy?.role === 'owner' || hierarchy?.role === 'admin';
+};
+
+/**
+ * An admin, or somebody who leads a Team.
+ *
+ * The same test the server applies (permissions.is_manager) and the same one the Spaces menu
+ * uses, in one place so the answer cannot differ between two screens.
+ */
+export const useIsManager = () => {
+  const { hierarchy, teams, me } = useWork();
+  const isAdmin = hierarchy?.role === 'owner' || hierarchy?.role === 'admin';
+  return isAdmin || teams.some((t) => t.lead_ids.includes(me));
+};
+
 export const useWork = () => {
   const ctx = useContext(WorkContext);
   if (!ctx) throw new Error('useWork must be used inside WorkProvider');

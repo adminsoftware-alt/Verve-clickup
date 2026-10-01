@@ -219,6 +219,36 @@ def test_checklists_progress_and_assigned_items(api, org):
     assert api.patch(f"/checklist-items/{item['id']}", "member2", {"name": "x"}).status_code == 403
 
 
+def test_a_checklist_can_be_saved_and_used_again(api, org):
+    tid = org["task"]["id"]
+    [cl] = ok(api.post(f"/tasks/{tid}/checklists", "owner", {"name": "Joiner pack", "items": ["Laptop", "Email", "Induction"]}), 201)
+    items = [i["name"] for i in cl["items"]]
+    tpl = ok(api.post(f"/workspaces/{org['ws']}/checklist-templates", "owner", {"name": "Joiner pack", "items": items}), 201)
+    assert tpl["item_count"] == 3
+
+    # Everyone in the workspace can see it and start from it, in the order it was saved.
+    assert [t["name"] for t in ok(api.get(f"/workspaces/{org['ws']}/checklist-templates", "member"))] == ["Joiner pack"]
+    other = ok(api.post(f"/lists/{org['list']['id']}/tasks", "owner", {"name": "New starter"}), 201)
+    made = ok(api.post(f"/tasks/{other['id']}/checklists", "owner", {"name": tpl["name"], "items": tpl["items"]}), 201)
+    assert [i["name"] for i in made[0]["items"]] == ["Laptop", "Email", "Induction"]
+    assert not any(i["resolved"] for i in made[0]["items"])  # a template carries no progress
+
+    # Saving again under the same name replaces the items rather than making a second copy.
+    again = ok(api.post(f"/workspaces/{org['ws']}/checklist-templates", "owner", {"name": "Joiner pack", "items": ["Laptop"]}), 201)
+    assert again["id"] == tpl["id"] and again["items"] == ["Laptop"]
+    assert len(ok(api.get(f"/workspaces/{org['ws']}/checklist-templates", "owner"))) == 1
+
+
+def test_only_the_author_or_an_admin_changes_a_saved_checklist(api, org):
+    tpl = ok(api.post(f"/workspaces/{org['ws']}/checklist-templates", "member", {"name": "Filing steps", "items": ["Draft"]}), 201)
+    url = f"/workspaces/{org['ws']}/checklist-templates/{tpl['id']}"
+    assert api.patch(url, "member2", {"name": "Mine now", "items": []}).status_code == 403
+    assert api.delete(url, "member2").status_code == 403
+    assert ok(api.patch(url, "member", {"name": "Filing steps", "items": ["Draft", "Review"]}))["item_count"] == 2
+    assert api.delete(url, "owner").status_code == 204  # an admin clears up after leavers
+    assert ok(api.get(f"/workspaces/{org['ws']}/checklist-templates", "owner")) == []
+
+
 def test_repeating_task_copies_checklists_unticked(api, org):
     due = datetime.now(UTC).replace(hour=9, minute=0, second=0, microsecond=0).isoformat()
     t = ok(api.post(f"/lists/{org['list']['id']}/tasks", "owner", {"name": "Daily log", "due_date": due, "recurrence": {"frequency": "daily"}}), 201)

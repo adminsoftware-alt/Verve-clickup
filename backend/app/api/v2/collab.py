@@ -204,6 +204,11 @@ def delete_reminder(workspace_id: uuid.UUID, reminder_id: uuid.UUID, user: User 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+def _template_out(tpl) -> c.ChecklistTemplateOut:
+    items = list(tpl.items or [])
+    return c.ChecklistTemplateOut(id=tpl.id, name=tpl.name, items=items, item_count=len(items), created_at=tpl.created_at)
+
+
 # --- checklists ------------------------------------------------------------------------------------
 
 
@@ -219,6 +224,32 @@ def add_checklist(task_id: uuid.UUID, data: c.ChecklistIn, user: User = Depends(
     extras.add_checklist(db, opened, data.name, data.items)
     db.commit()
     return extras.checklists_out(db, opened.obj.id)
+
+
+@router.get("/workspaces/{workspace_id}/checklist-templates", response_model=List[c.ChecklistTemplateOut])
+def list_checklist_templates(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return [_template_out(t) for t in extras.checklist_templates(db, _ws(db, user, workspace_id))]
+
+
+@router.post("/workspaces/{workspace_id}/checklist-templates", response_model=c.ChecklistTemplateOut, status_code=status.HTTP_201_CREATED)
+def save_checklist_template(workspace_id: uuid.UUID, data: c.ChecklistTemplateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    tpl = extras.save_checklist_template(db, _ws(db, user, workspace_id), data.name, data.items)
+    db.commit()
+    return _template_out(tpl)
+
+
+@router.patch("/workspaces/{workspace_id}/checklist-templates/{template_id}", response_model=c.ChecklistTemplateOut)
+def update_checklist_template(workspace_id: uuid.UUID, template_id: uuid.UUID, data: c.ChecklistTemplateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    tpl = extras.update_checklist_template(db, _ws(db, user, workspace_id), template_id, data.name, data.items)
+    db.commit()
+    return _template_out(tpl)
+
+
+@router.delete("/workspaces/{workspace_id}/checklist-templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_checklist_template(workspace_id: uuid.UUID, template_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    extras.delete_checklist_template(db, _ws(db, user, workspace_id), template_id)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch("/checklists/{checklist_id}")

@@ -31,9 +31,9 @@ export const Popover: React.FC<{
       if (!button.current?.contains(t) && !panel.current?.contains(t)) setOpen(false);
     };
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); setOpen(false); } };
-    document.addEventListener('mousedown', away);
+    document.addEventListener('mousedown', away, true);
     window.addEventListener('keydown', esc, true);
-    return () => { document.removeEventListener('mousedown', away); window.removeEventListener('keydown', esc, true); };
+    return () => { document.removeEventListener('mousedown', away, true); window.removeEventListener('keydown', esc, true); };
   }, [open]);
   return (
     <>

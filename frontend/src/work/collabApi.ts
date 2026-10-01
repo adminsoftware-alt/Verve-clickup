@@ -15,6 +15,8 @@ export interface CommentWithTask extends Comment { task: TaskRef }
 export interface Activity { id: string; user: UserRef | null; kind: string; data: Record<string, unknown>; created_at: string }
 export interface ChecklistItem { id: string; name: string; resolved: boolean; orderindex: number; assignee: UserRef | null }
 export interface Checklist { id: string; name: string; orderindex: number; items: ChecklistItem[] }
+/** A checklist saved for reuse: just the wording and the order, with nothing ticked. */
+export interface ChecklistTemplate { id: string; name: string; items: string[]; item_count: number; created_at: string }
 export interface Attachment { id: string; filename: string; content_type: string; size: number; user: UserRef | null; created_at: string }
 
 export type InboxTab = 'primary' | 'other' | 'later' | 'cleared' | 'all';
@@ -83,6 +85,12 @@ export const collabApi = {
   addChecklist: (taskId: string, name: string, items: string[] = []) => request<Checklist[]>('POST', `/tasks/${taskId}/checklists`, { name, items }),
   updateChecklist: (id: string, body: { name?: string; orderindex?: number }) => request<Checklist[]>('PATCH', `/checklists/${id}`, body),
   deleteChecklist: (id: string) => request('DELETE', `/checklists/${id}`),
+  checklistTemplates: (ws: string) => request<ChecklistTemplate[]>('GET', `/workspaces/${ws}/checklist-templates`),
+  saveChecklistTemplate: (ws: string, name: string, items: string[]) =>
+    request<ChecklistTemplate>('POST', `/workspaces/${ws}/checklist-templates`, { name, items }),
+  updateChecklistTemplate: (ws: string, id: string, name: string, items: string[]) =>
+    request<ChecklistTemplate>('PATCH', `/workspaces/${ws}/checklist-templates/${id}`, { name, items }),
+  deleteChecklistTemplate: (ws: string, id: string) => request('DELETE', `/workspaces/${ws}/checklist-templates/${id}`),
   addItem: (checklistId: string, name: string, assigneeId?: string | null) => request<Checklist[]>('POST', `/checklists/${checklistId}/items`, { name, assignee_id: assigneeId ?? null }),
   updateItem: (id: string, body: Partial<{ name: string; resolved: boolean; assignee_id: string | null; orderindex: number }>) =>
     request<Checklist[]>('PATCH', `/checklist-items/${id}`, body),

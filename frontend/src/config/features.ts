@@ -27,9 +27,10 @@ const DEFAULTS = {
   // The old Firestore-backed home page. Home now shows your own "My work" Dashboard.
   legacyHome: false,
 
-  // Candidate dashboard cards rendered with made-up data, so they can be judged and picked before
-  // any of them is built for real. Reachable at /dashboards/preview; turn off once we have chosen.
-  dashboardPreview: true,
+  // Candidate dashboard cards rendered with made-up data, so they could be judged and picked
+  // before any was built for real. That choosing is done, so the link is off. The page still
+  // exists at /dashboards/preview for the next time we are weighing up a card.
+  dashboardPreview: false,
 
   // Dashboard header controls. The layout editor still works — it moved into the "..." menu — and
   // the scheduled-report dialog and the full-screen card modal are both still wired up.
@@ -58,9 +59,55 @@ const DEFAULTS = {
   // and the service behind it are untouched -- turn this on and both come straight back.
   listCustomFields: false,
 
+  // Automations: "when this happens here, do that", on a Space, Folder or List. Six triggers
+  // against six actions, all built and all tested. It comes off the menu because a rule you
+  // cannot trace or silence from the notification it sent is a rule people end up muting
+  // wholesale -- see the plan for moving it into the Inbox. The service, the routes and the
+  // scheduled due-soon/overdue runs are untouched; no rule exists yet to be affected.
+  automations: false,
+
+  // The watch toggle on a task header -- the eye, and the little row of watcher faces beside
+  // it. Watching still happens: being assigned a task, commenting on it, being mentioned in
+  // one or having it shared with you all start it, and those notifications still arrive. This
+  // only takes away the button for subscribing to a task that is not yours, which is a habit
+  // nobody here has yet and a control that has to be explained before it is used.
+  taskWatchers: false,
+
   // The Relationships section on a task -- waiting on, blocking, links. The service and the
   // data are untouched; the section is simply not on the panel.
   taskRelationships: false,
+
+  // Four rows taken off the task panel, so what is left is what a task is actually filled in by:
+  // who, when, how long, what kind. Every one of them still works elsewhere --
+  //  * Group: still set in bulk from a List and still what "Group by" reads.
+  //  * Tags: still typed on the List and Table views, and still filterable.
+  //  * Custom fields: still defined per Space and still shown as columns.
+  //  * Time in status: still recorded on every status change, and still on the reports.
+  // Turn any of them back on and the row comes straight back where it was.
+  taskGroupField: false,
+  // The Repeat row. A repeat is a property of the dates it repeats on, and it is set from the
+  // date picker now -- "Set Recurring", on either half of the Dates field. The rule, the editor
+  // and the whole recurrence engine are untouched.
+  taskRepeatField: false,
+
+  // The "Start the joiner checklist" tick on the Add person dialog. Adding someone and running
+  // their induction are two jobs, usually two people and often two days apart; asking both at
+  // once got the box ticked by reflex. The checklist, its tasks and the leaver rules are all
+  // still there -- it is started from the person'"'"'s own page instead.
+  joinerChecklistOnAdd: false,
+
+  // The "Shared with me" tab on the Dashboards hub. All Dashboards already lists everything you
+  // can open, shared ones included, and each row says whose it is -- so the tab was a filtered
+  // view of a list you are already looking at. Sharing is untouched.
+  dashboardsSharedTab: false,
+
+  // The "Task types" entry in the People & Teams rail. A task type is a workspace setting, not a
+  // page about people, and it is already reachable from "Manage task types…" inside a task'"'"'s own
+  // Type field -- which is where someone is standing when they want one. The page is untouched.
+  taskTypesPage: false,
+  taskTagsField: false,
+  taskCustomFields: false,
+  taskTimeInStatus: false,
 
   // --- the Spaces menu ------------------------------------------------------------------------
   // Entries taken off the Space / Folder / List menu. Every one of them still works: Favourites

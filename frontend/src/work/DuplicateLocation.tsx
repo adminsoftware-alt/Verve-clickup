@@ -9,6 +9,7 @@ import React, { useMemo, useState } from 'react';
 
 import { ALL_PARTS, PART_LABELS, type CopyParts } from './task/CopyParts';
 import { PeoplePicker } from './PeoplePicker';
+import { FEATURES } from '../config/features';
 import { useWork } from './WorkContext';
 import { Portal } from './ui';
 
@@ -38,7 +39,11 @@ const TASK_PARTS = PART_LABELS.filter((r) => r.key !== 'subtasks');
 const PLACE_PARTS: { key: 'statuses' | 'views' | 'automations'; label: string; hint: string }[] = [
   { key: 'statuses', label: 'Its own statuses', hint: 'Only where it overrides the ones above it.' },
   { key: 'views', label: 'Saved views', hint: 'The groupings, filters and columns people settled on.' },
-  { key: 'automations', label: 'Automations', hint: 'The rules that run on this place.' },
+  // Automations are off the menus, so there is nothing here to tick. Copies still carry any
+  // rule that exists, which is why the request still sends the flag.
+  ...(FEATURES.automations
+    ? [{ key: 'automations' as const, label: 'Automations', hint: 'The rules that run on this place.' }]
+    : []),
 ];
 
 export const DuplicateLocation: React.FC<{

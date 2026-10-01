@@ -86,6 +86,19 @@ class ChecklistIn(BaseModel):
     items: List[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]] = Field(default_factory=list, max_length=200)
 
 
+class ChecklistTemplateIn(BaseModel):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    items: List[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]] = Field(default_factory=list, max_length=200)
+
+
+class ChecklistTemplateOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    items: List[str]
+    item_count: int
+    created_at: datetime
+
+
 class ChecklistUpdate(BaseModel):
     name: Optional[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]] = None
     orderindex: Optional[float] = None

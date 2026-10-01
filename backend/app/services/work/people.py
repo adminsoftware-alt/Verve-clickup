@@ -22,7 +22,7 @@ from app.services.work.errors import Forbidden, Invalid, NotFound
 from app.services.work.permissions import can_manage_workspace
 
 PROFILE_FIELDS = (
-    "designation", "department", "phone", "employee_code", "date_of_joining", "location",
+    "designation", "level", "department", "phone", "employee_code", "date_of_joining", "location",
     "date_of_birth", "marriage_anniversary", "takes_interviews",
 )
 # Only admins (and the person) see these.
@@ -62,6 +62,7 @@ def person_out(member: WorkspaceMember, user: User, team_ids: Sequence[uuid.UUID
         joined_at=member.joined_at,
         pending=user.auth_uid is None,
         designation=member.designation,
+        level=member.level,
         department=member.department,
         manager_id=member.manager_id,
         phone=None if hide_contact else member.phone,
@@ -180,9 +181,12 @@ def _find_or_create_user(db: Session, email: str, name: Optional[str]) -> User:
 
 
 def add_person(db: Session, access: Access, data: s.PersonCreate) -> Tuple[WorkspaceMember, User]:
+    from app.services.work.people_admin import check_not_blocked
+
     _require_admin(access, "add people")
     _check_role(access, data.role)
     check_domain(db, access.workspace_id, data.email, data.role)
+    check_not_blocked(db, access.workspace_id, data.email)
     user = _find_or_create_user(db, data.email, data.name)
     if db.get(WorkspaceMember, (access.workspace_id, user.id)) is not None:
         raise Invalid(f"{data.email} is already in this workspace")

@@ -91,6 +91,7 @@ class PersonCreate(BaseModel):
     name: Optional[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]] = None
     role: WorkspaceRole = WorkspaceRole.member
     designation: Optional[ShortText] = None
+    level: Optional[Annotated[int, Field(ge=1, le=3)]] = None
     department: Optional[ShortText] = None
     manager_id: Optional[str] = None
     phone: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
@@ -113,6 +114,7 @@ class PersonUpdate(BaseModel):
     email: Optional[Email] = None
     role: Optional[WorkspaceRole] = None
     designation: Optional[ShortText] = None
+    level: Optional[Annotated[int, Field(ge=1, le=3)]] = None
     department: Optional[ShortText] = None
     manager_id: Optional[str] = None
     phone: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
@@ -131,6 +133,7 @@ class PersonOut(BaseModel):
     joined_at: datetime
     pending: bool  # added or invited, hasn't signed in yet
     designation: Optional[str] = None
+    level: Optional[int] = None
     department: Optional[str] = None
     manager_id: Optional[str] = None
     phone: Optional[str] = None
@@ -186,6 +189,7 @@ class PersonImportRow(BaseModel):
     name: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]] = None
     role: Optional[str] = None
     designation: Optional[ShortText] = None
+    level: Optional[Annotated[int, Field(ge=1, le=3)]] = None
     department: Optional[ShortText] = None
     manager_email: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=320)]] = None
     teams: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]] = None
@@ -230,12 +234,19 @@ class OffboardPreview(BaseModel):
     teams: int
     joiner_tasks_kept: List[str]
     joiner_tasks_deleted: List[str]
+    # Teams where they are the only lead: whoever takes their work takes these too.
+    sole_lead_of: List[str] = Field(default_factory=list)
+    # Why this person cannot be taken off at all, if so -- the last admin, the owner, yourself.
+    blocked: Optional[str] = None
 
 
 class OffboardIn(BaseModel):
     hand_over_to: Optional[str] = None  # who gets their open tasks; default their manager; null with keep_tasks
     keep_tasks: bool = False  # leave open tasks assigned (no hand-over)
     apply_leaver_rules: bool = True  # SOP: keep birthday task as "Ex – Name", delete their other joiner tasks
+    # Bar the address as well, so nobody can add them back by mistake. Lift it from Admin.
+    block_email: bool = False
+    block_reason: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)]] = None
 
 
 class OffboardResult(BaseModel):
@@ -243,6 +254,24 @@ class OffboardResult(BaseModel):
     joiner_tasks_kept: int
     joiner_tasks_deleted: int
     direct_reports_moved: int
+    teams_led_moved: int = 0
+    email_blocked: bool = False
+    # Whether their sign-in account itself was disabled. False where no identity provider is
+    # configured, which is worth saying rather than implying more was done than was.
+    sign_in_revoked: bool = False
+
+
+class BlockedEmailIn(BaseModel):
+    email: Email
+    reason: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)]] = None
+
+
+class BlockedEmailOut(BaseModel):
+    id: uuid.UUID
+    email: str
+    reason: Optional[str] = None
+    blocked_by: Optional[UserOut] = None
+    blocked_at: datetime
 
 
 class TransferOwnershipIn(BaseModel):
@@ -636,25 +665,35 @@ class Recurrence(BaseModel):
 
     frequency + interval give "every N days/weeks/months/years"; weekly can pick weekdays
     (0 = Monday), monthly a day of the month (clamped to the month's last day).
+    days_after is the odd one out: it counts N days from the day the task was finished,
+    which is what a chore like "water the plants three days after the last watering" wants.
     trigger: create the next one when this one is done, or on schedule when it falls due.
+    sync_to_due keeps the series pinned to the original due dates; turn it off and each
+    occurrence is measured from the day the one before it was actually done.
     action (on_done only): make a new task, or reopen this one with the next dates.
     Stops after `until` or once `count` more occurrences have been made.
     """
 
-    frequency: Literal["daily", "weekly", "monthly", "yearly"]
+    frequency: Literal["daily", "weekly", "monthly", "yearly", "days_after"]
     interval: int = Field(default=1, ge=1, le=365)
     weekdays: Optional[List[Annotated[int, Field(ge=0, le=6)]]] = Field(default=None, max_length=7)
     month_day: Optional[int] = Field(default=None, ge=1, le=31)
     trigger: Literal["on_done", "on_schedule"] = "on_done"
     action: Literal["new_task", "reopen"] = "new_task"
+    sync_to_due: bool = True
     until: Optional[date] = None
     count: Optional[int] = Field(default=None, ge=0, le=1000)
+    # Which status the next one starts in. None means the List's own first status, which is
+    # right for most Lists and wrong for the ones whose first status is a queue nobody watches.
+    reset_status_id: Optional[uuid.UUID] = None
     tz: str = "UTC"
 
     @model_validator(mode="after")
     def _consistent(self):
         if self.trigger == "on_schedule" and self.action == "reopen":
             raise ValueError("Tasks created on a schedule are always new tasks")
+        if self.frequency == "days_after" and self.trigger != "on_done":
+            raise ValueError('"Days after" is counted from the day the task is done, so it cannot run on a schedule')
         if self.weekdays is not None:
             self.weekdays = sorted(set(self.weekdays))
             if self.frequency != "weekly" or not self.weekdays:
@@ -1370,6 +1409,9 @@ class TimeEntryOut(BaseModel):
 
 class TaskTimeOut(BaseModel):
     total_seconds: int  # finished entries by everyone
+    # The same, plus every subtask underneath. A parent task is often only a heading, and the
+    # hours that answer "how long did this job take" sit on its children.
+    subtree_seconds: int = 0
     entries: List[TimeEntryOut]  # yours, or everyone's for owners and admins
     shows_everyone: bool
 

@@ -14,7 +14,7 @@ client = TestClient(app)
 def test_health_check():
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "service": "Timetriq API"}
+    assert response.json() == {"status": "ok", "service": "Verve Workflow API"}
 
 def test_get_users():
     response = client.get("/api/v1/users/")

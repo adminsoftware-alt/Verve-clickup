@@ -80,12 +80,12 @@ export const TwoStepFilter: React.FC<{
     };
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPos(null);
     const away = (e: Event) => { if (!panelRef.current?.contains(e.target as Node)) setPos(null); };
-    document.addEventListener('mousedown', onDown);
+    document.addEventListener('mousedown', onDown, true);
     document.addEventListener('keydown', onKey);
     window.addEventListener('scroll', away, true);
     window.addEventListener('resize', away);
     return () => {
-      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('mousedown', onDown, true);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', away, true);
       window.removeEventListener('resize', away);

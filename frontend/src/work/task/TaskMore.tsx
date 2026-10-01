@@ -16,7 +16,11 @@ export const TaskLists: React.FC<{ taskId: string; isSubtask: boolean; editable:
     setError(null);
     try { setLists(await fn()); onChanged(); } catch (e) { setError((e as Error).message); }
   };
-  if (isSubtask || (!enabled && lists.length <= 1)) return null;
+  // A task in one List is the ordinary case, and "List  home" states what the breadcrumb above
+  // the task already says. The section is for the exception -- a task deliberately put in more
+  // than one place. Putting it in another moved to the task menu, beside the other things you do
+  // to a task, rather than a dashed button sitting under every task forever.
+  if (isSubtask || lists.length <= 1) return null;
   const choices = writable.filter((l) => !lists.some((x) => x.id === l.id));
   return (
     <section className="mt-4 border-t border-gray-100 pt-3" aria-label="Lists">

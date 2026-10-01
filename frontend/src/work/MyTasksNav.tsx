@@ -89,7 +89,9 @@ export const MyTasksNav: React.FC = () => {
             </div>
           )}
         </>
-      ) : (
+      ) : isAdmin ? null : (
+        /* An admin is not doing the task work; their own handful of assigned tasks is not what
+           they open the app for. The page still answers at /my-tasks if they go looking. */
         <Link to="/my-tasks" className={`${rowClass(pathname.startsWith('/my-tasks'))} pl-1.5`}>
           {gap}<UserCheck size={16} className="shrink-0 text-gray-500" />
           <span className="flex-1 truncate font-medium">My Tasks</span>

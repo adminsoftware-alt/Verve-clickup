@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AtSign, Check, CornerDownRight, MessageSquare, MoreHorizontal, Pencil, SmilePlus, Trash2, UserCheck, Users } from 'lucide-react';
 import { useWork, useMe } from '../WorkContext';
 import { collabApi, type Activity, type Comment } from '../collabApi';
-import { Avatar, Menu, formatDuration } from '../ui';
+import { Avatar, Menu, formatDuration, useClickAway } from '../ui';
 import { notify } from '../../components/notify';
 import { ask } from '../../components/ask';
 
@@ -80,6 +80,8 @@ const Composer: React.FC<{
   const [assignee, setAssignee] = useState('');
   const [busy, setBusy] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  useClickAway(list, () => setQuery(null), query !== null, box);
 
   const onChange = (value: string) => {
     setText(value);
@@ -133,7 +135,7 @@ const Composer: React.FC<{
         className="block w-full resize-none rounded-lg px-3 py-2 text-sm focus:outline-none"
       />
       {options.length > 0 && (
-        <ul className="absolute bottom-full left-2 z-10 mb-1 w-60 rounded-md border border-gray-200 bg-white py-1 shadow-lg" role="listbox" aria-label="Mention">
+        <ul ref={list} className="absolute bottom-full left-2 z-10 mb-1 w-60 rounded-md border border-gray-200 bg-white py-1 shadow-lg" role="listbox" aria-label="Mention">
           {options.map((o) => (
             <li key={`${o.kind}:${o.id}`}>
               <button type="button" role="option" aria-selected={false} onMouseDown={(e) => { e.preventDefault(); pick(o); }} className="flex w-full items-center gap-2 px-2 py-1 text-left text-sm hover:bg-gray-50">
@@ -236,12 +238,41 @@ const CommentCard: React.FC<{
   );
 };
 
+type Period = 'all' | 'today' | 'yesterday' | 'week' | 'custom';
+
+const PERIODS: { value: Period; label: string }[] = [
+  { value: 'all', label: 'All time' },
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'week', label: 'This week' },
+  { value: 'custom', label: 'Custom range…' },
+];
+
+/** The window a period covers, as [from, to). `null` means everything. */
+function windowFor(period: Period, from: string, to: string): [Date, Date] | null {
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const today = midnight(new Date());
+  const days = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+  if (period === 'today') return [today, days(today, 1)];
+  if (period === 'yesterday') return [days(today, -1), today];
+  // The week runs from Monday, which is how the timesheets and the workload read it.
+  if (period === 'week') return [days(today, -((today.getDay() + 6) % 7)), days(today, 1)];
+  if (period === 'custom') {
+    if (!from && !to) return null;
+    return [from ? new Date(`${from}T00:00:00`) : new Date(0), to ? days(new Date(`${to}T00:00:00`), 1) : days(today, 1)];
+  }
+  return null;
+}
+
 /** The right-hand column of a task: comments and history, oldest first, as in ClickUp. */
 export const TaskFeed: React.FC<{ taskId: string; canComment: boolean; refreshKey: number; onChanged: () => void }> = ({ taskId, canComment, refreshKey, onChanged }) => {
   const { allMembers: members } = useWork();
   const [comments, setComments] = useState<Comment[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [show, setShow] = useState<'all' | 'comments'>('all');
+  const [period, setPeriod] = useState<Period>('all');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const bottom = useRef<HTMLDivElement>(null);
   const viewer = useMe();
   const load = useCallback(async () => {
@@ -254,21 +285,53 @@ export const TaskFeed: React.FC<{ taskId: string; canComment: boolean; refreshKe
 
   const threads = comments.filter((c) => !c.parent_id);
   const replies = (id: string) => comments.filter((c) => c.parent_id === id);
-  const feed = [
+  const span = windowFor(period, from, to);
+  const within = (iso: string) => {
+    if (!span) return true;
+    const at = new Date(iso);
+    return at >= span[0] && at < span[1];
+  };
+  const all = [
     ...threads.map((c) => ({ at: c.created_at, key: `c:${c.id}`, comment: c })),
     ...(show === 'all' ? activity.filter((a) => a.kind !== 'comment').map((a) => ({ at: a.created_at, key: `a:${a.id}`, activity: a })) : []),
   ].sort((x, y) => x.at.localeCompare(y.at));
+  const feed = all.filter((item) => within(item.at));
+  const hidden = all.length - feed.length;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-gray-50/80">
-      <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-2.5">
-        <MessageSquare size={15} className="text-gray-500" />
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Activity</h3>
-        <select aria-label="Show" value={show} onChange={(e) => setShow(e.target.value as 'all' | 'comments')} className="ml-auto rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs text-gray-600">
-          <option value="all">Comments and history</option><option value="comments">Comments only</option>
-        </select>
+      <div className="border-b border-gray-200 px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <MessageSquare size={15} className="text-gray-500" />
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Activity</h3>
+          <select aria-label="When" value={period} onChange={(e) => setPeriod(e.target.value as Period)}
+            className="ml-auto rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs text-gray-600">
+            {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+          <select aria-label="Show" value={show} onChange={(e) => setShow(e.target.value as 'all' | 'comments')} className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs text-gray-600">
+            <option value="all">Comments and history</option><option value="comments">Comments only</option>
+          </select>
+        </div>
+        {period === 'custom' && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+            <label className="flex items-center gap-1">From
+              <input type="date" aria-label="From" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)}
+                className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs" />
+            </label>
+            <label className="flex items-center gap-1">to
+              <input type="date" aria-label="To" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)}
+                className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs" />
+            </label>
+            {(from || to) && <button type="button" onClick={() => { setFrom(''); setTo(''); }} className="rounded px-1.5 py-0.5 text-gray-500 hover:bg-gray-200">Clear</button>}
+          </div>
+        )}
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3" aria-label="Activity feed">
+        {feed.length === 0 && all.length > 0 && (
+          <p className="px-1 py-2 text-xs text-gray-500">
+            Nothing in that period. {hidden} {hidden === 1 ? 'entry is' : 'entries are'} outside it.
+          </p>
+        )}
         {feed.map((item) => ('comment' in item && item.comment ? (
           <CommentCard key={item.key} comment={item.comment} replies={replies(item.comment.id)} me={viewer} canComment={canComment}
             onChanged={() => { load(); onChanged(); }} />

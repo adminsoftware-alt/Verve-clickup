@@ -6,6 +6,11 @@ import type { Role, Task } from '../api';
 import { Avatar, Portal, StatusDot, formatDue, useEscapeToClose } from '../ui';
 import { peopleApi, personName, type Person, type PersonInput, type TeamFull } from './peopleApi';
 import { ask } from '../../components/ask';
+import { FEATURES } from '../../config/features';
+
+/** The three rungs the firm uses. The API refuses anything outside them, so a spreadsheet
+ *  carrying a 4 is an error rather than a quietly invented fourth level. */
+export const LEVELS = [1, 2, 3];
 
 export const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member', limited: 'Limited member', guest: 'Guest' };
 
@@ -59,6 +64,14 @@ const ProfileFields: React.FC<{
     {adminFields && (
       <>
         <Field label="Designation"><input aria-label="Designation" value={form.designation ?? ''} onChange={(e) => set({ designation: e.target.value })} placeholder="e.g. HR Business Partner" className={inputCls} /></Field>
+        {/* The rung, apart from the title: "Executive" and "Senior Executive" are two
+            designations at two levels, and only the number sorts the same way everywhere. */}
+        <Field label="Level">
+          <select aria-label="Level" value={form.level ?? ''} onChange={(e) => set({ level: e.target.value ? Number(e.target.value) : null })} className={inputCls}>
+            <option value="">No level</option>
+            {LEVELS.map((n) => <option key={n} value={n}>Level {n}</option>)}
+          </select>
+        </Field>
         <Field label="Department"><input aria-label="Department" value={form.department ?? ''} onChange={(e) => set({ department: e.target.value })} placeholder="e.g. HR" className={inputCls} /></Field>
         <Field label="Reporting manager">
           <select aria-label="Reporting manager" value={form.manager_id ?? ''} onChange={(e) => set({ manager_id: e.target.value || null })} className={inputCls}>
@@ -144,10 +157,15 @@ export const AddPersonDialog: React.FC<{
             <input type="checkbox" checked={!!form.send_invite} onChange={(e) => setForm((f) => ({ ...f, send_invite: e.target.checked }))} />
             Also email them an invitation
           </label>
-          <label className="mt-1 flex items-center gap-2 text-sm text-gray-700">
-            <input type="checkbox" checked={!!form.start_joiner_checklist} onChange={(e) => setForm((f) => ({ ...f, start_joiner_checklist: e.target.checked }))} />
-            Start the joiner checklist (induction, learning, reviews and HR reminders, as in the SOP)
-          </label>
+          {/* The joiner checklist is not a decision to make while typing someone's name in --
+              it is HR's, afterwards, from the person's own page. The plan, the tasks it makes and
+              the leaver rules that match it are all untouched. */}
+          {FEATURES.joinerChecklistOnAdd && (
+            <label className="mt-1 flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={!!form.start_joiner_checklist} onChange={(e) => setForm((f) => ({ ...f, start_joiner_checklist: e.target.checked }))} />
+              Start the joiner checklist (induction, learning, reviews and HR reminders, as in the SOP)
+            </label>
+          )}
           {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
@@ -241,7 +259,7 @@ export const PersonPanel: React.FC<{
   const reports = useMemo(() => people.filter((p) => p.manager_id === person.user.id), [people, person.user.id]);
   const startEdit = () => {
     setForm({
-      name: person.user.display_name ?? '', designation: person.designation ?? '', department: person.department ?? '',
+      name: person.user.display_name ?? '', designation: person.designation ?? '', level: person.level, department: person.department ?? '',
       manager_id: person.manager_id, phone: person.phone ?? '', employee_code: person.employee_code ?? '',
       date_of_joining: person.date_of_joining, location: person.location ?? '', team_ids: person.team_ids, role: person.role,
       date_of_birth: person.date_of_birth, marriage_anniversary: person.marriage_anniversary, takes_interviews: person.takes_interviews,
@@ -260,7 +278,15 @@ export const PersonPanel: React.FC<{
     onChanged();
   };
   const remove = async () => {
-    if (!(await ask.confirm({ danger: true, title: `Remove ${personName(person)} from the workspace? Their tasks stay, but they lose access.` }))) return;
+    // The weakest of the three, and the one that looks strongest. It deletes the membership --
+    // including the record that they were ever turned off -- so nothing afterwards says they
+    // should not be added again. Say so, and point at the two that do more.
+    if (!(await ask.confirm({
+      danger: true,
+      title: `Remove ${personName(person)} from the workspace?`,
+      body: 'Their tasks, comments and time stay. They lose access now — but nothing stops them being added again later. To keep them out, use Offboard… and tick "Block this address", or block it under Admin → Blocked addresses.',
+      confirmLabel: 'Remove anyway',
+    }))) return;
     try { await peopleApi.remove(ws, person.user.id); onChanged(); onClose(); } catch (e) { setError((e as Error).message); }
   };
   const act = async (fn: () => Promise<unknown>, done?: string) => {

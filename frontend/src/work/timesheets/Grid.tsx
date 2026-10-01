@@ -4,7 +4,7 @@ import { Menu, StatusDot, formatDuration, parseDuration } from '../ui';
 import { isoDay, type EntryUpdate, type SheetEntry, type SheetRow, type TimeTag, type Timesheet } from './api';
 import { Popover, TaskPicker, dayLabel, hours } from './pieces';
 import { CellCard, DayCard, HoverCard } from './Hover';
-import { AddPeriod } from './AddPeriod';
+import { TrackTime } from '../task/TrackTime';
 import { ask } from '../../components/ask';
 
 export interface EntryActions {
@@ -41,9 +41,11 @@ const Cell: React.FC<{
   card?: React.ReactNode;
   /** The day and task this cell stands for, so a period can be logged against them. */
   day: string;
-  taskName: string;
-  onAddPeriod: (started: string, ended: string, note: string | null) => Promise<void>;
-}> = ({ seconds, editable, muted, onSave, label, card, day, taskName, onAddPeriod }) => {
+  taskId: string;
+  /** Whose sheet this is, when an admin is filling in somebody else's. */
+  forUserId?: string;
+  onLogged: () => void;
+}> = ({ seconds, editable, muted, onSave, label, card, day, taskId, forUserId, onLogged }) => {
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const commit = async () => {
@@ -90,7 +92,7 @@ const Cell: React.FC<{
     <div className={`${base} group/cell w-full pl-1`}>
       {editable && (
         <Popover
-          width={280}
+          width={432}
           align="left"
           trigger={(open, active) => (
             <button
@@ -104,7 +106,19 @@ const Cell: React.FC<{
             </button>
           )}
         >
-          {(close) => <AddPeriod day={day} taskName={taskName} onAdd={onAddPeriod} onDone={close} />}
+          {/* The same control as the task panel, opened on this cell's day and narrowed to what
+              is already in it. One component, so the two can never drift apart. */}
+          {(close) => (
+            <TrackTime
+              taskId={taskId}
+              canTrack
+              day={day}
+              forUserId={forUserId}
+              onlyThatDay
+              onClose={close}
+              onChanged={onLogged}
+            />
+          )}
         </Popover>
       )}
       {button}
@@ -118,14 +132,16 @@ export const Grid: React.FC<{
   sheet: Timesheet;
   editable: boolean;
   onCell: (taskId: string, dayIndex: number, seconds: number) => Promise<void>;
-  /** One entry at a stated period, as against a duration ending at the moment of typing. */
-  onAddPeriod: (taskId: string, started: string, ended: string, note: string | null) => Promise<void>;
+  /** Whose sheet this is, when an admin is filling in somebody else's. */
+  forUserId?: string;
+  /** Something was logged from a cell; the week needs reading again. */
+  onLogged: () => void;
   onDeleteRow: (row: SheetRow) => void;
   onOpenTask: (taskId: string) => void;
   onStartTimer?: (taskId: string) => void;
   onAddTask: (taskId: string) => Promise<void>;
   actions: EntryActions;
-}> = ({ sheet, editable, onCell, onAddPeriod, onDeleteRow, onOpenTask, onStartTimer, onAddTask, actions }) => {
+}> = ({ sheet, editable, onCell, forUserId, onLogged, onDeleteRow, onOpenTask, onStartTimer, onAddTask, actions }) => {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const today = isoDay(new Date());
   const toggle = (id: string) => setOpen((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -189,8 +205,9 @@ export const Grid: React.FC<{
                     label={`${row.task.name} on ${dayLabel(sheet.days[i])}`}
                     onSave={(value) => onCell(row.task.id, i, value)}
                     day={sheet.days[i]}
-                    taskName={row.task.name}
-                    onAddPeriod={(started, ended, note) => onAddPeriod(row.task.id, started, ended, note)}
+                    taskId={row.task.id}
+                    forUserId={forUserId}
+                    onLogged={onLogged}
                     card={(
                       <CellCard
                         task={row.task.name}

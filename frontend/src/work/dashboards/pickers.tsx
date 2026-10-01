@@ -189,7 +189,10 @@ export function useFilterSummary() {
   const name = usePeopleLabel();
   return (f: Filters): string[] => {
     const out: string[] = [];
-    if (f.assignees?.length) out.push(f.assignees.map(name).join(', '));
+    // "Me" is left out: filtering a Dashboard to your own work is the ordinary case, and a chip
+    // saying so on every board is noise. Anyone else named still shows.
+    const who = (f.assignees ?? []).filter((a) => a !== 'me');
+    if (who.length) out.push(who.map(name).join(', '));
     if (f.status_groups?.length) out.push(`Status: ${f.status_groups.map((g) => GROUPS.find((x) => x.value === g)?.label).join(', ')}`);
     if (f.priorities?.length) out.push(`Priority: ${f.priorities.map((p) => PRIORITY_OPTIONS.find((x) => x.v === p)?.l).join(', ')}`);
     if (f.due) out.push(`Due: ${f.due.replace(/_/g, ' ')}`);

@@ -129,7 +129,8 @@ def test_offboarding_hands_over_work_and_applies_the_leaver_sop(api, ws, vapl):
 
     birthday_id = next(pt for pt in ok(api.get(f"/workspaces/{ws}/people/{leaver}/joiner", "owner")) if pt["key"] == "birthday")["task_id"]
     out = ok(api.post(f"/workspaces/{ws}/people/{leaver}/offboard", "owner", {}))
-    assert out == {"tasks_handed_over": 1, "joiner_tasks_kept": 1, "joiner_tasks_deleted": 6, "direct_reports_moved": 1}  # incl. ClickUp Review (an Executive)
+    assert out == {"tasks_handed_over": 1, "joiner_tasks_kept": 1, "joiner_tasks_deleted": 6, "direct_reports_moved": 1,
+                   "teams_led_moved": 0, "email_blocked": False, "sign_in_revoked": False}  # incl. ClickUp Review (an Executive)
     assert [a["id"] for a in ok(api.get(f"/tasks/{work['id']}", "owner"))["assignees"]] == [lead]
     birthday = ok(api.get(f"/tasks/{birthday_id}", "owner"))
     assert birthday["name"] == "Ex – Madhuri Aghade"
@@ -162,6 +163,101 @@ def test_offboarding_needs_someone_to_take_over(api, ws):
     assert api.post(f"/workspaces/{ws}/people/member/offboard", "owner", {"hand_over_to": "member"}).status_code == 400
     ok(api.post(f"/workspaces/{ws}/people/member/offboard", "owner", {"keep_tasks": True}))
     assert api.post(f"/workspaces/{ws}/people/owner/offboard", "admin", {"keep_tasks": True}).status_code == 400
+
+
+def test_the_only_lead_of_a_team_hands_it_on(api, ws, vapl):
+    """A team whose only lead has left is a team nobody is answering for."""
+    team = vapl["accounts"]
+    lead = ok(api.post(f"/workspaces/{ws}/people", "owner", {"email": "lead@example.com", "name": "Lead", "team_ids": [team["id"]]}), 201)["person"]["user"]["id"]
+    heir = ok(api.post(f"/workspaces/{ws}/people", "owner", {"email": "heir@example.com", "name": "Heir", "team_ids": [team["id"]]}), 201)["person"]["user"]["id"]
+    ok(api.put(f"/teams/{team['id']}/members", "owner", {"user_ids": [lead, heir], "lead_ids": [lead]}))
+
+    # The preview says so before anything is pressed.
+    preview = ok(api.get(f"/workspaces/{ws}/people/{lead}/offboard", "owner"))
+    assert preview["sole_lead_of"] == ["Accounts"] and preview["blocked"] is None
+
+    # Offboarding with nobody to hand to is refused, and says why.
+    refused = api.post(f"/workspaces/{ws}/people/{lead}/offboard", "owner", {"keep_tasks": True})
+    assert refused.status_code == 400 and "only lead of Accounts" in refused.json()["detail"]
+
+    out = ok(api.post(f"/workspaces/{ws}/people/{lead}/offboard", "owner", {"keep_tasks": True, "hand_over_to": heir}))
+    assert out["teams_led_moved"] == 1
+    after = next(t for t in ok(api.get(f"/workspaces/{ws}/teams", "owner")) if t["id"] == team["id"])
+    assert heir in after["lead_ids"] and lead not in [u["id"] for u in after["members"]]
+
+
+def test_who_may_take_whom_off(api, ws):
+    """The same rules whether it is an offboard or just turning access off."""
+    # The owner goes through ownership transfer, not offboarding -- and the preview says so
+    # rather than letting an admin get three steps in first.
+    assert ok(api.get(f"/workspaces/{ws}/people/owner/offboard", "admin"))["blocked"]
+    r = api.post(f"/workspaces/{ws}/people/owner/offboard", "admin", {"keep_tasks": True})
+    assert r.status_code == 400 and "ownership" in r.json()["detail"]
+    assert api.post(f"/workspaces/{ws}/people/owner/deactivate", "admin").status_code == 400
+
+    # Not yourself, by either route.
+    assert api.post(f"/workspaces/{ws}/people/admin/offboard", "admin", {"keep_tasks": True}).status_code == 400
+    assert api.post(f"/workspaces/{ws}/people/admin/deactivate", "admin").status_code == 400
+
+    # An admin is the owner's to take off, not another admin's.
+    ok(api.patch(f"/workspaces/{ws}/people/member", "owner", {"role": "admin"}))
+    assert api.post(f"/workspaces/{ws}/people/member/deactivate", "admin").status_code == 403
+    ok(api.post(f"/workspaces/{ws}/people/member/deactivate", "owner"))
+
+
+def test_removing_someone_outright_will_not_strand_their_work(api, ws, vapl):
+    """The hard delete is only open once there is nothing left to orphan."""
+    lst = ok(api.post(f"/spaces/{vapl['space']['id']}/lists", "owner", {"name": "Client work"}), 201)
+    ok(api.post(f"/lists/{lst['id']}/tasks", "owner", {"name": "File the return", "assignees": ["member"]}), 201)
+
+    r = api.delete(f"/workspaces/{ws}/members/member", "owner")
+    assert r.status_code == 400 and "Offboard them instead" in r.json()["detail"]
+
+    # Offboard hands the work over; after that there is nothing to strand and the row can go.
+    ok(api.post(f"/workspaces/{ws}/people/member/offboard", "owner", {"hand_over_to": "admin"}))
+    assert api.delete(f"/workspaces/{ws}/members/member", "owner").status_code == 204
+
+
+def test_a_blocked_address_cannot_be_added_back(api, ws):
+    """The point of the blocklist: turning access off is not the same as keeping someone out."""
+    gone = ok(api.post(f"/workspaces/{ws}/people", "owner", {"email": "leaver@example.com", "name": "Leaver"}), 201)["person"]["user"]["id"]
+
+    out = ok(api.post(f"/workspaces/{ws}/people/{gone}/offboard", "owner",
+                      {"keep_tasks": True, "block_email": True, "block_reason": "Left on bad terms"}))
+    assert out["email_blocked"] is True
+    assert out["sign_in_revoked"] is False  # no identity provider in the tests, and that is reported, not implied
+
+    # Every way back in is refused, and the refusal says who barred it and why.
+    again = api.post(f"/workspaces/{ws}/people", "owner", {"email": "leaver@example.com", "name": "Leaver"})
+    assert again.status_code == 400 and "Left on bad terms" in again.json()["detail"]
+    invited = ok(api.post(f"/workspaces/{ws}/invites", "owner", {"emails": ["leaver@example.com"], "role": "member"}), 201)
+    assert invited["people"] == [] and "blocked" in invited["problems"][0]
+    imported = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": [{"email": "leaver@example.com", "name": "Leaver"}]}))
+    assert imported["added"] == 0 and imported["errors"] == 1
+    assert any("blocked" in problem for problem in imported["rows"][0]["problems"])
+
+    # Lifting the block lets them be added again -- as a new person, not restored.
+    listed = ok(api.get(f"/workspaces/{ws}/blocked-emails", "owner"))
+    assert [b["email"] for b in listed] == ["leaver@example.com"]
+    assert listed[0]["blocked_by"]["id"] == "owner" and listed[0]["reason"] == "Left on bad terms"
+    assert ok(api.delete(f"/workspaces/{ws}/blocked-emails/{listed[0]['id']}", "owner")) == []
+    assert api.post(f"/workspaces/{ws}/people", "owner", {"email": "leaver@example.com", "name": "Leaver"}).status_code in (201, 400)
+
+
+def test_blocking_someone_still_here_turns_them_off_too(api, ws):
+    assert ok(api.get(f"/workspaces/{ws}/hierarchy", "member")) is not None
+    ok(api.post(f"/workspaces/{ws}/blocked-emails", "owner", {"email": "member@example.com", "reason": "Contract ended"}), 201)
+    r = api.get(f"/workspaces/{ws}/hierarchy", "member")
+    assert r.status_code == 403 and "turned off" in r.json()["detail"]
+    # Their subscribed calendar is a link that needs no sign-in, so it goes with them.
+    assert person(api, ws, "member")["deactivated_at"] is not None
+
+
+def test_only_admins_block_and_never_themselves_or_the_owner(api, ws):
+    assert api.get(f"/workspaces/{ws}/blocked-emails", "member").status_code == 403
+    assert api.post(f"/workspaces/{ws}/blocked-emails", "member", {"email": "x@example.com"}).status_code == 403
+    assert api.post(f"/workspaces/{ws}/blocked-emails", "owner", {"email": "owner@example.com"}).status_code == 400
+    assert api.post(f"/workspaces/{ws}/blocked-emails", "admin", {"email": "owner@example.com"}).status_code == 400
 
 
 # --- ownership, roles --------------------------------------------------------------------------------------------

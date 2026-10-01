@@ -10,7 +10,7 @@
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -109,6 +109,23 @@ def tracked_totals(db: Session, task_ids: Sequence[uuid.UUID]) -> Dict[uuid.UUID
         .group_by(TimeEntry.task_id)
     )
     return {task_id: int(total) for task_id, total in rows}
+
+
+def _with_descendants(db: Session, task: Task) -> List[uuid.UUID]:
+    """A task and every subtask beneath it, however deep.
+
+    Walks a level at a time rather than trusting top_level_parent_id, which points at the root of
+    the whole tree: a subtask three levels down would otherwise drag in its cousins.
+    """
+    ids = [task.id]
+    frontier = [task.id]
+    while frontier:
+        children = list(db.scalars(select(Task.id).where(Task.parent_id.in_(frontier))))
+        if not children:
+            break
+        ids += children
+        frontier = children
+    return ids
 
 
 def _finish(entry: TimeEntry, at: datetime) -> None:
@@ -283,8 +300,11 @@ def task_time(db: Session, opened: Opened[Task]) -> s.TaskTimeOut:
         query = query.where(TimeEntry.user_id.in_(people))
     rows = db.execute(query.order_by(TimeEntry.started_at.desc())).all()
     tags = tags_for(db, [entry.id for entry, _ in rows])
+    task = opened.obj
+    totals = tracked_totals(db, _with_descendants(db, task))
     return s.TaskTimeOut(
-        total_seconds=tracked_totals(db, [opened.obj.id]).get(opened.obj.id, 0),
+        total_seconds=totals.get(task.id, 0),
+        subtree_seconds=sum(totals.values()),
         entries=[entry_out(entry, user, tags.get(entry.id)) for entry, user in rows],
         shows_everyone=everyone,
     )

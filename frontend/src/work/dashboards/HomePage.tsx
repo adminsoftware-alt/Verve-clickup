@@ -1,8 +1,8 @@
 // What the app opens on: your own "My work" Dashboard, drawn by the same engine as every other one.
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 
-import { useWork } from '../WorkContext';
+import { useIsAdmin, useWork } from '../WorkContext';
 import { dashApi } from './api';
 import { DashboardPage } from './DashboardPage';
 import { DailyThought } from './DailyThought';
@@ -22,6 +22,7 @@ function firstName(name: string | null | undefined, email: string): string {
 
 export const HomePage: React.FC = () => {
   const { workspace, me, allMembers, loading } = useWork();
+  const isAdmin = useIsAdmin();
   const [id, setId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +35,10 @@ export const HomePage: React.FC = () => {
       .catch((e) => { if (current) setError((e as Error).message); });
     return () => { current = false; };
   }, [workspace]);
+
+  // An admin has no personal board and no "Dashboard" row in the rail, so landing here is
+  // either an old bookmark or the logo. Send them where their boards are.
+  if (isAdmin) return <Navigate to="/dashboards" replace />;
 
   const mine = allMembers.find((m) => m.user.id === me);
   const hello = `${greeting(new Date())}, ${firstName(mine?.user.display_name, mine?.user.email ?? '')}`;

@@ -18,7 +18,7 @@ import { StatusSelector } from './StatusSelector';
 import { FEATURES } from '../config/features';
 import { HeaderInboxBell } from '../work/InboxPages';
 import { HelpMenu, ProfileChip, RecentMenu } from './HeaderBits';
-import { useWork } from '../work/WorkContext';
+import { useIsAdmin, useWork } from '../work/WorkContext';
 import { presenceService, type UserPresence } from '../services/presenceService';
 
 export const Layout: React.FC = () => {
@@ -35,6 +35,7 @@ export const Layout: React.FC = () => {
   const notificationsRef = useRef<HTMLDivElement>(null);
 
   const { workspace } = useWork();
+  const isWorkspaceAdmin = useIsAdmin();
   const workspaceName = workspace?.name ?? 'Verve Workflow';
   const [onlineUsers, setOnlineUsers] = useState<UserPresence[]>([]);
 
@@ -67,8 +68,8 @@ export const Layout: React.FC = () => {
         setShowNotifications(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, []);
   const runningTimers = Object.entries(timers).filter(([_, t]) => t.startTime !== null);
 
@@ -80,7 +81,9 @@ export const Layout: React.FC = () => {
   };
 
   const baseNavItems = [
-    { name: 'Dashboard', path: '/', icon: <LayoutDashboard size={16} /> },
+    // An admin has no personal board -- the Company one is theirs, and it is the first row of
+    // Dashboards -- so the rail would otherwise carry two routes to the same place.
+    ...(isWorkspaceAdmin ? [] : [{ name: 'Dashboard', path: '/', icon: <LayoutDashboard size={16} /> }]),
     ...(FEATURES.legacyTasks ? [{ name: 'My Tasks', path: '/tasks', icon: <CheckSquare size={16} /> }] : []),
     ...(FEATURES.chat ? [{ name: 'Chat', path: '/chat', icon: <MessageSquare size={16} /> }] : []),
     ...(FEATURES.legacyTimeTracking ? [{ name: 'Time Tracking', path: '/time-entries', icon: <Clock size={16} /> }] : []),

@@ -2,9 +2,10 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, String, UniqueConstraint, false, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -29,6 +30,27 @@ class ChecklistItem(Base):
     resolved: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
     assignee_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     orderindex: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+
+
+class ChecklistTemplate(Base):
+    """A saved checklist, kept per workspace and applied to any task.
+
+    The items are stored as a plain list of strings rather than rows: a template has no state
+    to track -- nothing is ticked, nothing is assigned -- so rows would only be a second table
+    to keep in step with the one that matters.
+    """
+
+    __tablename__ = "checklist_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    items: Mapped[List[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (UniqueConstraint("workspace_id", "name", name="uq_checklist_template_name"),)
 
 
 class Attachment(Base):

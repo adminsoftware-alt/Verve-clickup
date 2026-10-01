@@ -39,7 +39,9 @@ export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
   const tabs = [
-    { key: 'mine', label: 'My timesheet', to: '/timesheets', show: true },
+    // An admin is not filling in a timesheet of their own; the question they come here with is
+    // whose hours are missing. The page still answers at /timesheets if they want theirs.
+    { key: 'mine', label: 'My timesheet', to: '/timesheets', show: !isAdmin },
     { key: 'all', label: 'All timesheets', to: '/timesheets/all', show: isAdmin || led.length > 0 },
     { key: 'approvals', label: 'Approvals', to: '/timesheets/approvals', show: isAdmin || !!settings?.approvals_enabled },
   ];
@@ -72,7 +74,7 @@ export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
         )}
       </header>
       <main className="min-h-0 flex-1 overflow-auto px-6 py-6">
-        {tab === 'all' ? <AllTimesheets /> : tab === 'approvals' ? <Approvals settings={settings} /> : <SheetPage />}
+        {tab === 'all' ? <AllTimesheets /> : tab === 'approvals' ? <Approvals settings={settings} /> : isAdmin ? <AllTimesheets /> : <SheetPage />}
       </main>
       {showSettings && settings && isAdmin && <SettingsDialog settings={settings} onClose={() => setShowSettings(false)} onSaved={loadSettings} />}
     </div>
@@ -279,8 +281,8 @@ const SheetPage: React.FC = () => {
             sheet={shownSheet}
             editable={editable}
             onCell={(taskId, i, seconds) => run(() => sheetApi.setCell(workspace!.id, { user_id: whose, task_id: taskId, day: sheet.days[i], seconds }))}
-            onAddPeriod={(taskId, started_at, ended_at, description) =>
-              run(() => sheetApi.addEntry(taskId, { started_at, ended_at, description, ...(whose ? { user_id: whose } : {}) }))}
+            forUserId={whose}
+            onLogged={load}
             onDeleteRow={deleteRow}
             onOpenTask={setOpenTask}
             onStartTimer={own ? (taskId) => run(() => startTimer(taskId)) : undefined}

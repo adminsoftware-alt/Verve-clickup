@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import { Activity, Calendar, CalendarRange, ChevronRight, ClipboardList, Columns3, FileSpreadsheet, FileText, Folder, GanttChart, Globe, History, Home, Layers, LayoutDashboard, List as ListIcon, ListPlus, Lock, Map as MapIcon, MessagesSquare, MoreHorizontal, Network, Pencil, Plus, PenTool, Search, Share2, Shield, Star, Table2, Upload, UserPlus, Users, X } from 'lucide-react';
 import { useWork, useMe } from './WorkContext';
 import { workApi, type CustomField, type Dependency, type FolderNode, type ListNode, type LocationKind, type Recurrence, type SpaceNode, type Status, type Task, type TaskGroup, type TaskInput, type UserRef, type View, type ViewType } from './api';
-import { DateField } from './DateField';
+import { DateRange } from './DateField';
 import { FieldEditor } from './fields/FieldValue';
 import { TaskRowsSkeleton } from './Skeleton';
 import { Menu, NameDialog, PRIORITIES, Portal, StatusDot, formatDue, fromDateInput } from './ui';
@@ -28,9 +28,9 @@ import { AssigneePicker } from './task/AssigneePicker';
 import { RecurrenceEditor } from './RecurrenceEditor';
 import { NO_GROUP, buildGroups, type GroupBy } from './views/grouping';
 import { applyFilters, readSettings, sameSettings, sortTasks, COLUMNS, type ViewSettings } from './views/viewSettings';
-import { ColumnsButton, FilterButton, GroupByButton, MeButton, SortButton } from './views/ViewControls';
+import { FilterPanel } from './views/FilterPanel';
 import { BulkBar } from './views/BulkBar';
-import { TABLE_COLUMNS, TableView } from './views/TableView';
+import { TableView } from './views/TableView';
 import { TeamView } from './views/TeamView';
 import { GanttView } from './views/GanttView';
 import { exportTasks, taskRows } from './views/exportTasks';
@@ -147,9 +147,10 @@ export const LocationPage: React.FC = () => {
   const groupBy: GroupBy = settings.groupBy;
   // Me mode is personal: remembered per view in this browser, never saved into the view.
   const meKey = `timetriq.me.${activeView?.id ?? ''}`;
+  // "Me" was a toggle in the toolbar. Filtering by assignee says the same thing in the one
+  // place people now look, so the toggle went and only the remembered state is read.
   const [meMode, setMeModeState] = useState(false);
   useEffect(() => { try { setMeModeState(localStorage.getItem(meKey) === '1'); } catch { setMeModeState(false); } }, [meKey]);
-  const setMeMode = (on: boolean) => { setMeModeState(on); try { localStorage.setItem(meKey, on ? '1' : '0'); } catch { /* ignore */ } };
   const saveView = async () => {
     if (!activeView) return;
     try {
@@ -481,17 +482,28 @@ export const LocationPage: React.FC = () => {
 
       {/* Toolbar */}
       {activeView && !SELF_CONTAINED.includes(activeView.type) && (
-        <div className="flex flex-wrap items-center gap-1 border-b border-gray-100 px-6 py-1.5">
-          {/* Left, as in ClickUp: how the tasks are laid out. */}
-          {(activeView.type === 'list' || activeView.type === 'board') && (
-            <GroupByButton value={groupBy} onChange={(g) => update('groupBy', g)}
-              options={['status', 'assignee', 'priority', 'due', 'tags', 'group', 'type', 'none']}
-              onManageGroups={canCreate ? () => setManagingGroups(true) : undefined} />
-          )}
-          {(activeView.type === 'list' || activeView.type === 'table') && (
-            <ColumnsButton hidden={settings.hidden} onChange={(h) => update('hidden', h)} fields={viewFields}
-              columns={activeView.type === 'table' ? TABLE_COLUMNS.filter((c) => c.key !== 'list' || kind !== 'list') : undefined} />
-          )}
+        <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-6 py-2">
+          {/* Search first, because looking for one task by name is the commonest thing anyone
+              does here and it used to be the last control on the row. */}
+          <label className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50/70 px-2.5 py-1.5 transition-colors focus-within:border-brand-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-brand-100 hover:border-gray-300">
+            <Search size={14} className="shrink-0 text-gray-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search tasks"
+              aria-label="Search tasks"
+              className="w-32 bg-transparent text-sm placeholder:text-gray-400 focus:w-52 focus:outline-none"
+            />
+            {search && (
+              <button type="button" aria-label="Clear the search" onClick={() => setSearch('')} className="shrink-0 rounded-full p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700">
+                <X size={12} />
+              </button>
+            )}
+          </label>
+          <span className="whitespace-nowrap text-xs tabular-nums text-gray-400">
+            {taskCount} task{taskCount === 1 ? '' : 's'}
+            {subtaskCount > 0 && ` · ${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`}
+          </span>
           {dirty && (
             <span className="ml-1 flex items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800" role="status">
               View changed
@@ -502,24 +514,28 @@ export const LocationPage: React.FC = () => {
             </span>
           )}
           {/* Right: narrowing down, then everything else under "…". */}
-          <div className="ml-auto flex items-center gap-1">
-            <span className="mr-1 whitespace-nowrap text-xs text-gray-400">
-              {taskCount} task{taskCount === 1 ? '' : 's'}
-              {subtaskCount > 0 && ` · ${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`}
-            </span>
-            <FilterButton filters={settings.filters} onChange={(f) => update('filters', f)} tasks={tasks} statuses={statuses} groups={groups} people={people} fields={viewFields} />
-            {(activeView.type === 'list' || activeView.type === 'table') && <SortButton sort={settings.sort} onChange={(v) => update('sort', v)} />}
-            {activeView.type !== 'board' && activeView.type !== 'team' && (
-              <label className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-sm text-gray-600 hover:bg-gray-100">
-                <input type="checkbox" checked={settings.showClosed} onChange={(e) => update('showClosed', e.target.checked)} />
-                Show closed
-              </label>
-            )}
-            <MeButton on={meMode} onChange={setMeMode} />
-            <div className="flex items-center gap-1.5 rounded-md border border-transparent px-2 py-1 focus-within:border-brand-300 hover:border-gray-200">
-              <Search size={14} className="text-gray-400" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks" className="w-28 bg-transparent text-sm focus:w-40 focus:outline-none" />
-            </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            {/* One panel, as on My Tasks: what to show, and how to lay it out. It replaced a row
+                of five controls -- Filter, Sort, Show closed, Me, Group by, Columns -- that were
+                six separate answers to one question. */}
+            <FilterPanel
+              filters={settings.filters}
+              onChange={(f) => update('filters', f)}
+              tasks={tasks}
+              statuses={statuses}
+              people={people}
+              view={{
+                ...(activeView.type === 'list' || activeView.type === 'board' ? {
+                  groupBy,
+                  groupOptions: ['status', 'assignee', 'priority', 'due', 'tags', 'group', 'type', 'none'] as GroupBy[],
+                  onGroupBy: (g: GroupBy) => update('groupBy', g),
+                } : {}),
+                hidden: settings.hidden,
+                onHidden: (h: string[]) => update('hidden', h),
+                showClosed: settings.showClosed,
+                onShowClosed: (on: boolean) => update('showClosed', on),
+              }}
+            />
             <Menu
               label="More view options"
               items={[
@@ -881,8 +897,10 @@ const NewTaskDialog: React.FC<{
     }
   };
 
-  const label = 'block text-sm font-medium text-gray-700';
-  const box = 'mt-1 rounded-md border border-gray-300 px-2 py-1.5 focus-within:border-brand-500';
+  // One label style, one control height, one focus treatment. A create dialog that mixes three
+  // of each reads as three dialogs stitched together, whatever the individual fields look like.
+  const label = 'block text-[13px] font-medium text-gray-700';
+  const box = 'mt-1.5 flex h-9 items-center rounded-lg border border-gray-300 px-2 transition-colors hover:border-gray-400 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/15';
   return (
     <Portal>
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 p-4" onMouseDown={onClose}>
@@ -891,26 +909,31 @@ const NewTaskDialog: React.FC<{
           aria-label="New task"
           onMouseDown={(e) => e.stopPropagation()}
           onSubmit={submit}
-          className="w-[32rem] max-w-full rounded-xl bg-white p-5 shadow-xl"
+          className="flex max-h-[88vh] w-[34rem] max-w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5"
         >
-          <h3 className="text-base font-semibold text-gray-900">New task</h3>
-          <p className="mb-3 text-xs text-gray-500">Filled in from what this List usually does — change whatever is wrong.</p>
+          <header className="shrink-0 border-b border-gray-100 px-5 py-3.5">
+            <h3 className="text-[15px] font-semibold text-gray-900">New task</h3>
+            <p className="mt-0.5 text-xs text-gray-500">Filled in from what this List usually does — change whatever is wrong.</p>
+          </header>
 
+          {/* The body scrolls; the header and the buttons do not. On a laptop the old dialog ran
+              off both ends of the screen, so "Create task" was below the fold. */}
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
           <label className={label}>
             Task name
             <input
               autoFocus value={name} onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Aditi Jain Monthly Review"
-              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
+              className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 px-3 text-sm transition-colors placeholder:text-gray-400 hover:border-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/15"
             />
           </label>
 
           {/* From here the fields run in the order the task panel shows them, so what someone
               fills in now is where they will look for it afterwards. */}
-          <div className="mt-3 grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <span className={label}>Status</span>
-              <div className="mt-1">
+              <div className="mt-1.5">
                 <Select
                   label="Status"
                   value={statusId ?? ''}
@@ -931,7 +954,7 @@ const NewTaskDialog: React.FC<{
             </div>
             <div hidden={!uses('priorities')}>
               <span className={label}>Priority</span>
-              <div className="mt-1">
+              <div className="mt-1.5">
                 <Select
                   label="Priority"
                   value={String(priority)}
@@ -952,9 +975,9 @@ const NewTaskDialog: React.FC<{
             </div>
           </div>
 
-          <div className="mt-3">
+          <div>
             <span className={label}>Who is doing it</span>
-            <div className="mt-1 rounded-md border border-gray-300 py-1.5">
+            <div className="mt-1.5 min-h-9 rounded-lg border border-gray-300 py-1 transition-colors hover:border-gray-400 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/15">
               <AssigneePicker
                 listId={target}
                 assignees={people.filter((m) => assignees.includes(m.user.id)).map((m) => m.user)}
@@ -968,43 +991,55 @@ const NewTaskDialog: React.FC<{
             </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-3 gap-3">
+          {/* Start and due as one field, the way the task panel puts them -- and the way the
+              repeat rule is reached, from "Set Recurring" inside either picker. */}
+          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-4">
             <div>
-              <span className={label}>Start date</span>
-              <div className={box}><DateField value={start} onChange={setStart} label="Start date" /></div>
-            </div>
-            <div>
-              <span className={label}>Due date</span>
-              <div className={box}><DateField value={due} onChange={setDue} label="Due date" overdue={backwards} /></div>
+              <span className={label}>Dates</span>
+              <div className={box}>
+                <DateRange
+                  start={start} due={due} overdue={backwards}
+                  onChange={(patch) => {
+                    if ('start_date' in patch) setStart(patch.start_date ?? null);
+                    if ('due_date' in patch) setDue(patch.due_date ?? null);
+                  }}
+                  recurrence={repeat} statuses={statuses}
+                  onRecurrence={async (value) => { setRepeat(value); }}
+                />
+              </div>
             </div>
             <div hidden={!uses('time_estimates')}>
               <span className={label}>Time estimate</span>
               {/* The same input as the task panel, so "3" offers 3h and 3m here too rather than
                   silently picking one of them. */}
-              <div className="mt-1">
+              <div className="mt-1.5">
                 <DurationInput
                   label="Time estimate"
                   value={estimateSeconds}
                   placeholder="3, 2.30, 45m"
                   onChange={(seconds) => { setEstimateSeconds(seconds); setTouched((t) => ({ ...t, estimate: true })); setHint(null); }}
-                  className="h-9 w-full rounded-md border border-gray-300 px-3 text-sm focus:border-brand-500 focus:outline-none"
+                  className="h-9 w-full rounded-lg border border-gray-300 px-3 text-sm transition-colors placeholder:text-gray-400 hover:border-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/15"
                 />
               </div>
             </div>
           </div>
-          {hint && <p className="mt-1.5 text-xs text-gray-500">{hint}</p>}
-          {backwards && <p className="mt-2 text-xs text-red-600">The due date is before the start date.</p>}
+          {hint && <p className="-mt-2 text-xs text-gray-500">{hint}</p>}
+          {backwards && <p className="-mt-2 text-xs text-red-600">The due date is before the start date.</p>}
 
-          <div className="mt-3">
-            <span className={label}>Repeat</span>
-            <div className="mt-1">
-              <RecurrenceEditor value={repeat} dueDate={due} disabled={false} onSave={async (value) => { setRepeat(value); }} />
+          {/* Repeat had its own row here as well as inside the date picker. Same flag as the
+              task panel, so the two say the same thing. */}
+          {FEATURES.taskRepeatField && (
+            <div>
+              <span className={label}>Repeat</span>
+              <div className="mt-1.5">
+                <RecurrenceEditor value={repeat} dueDate={due} statuses={statuses} disabled={false} onSave={async (value) => { setRepeat(value); }} />
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="mt-3" hidden={!uses('tags')}>
+          <div hidden={!FEATURES.taskTagsField || !uses('tags')}>
             <span className={label}>Tags <span className="font-normal text-gray-400">optional</span></span>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5 rounded-md border border-gray-300 px-2 py-1.5">
+            <div className="mt-1.5 flex min-h-9 flex-wrap items-center gap-1.5 rounded-lg border border-gray-300 px-2 py-1 transition-colors hover:border-gray-400 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/15">
               {tags.map((t) => (
                 <span key={t} className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-xs text-teal-800">
                   {t}
@@ -1035,14 +1070,14 @@ const NewTaskDialog: React.FC<{
           </div>
 
           {/* Last, as it is in the panel: the long one, and the one nobody is blocked on. */}
-          <label className={`${label} mt-3`}>
+          <label className={label}>
             Description <span className="font-normal text-gray-400">optional</span>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
               placeholder="What actually needs doing, and anything whoever picks it up will need."
-              className="mt-1 w-full resize-y rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
+              className="mt-1.5 w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm transition-colors placeholder:text-gray-400 hover:border-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/15"
             />
           </label>
 
@@ -1051,8 +1086,9 @@ const NewTaskDialog: React.FC<{
           <button
             type="button"
             onClick={() => setMore(!more)}
-            className="mt-3 flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-800"
+            className="flex w-full items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-brand-700 transition-colors hover:border-brand-300 hover:bg-brand-50/60"
           >
+            <ChevronRight size={13} className={`shrink-0 text-gray-400 transition-transform ${more ? 'rotate-90' : ''}`} />
             {more ? 'Fewer fields' : 'More fields'}
             <span className="text-gray-400">
               {more ? '' : `— private${uses('custom_fields') && fields.length ? `, ${fields.length} of this Space's own fields` : ''}`}
@@ -1060,12 +1096,12 @@ const NewTaskDialog: React.FC<{
           </button>
 
           {more && (
-            <div className="mt-2 space-y-3 rounded-lg border border-gray-200 bg-gray-50/60 p-3">
-              <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-4 rounded-xl border border-gray-200 bg-gray-50/70 p-4">
+              <div className="grid grid-cols-2 gap-4">
                 {taskTypes.length > 0 && (
                   <div>
                     <span className={label}>Task type</span>
-                    <div className="mt-1">
+                    <div className="mt-1.5">
                       <Select
                         label="Task type"
                         value={typeId ?? ''}
@@ -1121,18 +1157,19 @@ const NewTaskDialog: React.FC<{
           )}
 
           {lists.length > 1 && (
-            <div className="mt-3">
+            <div>
               <span className={label}>In List</span>
-              <div className="mt-1">
+              <div className="mt-1.5">
                 <Select label="In List" value={target} onChange={setTarget}
                   choices={lists.map((l) => ({ value: l.id, label: l.label }))} />
               </div>
             </div>
           )}
-          {lists.length === 1 && <p className="mt-2 text-xs text-gray-500">In {lists[0].label}</p>}
-          {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          {lists.length === 1 && <p className="-mt-1 text-xs text-gray-500">In {lists[0].label}</p>}
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          </div>
 
-          <div className="mt-5 flex items-center justify-end gap-2">
+          <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-gray-100 bg-gray-50/70 px-5 py-3">
             {FEATURES.templates && <button type="button" onClick={() => onTemplate(target)} className="mr-auto rounded-md px-2 py-1.5 text-sm text-brand-600 hover:bg-brand-50">Use a template</button>}
             {/* Keeps the List, dates, people and priority; clears the name, description, tags
                 and fields. Five near-identical tasks is the common case here. */}
@@ -1140,11 +1177,11 @@ const NewTaskDialog: React.FC<{
               <input type="checkbox" checked={again} onChange={(e) => setAgain(e.target.checked)} />
               Create another
             </label>
-            <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-            <button type="submit" disabled={!ready || busy} className="btn-accent rounded-md px-3 py-1.5 text-sm font-semibold disabled:opacity-50">
+            <button type="button" onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-200/70">Cancel</button>
+            <button type="submit" disabled={!ready || busy} className="btn-accent rounded-lg px-4 py-1.5 text-sm font-semibold shadow-sm transition-opacity disabled:opacity-50">
               {busy ? 'Creating…' : 'Create task'}
             </button>
-          </div>
+          </footer>
         </form>
       </div>
     </Portal>

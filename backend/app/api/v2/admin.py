@@ -54,6 +54,28 @@ def offboard(workspace_id: uuid.UUID, user_id: str, data: s.OffboardIn, user: Us
     return out
 
 
+@router.get("/workspaces/{workspace_id}/blocked-emails", response_model=List[s.BlockedEmailOut])
+def list_blocked(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return people_admin.blocked_emails(db, _access(db, user, workspace_id))
+
+
+@router.post("/workspaces/{workspace_id}/blocked-emails", response_model=List[s.BlockedEmailOut], status_code=status.HTTP_201_CREATED)
+def block_email(workspace_id: uuid.UUID, data: s.BlockedEmailIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    access = _access(db, user, workspace_id)
+    people_admin.block_email(db, access, data.email, data.reason)
+    people_admin.revoke_sign_in(data.email)
+    db.commit()
+    return people_admin.blocked_emails(db, access)
+
+
+@router.delete("/workspaces/{workspace_id}/blocked-emails/{block_id}", response_model=List[s.BlockedEmailOut])
+def unblock_email(workspace_id: uuid.UUID, block_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    access = _access(db, user, workspace_id)
+    people_admin.unblock_email(db, access, block_id)
+    db.commit()
+    return people_admin.blocked_emails(db, access)
+
+
 @router.post("/workspaces/{workspace_id}/people/{user_id}/deactivate", response_model=s.PersonOut)
 def deactivate(workspace_id: uuid.UUID, user_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     access = _access(db, user, workspace_id)

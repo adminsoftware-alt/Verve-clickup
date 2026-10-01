@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckSquare, Pencil, Send, Trash2 } from 'lucide-react';
 import type { UserRef } from '../api';
-import { Avatar } from '../ui';
+import { Avatar, useClickAway } from '../ui';
 import { spacesApi, type ChatMessage } from '../spacesApi';
 import { ask } from '../../components/ask';
 
@@ -22,6 +22,8 @@ export const ChatView: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  const mentionList = useRef<HTMLUListElement>(null);
+  useClickAway(mentionList, () => setQuery(null), query !== null, box);
 
   const load = useCallback(async () => {
     try { setMessages(await spacesApi.chat(viewId)); } catch (e) { setError((e as Error).message); }
@@ -112,7 +114,7 @@ export const ChatView: React.FC<{
       {canPost ? (
         <div className="relative border-t border-gray-100 px-6 py-3">
           {matches.length > 0 && (
-            <ul role="listbox" aria-label="Mention someone" className="absolute bottom-full left-6 mb-1 w-64 rounded-md border border-gray-200 bg-white py-1 shadow-lg">
+            <ul ref={mentionList} role="listbox" aria-label="Mention someone" className="absolute bottom-full left-6 mb-1 w-64 rounded-md border border-gray-200 bg-white py-1 shadow-lg">
               {matches.map((p) => (
                 <li key={p.id}>
                   <button type="button" role="option" aria-selected="false" onMouseDown={(e) => { e.preventDefault(); pick(p); }}

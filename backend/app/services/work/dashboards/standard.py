@@ -115,7 +115,9 @@ def ensure(db: Session, access: Access, standing: Standing) -> None:
             select(Dashboard).where(Dashboard.workspace_id == access.workspace_id, Dashboard.standard.is_not(None))
         )
     }
-    if (MY_WORK, access.user_id, None) not in have:
+    # An admin's own handful of tasks is not what they open the app to look at, so they are
+    # not given a personal board; the Company one is their home. Everyone else gets theirs.
+    if not standing.is_admin and (MY_WORK, access.user_id, None) not in have:
         _make(db, access, MY_WORK, "My work", {"assignees": ["me"]}, _my_work_cards())
     for team_id in sorted(standing.led_teams, key=str):
         if any(kind == TEAM and had == team_id for kind, _, had in have):
