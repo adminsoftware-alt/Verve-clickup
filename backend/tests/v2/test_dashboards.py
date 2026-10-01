@@ -526,7 +526,9 @@ def test_a_report_pauses_when_its_creator_loses_access(api, seeded, monkeypatch)
     monkeypatch.setattr(reports, "send_email", lambda *a: None)
     dash = new_dashboard(api, seeded, "member", template="simple")
     schedule = ok(api.post(f"/dashboards/{dash['id']}/reports", "member", {"recipient_ids": ["member"]}), 201)
-    ok(api.delete(f"/workspaces/{seeded['ws']}/members/member", "owner"), 204)
+    # Turning their access off, rather than deleting the membership: the schedule pauses on any
+    # loss of access, and someone holding open tasks cannot be deleted outright anyway.
+    ok(api.post(f"/workspaces/{seeded['ws']}/people/member/deactivate", "owner"))
     later = datetime.fromisoformat(schedule["next_run_at"]) + timedelta(minutes=1)
     with db_session.new_session() as db:
         reports.run_due(db, later)
