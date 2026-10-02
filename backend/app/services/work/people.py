@@ -25,8 +25,12 @@ PROFILE_FIELDS = (
     "designation", "level", "department", "phone", "employee_code", "date_of_joining", "location",
     "date_of_birth", "marriage_anniversary", "takes_interviews",
 )
-# Only admins (and the person) see these.
-PRIVATE_FIELDS = ("phone", "date_of_birth", "marriage_anniversary")
+# Who sees what on someone else's profile, as person_out applies it:
+#   * a phone number is for everyone inside the firm, and hidden from guests -- see
+#     test_limited_members_see_only_what_is_shared, which says so on purpose;
+#   * a birthday and an anniversary are the person's and the admins', nobody else's.
+# There used to be a PRIVATE_FIELDS tuple here naming all three as admin-only. Nothing read it,
+# and it described a rule the code does not follow, which is worse than no note at all.
 SELF_EDITABLE = {"name", "phone", "location"}
 
 
