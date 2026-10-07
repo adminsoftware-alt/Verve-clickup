@@ -1,9 +1,9 @@
 """Comments, activity, watchers, the Inbox, notification settings and reminders."""
 
 import uuid
-from typing import List, Literal
+from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -129,11 +129,27 @@ def remove_watcher(task_id: uuid.UUID, user_id: str, user: User = Depends(curren
 # --- Inbox ----------------------------------------------------------------------------------------
 
 
+def _csv(value: Optional[str]) -> List[str]:
+    """Repeated query parameters would be tidier, but the client's request helper sends scalars."""
+    return [part for part in (value or "").split(",") if part]
+
+
 @router.get("/workspaces/{workspace_id}/inbox", response_model=List[c.InboxItem])
 def get_inbox(
-    workspace_id: uuid.UUID, tab: c.InboxTab = Query("primary"), user: User = Depends(current_user), db: Session = Depends(get_db)
+    workspace_id: uuid.UUID,
+    tab: c.InboxTab = Query("primary"),
+    group: Optional[str] = Query(None, description="Comma-separated kind groups, e.g. assigned,comments"),
+    unread: bool = Query(False),
+    priority: Optional[str] = Query(None, description="Comma-separated, 1 (urgent) to 4 (low)"),
+    due: Optional[c.InboxDue] = Query(None),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
 ):
-    return inbox.items(db, _ws(db, user, workspace_id), tab)
+    try:
+        wanted = [int(x) for x in _csv(priority)]
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Priority must be numbers from 1 to 4")
+    return inbox.items(db, _ws(db, user, workspace_id), tab, groups=_csv(group), unread=unread, priority=wanted, due=due)
 
 
 @router.get("/workspaces/{workspace_id}/inbox/counts", response_model=c.InboxCounts)

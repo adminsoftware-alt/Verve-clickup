@@ -51,6 +51,20 @@ export interface JoinerPlan {
   space_name: string; hr_team_name: string; hr_user_ids: string[]; timezone: string; due_hour: number;
   reviewer_designations: string[]; rules: JoinerRule[];
 }
+export interface CostLine {
+  id: string; name: string; category: string; note: string | null; active: boolean;
+  amount_minor: number; currency: string; period: string; scales: string;
+  daily_minor: number; monthly_minor: number; yearly_minor: number; once_minor: number;
+}
+export interface CostSummary {
+  currency: string; mixed_currencies: boolean;
+  usage: { active_people: number; stored_bytes: number };
+  lines: CostLine[];
+  daily_minor: number; monthly_minor: number; yearly_minor: number;
+  per_person_monthly_minor: number; one_off_minor: number;
+  by_category: { category: string; yearly_minor: number }[];
+}
+export interface CostSuggestion { name: string; category: string; why: string; scales: string }
 export interface SignInRules { allowed_email_domains: string[]; allow_outside_guests: boolean; require_google_sign_in: boolean; require_two_step: boolean }
 export interface AuditEvent {
   id: string; action: string; verb: string; actor: UserRef | null; target_kind: string | null; target_id: string | null;
@@ -97,6 +111,11 @@ export const peopleApi = {
   importPeople: (ws: string, body: { rows: ImportRow[]; dry_run: boolean; send_invites?: boolean; start_joiner_checklist?: boolean; update_existing?: boolean }) =>
     request<ImportResult>('POST', `/workspaces/${ws}/people/import`, body),
   offboardPreview: (ws: string, userId: string) => request<OffboardPreview>('GET', `/workspaces/${ws}/people/${encodeURIComponent(userId)}/offboard`),
+  costs: (ws: string) => request<CostSummary>('GET', `/workspaces/${ws}/costs`),
+  costSuggestions: (ws: string) => request<CostSuggestion[]>('GET', `/workspaces/${ws}/costs/suggestions`),
+  addCost: (ws: string, body: Record<string, unknown>) => request<CostSummary>('POST', `/workspaces/${ws}/costs`, body),
+  updateCost: (ws: string, id: string, body: Record<string, unknown>) => request<CostSummary>('PATCH', `/workspaces/${ws}/costs/${id}`, body),
+  deleteCost: (ws: string, id: string) => request<CostSummary>('DELETE', `/workspaces/${ws}/costs/${id}`),
   blocked: (ws: string) => request<BlockedEmail[]>('GET', `/workspaces/${ws}/blocked-emails`),
   block: (ws: string, email: string, reason?: string | null) =>
     request<BlockedEmail[]>('POST', `/workspaces/${ws}/blocked-emails`, { email, reason: reason || null }),
@@ -114,7 +133,7 @@ export const peopleApi = {
   saveSignInRules: (ws: string, rules: SignInRules) => request<{ rules: SignInRules; locked_out: string[] }>('PUT', `/workspaces/${ws}/sign-in-rules`, rules),
   emailStatus: (ws: string) => request<{ configured: boolean; host: string | null; sender: string | null }>('GET', `/workspaces/${ws}/email-status`),
   emailTest: (ws: string) => request('POST', `/workspaces/${ws}/email-test`),
-  audit: (ws: string, params: { before?: string; action?: string; actor_id?: string; limit?: number } = {}) =>
+  audit: (ws: string, params: { before?: string; action?: string; actor_id?: string; target_id?: string; limit?: number } = {}) =>
     request<AuditEvent[]>('GET', `/workspaces/${ws}/audit`, undefined, params),
   setAvatar: async (ws: string, userId: string, file: File) => {
     const form = new FormData();

@@ -32,6 +32,21 @@ PROFILE_FIELDS = (
 # There used to be a PRIVATE_FIELDS tuple here naming all three as admin-only. Nothing read it,
 # and it described a rule the code does not follow, which is worse than no note at all.
 SELF_EDITABLE = {"name", "phone", "location"}
+# The fields a promotion or a transfer moves. Changes to these are logged with their old and new
+# values, because "what was their designation before?" is the question the log gets asked.
+MOVEMENT_FIELDS = ("designation", "level", "department", "manager_id")
+
+
+def _plain(value):
+    """A value an audit row can hold: JSON, not a date or an enum."""
+    return value if value is None or isinstance(value, (str, int, float, bool)) else str(value)
+
+
+def _team_names_of(db: Session, workspace_id: uuid.UUID, user_id: str) -> List[str]:
+    return sorted(db.scalars(
+        select(Team.name).join(TeamMember, TeamMember.team_id == Team.id)
+        .where(Team.workspace_id == workspace_id, TeamMember.user_id == user_id)
+    ))
 
 
 def _require_admin(access: Access, what: str = "manage people") -> None:
@@ -215,6 +230,8 @@ def update_person(db: Session, access: Access, user_id: str, data: s.PersonUpdat
     user = db.get(User, user_id)
     if member is None or user is None:
         raise NotFound("Person not found")
+    # Read before anything is written, so the log can say what it was as well as what it became.
+    was = {f: _plain(getattr(member, f, None)) for f in MOVEMENT_FIELDS}
     fields = data.model_fields_set
     is_admin = can_manage_workspace(access.role)
     if not is_admin:
@@ -248,13 +265,23 @@ def update_person(db: Session, access: Access, user_id: str, data: s.PersonUpdat
                      {"from": member.role.value, "to": data.role.value})
         member.role = data.role
     if "team_ids" in fields and data.team_ids is not None:
+        before_teams = _team_names_of(db, access.workspace_id, user_id)
         _set_teams(db, access, user_id, data.team_ids)
-    changed = sorted(f for f in fields if f not in ("role",))
+        after_teams = _team_names_of(db, access.workspace_id, user_id)
+        if before_teams != after_teams and is_admin:
+            from app.services.work import audit
+
+            audit.record(db, access.workspace_id, access.user_id, "person.teams_changed", "person", user_id,
+                         user.display_name or user.email, {"from": before_teams, "to": after_teams})
+    changed = sorted(f for f in fields if f not in ("role", "team_ids"))
     if changed and is_admin and user_id != access.user_id:
         from app.services.work import audit
 
+        # The names alone said "designation changed" and left you to guess from what. A promotion
+        # is exactly the thing somebody comes to this log to confirm, so the values go in too.
+        moved = {f: {"from": was.get(f), "to": _plain(getattr(data, f, None))} for f in changed if f in MOVEMENT_FIELDS}
         audit.record(db, access.workspace_id, access.user_id, "person.updated", "person", user_id, user.display_name or user.email,
-                     {"fields": changed})
+                     {"fields": changed, **({"moved": moved} if moved else {})})
     db.flush()
 
 

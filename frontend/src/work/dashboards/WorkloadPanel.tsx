@@ -124,6 +124,16 @@ export const WorkloadPanel: React.FC<{
     if (d.planned_seconds > 0 && d.logged_seconds < d.planned_seconds * 0.5) {
       return { text: `Only ${hours(d.logged_seconds)} logged against ${hours(d.planned_seconds)} planned. Either the work has not started, or the time has not been recorded.`, tone: 'bg-amber-50 text-amber-800' };
     }
+    // "Still free" is a claim about work nobody has sized. Planned only knows about tasks that
+    // have both an estimate and a due date, so when most of them have neither, the free hours
+    // are an artefact of the missing data -- and a manager who believes them hands out more work
+    // to a team that may already be full. Say what is actually known instead.
+    if (d.tasks > 0 && d.scheduled_tasks < d.tasks * 0.7) {
+      return {
+        text: `Planned covers ${d.scheduled_tasks} of ${d.tasks} tasks, so the free hours are not reliable yet. Give the other ${unplanned} a date and an estimate to find out where this team really stands.`,
+        tone: 'bg-amber-50 text-amber-800',
+      };
+    }
     return { text: `${hours(d.remaining_seconds)} of ${hours(capacity)} is still free in this period.`, tone: 'bg-emerald-50 text-emerald-800' };
   })();
 

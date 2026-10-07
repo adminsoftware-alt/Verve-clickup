@@ -185,6 +185,48 @@ def test_inbox_read_snooze_clear(api, org):
     assert api.patch(f"/notifications/{item['id']}", "member", {"read": True}).status_code == 404
 
 
+def test_the_inbox_narrows_by_what_happened_by_priority_and_by_due_date(api, org):
+    """An unread count of 605 is not a to-do list; the filters are how it becomes one."""
+    ws, tid = org["ws"], org["task"]["id"]
+    urgent_soon = ok(api.post(f"/lists/{org['list']['id']}/tasks", "owner", {
+        "name": "File the return", "assignees": ["member2"], "priority": 1,
+        "due_date": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+    }), 201)
+    ok(api.post(f"/lists/{org['list']['id']}/tasks", "owner", {
+        "name": "Tidy the drive", "assignees": ["member2"], "priority": 4,
+    }), 201)
+    ok(api.post(f"/tasks/{tid}/comments", "owner", {"body": "Any update @Member2", "mention_user_ids": ["member2"]}), 201)
+
+    def narrowed(**params):
+        return ok(api.get(f"/workspaces/{ws}/inbox", "member2", params={"tab": "primary", **params}))
+
+    assert len(narrowed()) == 3  # two assignments and a mention
+    assert kinds(narrowed(group="mentions")) == ["mentioned"]
+    assert kinds(narrowed(group="assigned")) == ["assigned", "assigned"]
+    assert kinds(narrowed(group="assigned,mentions")) == ["assigned", "assigned", "mentioned"]
+
+    # Priority and due date are the task's: the mention is about a task with neither, so a
+    # positive filter leaves it out -- and "No due date" rightly brings it back.
+    assert [i["task"]["name"] for i in narrowed(priority="1")] == ["File the return"]
+    assert sorted(i["task"]["name"] for i in narrowed(priority="1,4")) == ["File the return", "Tidy the drive"]
+    assert [i["task"]["name"] for i in narrowed(due="today")] == ["File the return"]
+    assert sorted(i["task"]["name"] for i in narrowed(due="none")) == ["Salary sheet", "Tidy the drive"]
+    assert narrowed(due="overdue") == []
+    # The row carries what it was filtered on, so the list can show it.
+    assert narrowed(priority="1")[0]["task"]["priority"] == 1 and narrowed(priority="1")[0]["task"]["due_date"]
+
+    # Filters combine, and reading an item takes it out of "unread only".
+    assert [i["task"]["name"] for i in narrowed(group="assigned", due="today")] == ["File the return"]
+    assert len(narrowed(unread="true")) == 3
+    first = narrowed(group="assigned", due="today")[0]
+    ok(api.patch(f"/notifications/{first['id']}", "member2", {"read": True}), 204)
+    assert len(narrowed(unread="true")) == 2
+
+    assert api.get(f"/workspaces/{ws}/inbox", "member2", params={"group": "nonsense"}).status_code == 400
+    assert api.get(f"/workspaces/{ws}/inbox", "member2", params={"priority": "high"}).status_code == 422
+    assert urgent_soon["priority"] == 1
+
+
 def test_reminders_arrive_in_the_inbox_when_due(api, org):
     soon = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
     r = ok(api.post(f"/workspaces/{org['ws']}/reminders", "member", {"task_id": org["task"]["id"], "remind_at": soon}), 201)

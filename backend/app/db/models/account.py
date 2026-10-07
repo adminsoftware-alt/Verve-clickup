@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, SmallInteger, String, UniqueConstraint, false, func, text, true
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, SmallInteger, String, UniqueConstraint, false, func, text, true
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -50,6 +50,39 @@ class Workspace(TimestampMixin, Base):
     require_two_step: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False, default=False)
     # The joiner checklist (Verve's SOP by default when null); see services/work/onboarding.py.
     joiner_plan: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
+
+
+class CostItem(Base):
+    """One thing the firm pays for to run this: a server, a mailbox, a domain, a licence.
+
+    Nothing here is discovered. No billing API is wired up, and inventing figures would be worse
+    than asking: an admin records what they actually pay and how often, and the app does the
+    arithmetic over it -- per day, per month, per year, and per person.
+
+    `amount_minor` is paise/cents, as an integer. A monthly bill divided three ways by floating
+    point drifts, and a cost page that does not add up is a cost page nobody believes.
+
+    `scales` says whether the figure is the whole bill (flat) or a rate to multiply by something
+    the app can measure -- the number of active people, or gigabytes stored.
+    """
+
+    __tablename__ = "cost_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # What kind of cost it is, so the breakdown can group them: hosting, database, email,
+    # authentication, storage, domain, licence, other.
+    category: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'other'"))
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default=text("'INR'"))
+    period: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'monthly'"))  # daily | monthly | yearly | once
+    scales: Mapped[str] = mapped_column(String(12), nullable=False, server_default=text("'flat'"))     # flat | per_person | per_gb
+    note: Mapped[Optional[str]] = mapped_column(String(300))
+    active: Mapped[bool] = mapped_column(Boolean, server_default=true(), nullable=False, default=True)
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class BlockedEmail(Base):
@@ -112,7 +145,7 @@ class WorkspaceMember(Base):
     deactivated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     deactivated_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     # How they hear about things outside the app.
-    email_notifications: Mapped[str] = mapped_column(String(10), server_default=text("'daily'"), nullable=False, default="daily")  # off | instant | daily
+    email_notifications: Mapped[str] = mapped_column(String(10), server_default=text("'daily'"), nullable=False, default="daily")  # off | instant | daily | weekly | monthly
     digest_hour: Mapped[int] = mapped_column(server_default=text("8"), nullable=False, default=8)
     timezone: Mapped[str] = mapped_column(String(64), server_default=text("'Asia/Kolkata'"), nullable=False, default="Asia/Kolkata")
     last_digest_on: Mapped[Optional[date]] = mapped_column(Date)

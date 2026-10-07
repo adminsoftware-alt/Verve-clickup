@@ -103,6 +103,9 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
       .filter((t) => !text || t.name.toLowerCase().includes(text) || (t.custom_id ?? '').toLowerCase() === text);
     return sortTasks(applyFilters(found, settings.filters, me, meMode), settings.sort);
   }, [tasks, q, settings.filters, settings.sort, me, meMode, scope, layout]);
+  // Whether an empty list means "nothing is yours" or "your filters hide it" -- a different
+  // sentence belongs on each, and only this page knows which.
+  const hasFilters = !!q.trim() || Object.values(settings.filters).some((v) => (Array.isArray(v) ? v.length > 0 : !!v));
   const makeGroups = useCallback((roots: Task[]) => buildGroups(settings.groupBy, roots, null, [], people), [settings.groupBy, people]);
   // The Board reads its own setting, so a List grouped by due date does not leave the Board
   // with Overdue and Upcoming columns and nowhere to put finished work.
@@ -248,7 +251,8 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
           <ListView tasks={filtered} statuses={null} listName={where} groupBy={settings.groupBy} makeGroups={makeGroups}
             canAddIn={() => false} onCreate={async () => undefined} onOpenTask={openTask}
             columns={COLUMNS.map((c) => c.key).filter((k) => !settings.hidden.includes(k))} fields={[]} people={people}
-            onSetField={() => undefined} selected={selected} onSelect={select} />
+            onSetField={() => undefined} selected={selected} onSelect={select}
+            emptyBecause={hasFilters ? 'filters' : scope === 'mine' ? 'none-assigned' : 'nothing-here'} />
         ) : (
           <TableView tasks={filtered} statuses={null} fields={[]} hidden={settings.hidden} people={people} listName={where}
             canCreate={false} onCreate={async () => undefined} onOpenTask={openTask} onChanged={load} selected={selected} onSelect={select}

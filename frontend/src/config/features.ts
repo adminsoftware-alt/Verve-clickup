@@ -15,11 +15,13 @@ const DEFAULTS = {
   // Settings stays reachable from the profile menu.
   sidebarSettings: false,
   sidebarWorkspaceCard: false,
-  // The header's "Request Leave" button (leave requests on the old v1 pages).
+  // The header's "Request Leave" button. It still points at the old v1 pages, so it stays off:
+  // the Leave page in the sidebar is the v2 one.
   leave: false,
   // The header bell's old v1 notification popover. The bell now opens the v2 Inbox.
   legacyNotifications: false,
-  // The header's bell (the Inbox is in the sidebar too) and the "Available" status picker.
+  // The header's bell -- the way into the Inbox, and where the unread count lives -- and the
+  // "Available" status picker.
   headerBell: true,
   availabilityStatus: false,
   // The first People & Teams page, replaced by the Teams Hub.
@@ -95,11 +97,21 @@ const DEFAULTS = {
   // once got the box ticked by reflex. The checklist, its tasks and the leaver rules are all
   // still there -- it is started from the person'"'"'s own page instead.
   joinerChecklistOnAdd: false,
+  // The joiner checklist editor in Admin. The engine behind it stays on: it is what creates a
+  // joiner'"'"'s recurring tasks and HR reminders, and -- more importantly -- what offboarding reads
+  // to know which of a leaver'"'"'s tasks to delete and which to keep as "Ex - Name". Only the
+  // editor is off; the plan runs on its SOP defaults and the person-level button still works.
+  joinerChecklistSection: false,
 
   // The "Shared with me" tab on the Dashboards hub. All Dashboards already lists everything you
   // can open, shared ones included, and each row says whose it is -- so the tab was a filtered
   // view of a list you are already looking at. Sharing is untouched.
   dashboardsSharedTab: false,
+
+  // The All / Team Dashboards / Company scopes above the Dashboards list. With a handful of
+  // boards they narrowed a list that already fits on one screen, and each row names whose it
+  // is. The filtering still works from a ?tab= link; only the control is gone.
+  dashboardScopeTabs: false,
 
   // The "Task types" entry in the People & Teams rail. A task type is a workspace setting, not a
   // page about people, and it is already reachable from "Manage task types…" inside a task'"'"'s own
@@ -196,8 +208,9 @@ const DEFAULTS = {
   assignedComments: false,
   // The Personal List row under My Tasks. The List itself still exists and still opens.
   personalList: false,
-  // The Inbox and Reminders rows. Both pages still answer at /inbox and /reminders, and
-  // notifications are still recorded; they are simply not in the rail.
+  // The Inbox is the notifications, not a page beside them: the header bell carries the unread
+  // count and opens it, and that is the only way in. A sidebar row as well would be two doors
+  // into one room. Both pages still answer at /inbox and /reminders.
   inbox: false,
   reminders: false,
   // The separate rows under My Tasks. My Tasks is one page with its own views now.
@@ -209,7 +222,9 @@ const DEFAULTS = {
   // are in and the ones shared with you, so there is only one place to look.
   allSpacesPage: false,
   compliance: false,
-  leavePages: false,
+  // Leave is on: the policy, the chain from a person to their manager to HR, balances that run on
+  // the firm's leave year, and the approver seeing what is due before they say yes.
+  leavePages: true,
   billing: false,
   archived: false,
   templates: false,

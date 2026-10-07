@@ -528,3 +528,50 @@ select:not([multiple]):not([size]) {
   .dashboard-print section[data-card-id] { break-inside: avoid; border-color: #d1d5db !important; }
   @page { size: A4 landscape; margin: 12mm; }
 }
+
+/* --- touch, and the shapes a small screen needs --------------------------------------------- */
+
+/* An icon button a finger can hit. Apple and Google both ask for 44px; 173 buttons in this app
+   were 24. The padding grows the hit area without moving anything around it, because the icon
+   stays centred in a box that was already there. */
+.tap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0.375rem;
+}
+@media (pointer: coarse) {
+  .tap { min-width: 2.75rem; min-height: 2.75rem; }
+  /* A row that is only a line of text is still a tap target when it is the whole row. */
+  .tap-row { min-height: 2.75rem; }
+}
+
+/* A grid that cannot shrink -- a month calendar, a timesheet week, a Gantt chart -- keeps its
+   width and scrolls sideways. The shadow on the right edge is what tells somebody there is more,
+   which a bare overflow never does. Momentum scrolling matters on iOS. */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  background:
+    linear-gradient(to right, #fff 30%, rgba(255, 255, 255, 0)) left center,
+    linear-gradient(to left, #fff 30%, rgba(255, 255, 255, 0)) right center,
+    radial-gradient(farthest-side at 0 50%, rgba(15, 23, 42, 0.12), transparent) left center,
+    radial-gradient(farthest-side at 100% 50%, rgba(15, 23, 42, 0.12), transparent) right center;
+  background-repeat: no-repeat;
+  background-size: 36px 100%, 36px 100%, 14px 100%, 14px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
+/* The bar of tabs across the bottom of a phone, and the room it takes up. Pages add
+   `pb-nav` so their last row is not hidden behind it. */
+.pb-nav { padding-bottom: calc(4rem + env(safe-area-inset-bottom)); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+/* iOS zooms the whole page in when it focuses an input whose text is under 16px. Nothing else
+   about the app wants 16px inputs, so this applies only where the pointer is a finger. */
+@media (pointer: coarse) {
+  input, select, textarea { font-size: 16px; }
+}

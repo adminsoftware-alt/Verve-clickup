@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Users } from 'lucide-react';
 import { useWork } from '../WorkContext';
+import { FEATURES } from '../../config/features';
 import { Avatar } from '../ui';
 import { Select } from '../Select';
 import { STATUS_CLASS, STATUS_LABEL, isoDay, sheetApi, type AllTimesheets as Data, type SubmissionStatus } from './api';
@@ -108,9 +109,13 @@ export const AllTimesheets: React.FC = () => {
               />
             </span>
           )}
-          <span className={control}>
-            <Select label="Sort" value={sort} onChange={setSort} choices={SORTS.map((s) => ({ value: s.value, label: s.label }))} />
-          </span>
+          {/* The sort chip comes off: a week is read by name, which is what it is ordered by.
+              The orderings themselves are still here if the chip is ever wanted back. */}
+          {FEATURES.timesheetSortChip && (
+            <span className={control}>
+              <Select label="Sort" value={sort} onChange={setSort} choices={SORTS.map((s) => ({ value: s.value, label: s.label }))} />
+            </span>
+          )}
         </span>
       </div>
 

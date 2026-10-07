@@ -6,9 +6,11 @@
 // and it asks three questions in order -- who, what happens to their work, and are you certain --
 // showing what you are about to do to at each step rather than after.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, Power, Search, ShieldBan, UserMinus, UserX, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronRight, Power, Search, ShieldBan, UserMinus, UserX, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
-import { Avatar, Portal } from '../ui';
+import type { Task } from '../api';
+import { Avatar, Portal, StatusDot, formatDue } from '../ui';
 import { peopleApi, personName, type OffboardPreview, type Person, type TeamFull } from './peopleApi';
 import { ROLE_LABEL } from './PersonDialogs';
 
@@ -176,10 +178,22 @@ const PersonPicker: React.FC<{ people: Person[]; chosen: Person | null; onPick: 
   );
 };
 
+// The value wraps to its own line when the column is narrow, rather than breaking mid-name.
 const Fact: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div className="flex gap-2 text-sm">
+  <div className="flex flex-wrap gap-x-2 text-sm">
     <span className="w-32 shrink-0 text-gray-500">{label}</span>
-    <span className="min-w-0 text-gray-800">{children}</span>
+    <span className="min-w-[9rem] flex-1 text-gray-800">{children}</span>
+  </div>
+);
+
+/** The same row, but the value opens something. */
+const ActionFact: React.FC<{ label: string; onClick: () => void; open?: boolean; children: React.ReactNode }> = ({ label, onClick, open, children }) => (
+  <div className="flex flex-wrap gap-x-2 text-sm">
+    <span className="w-32 shrink-0 text-gray-500">{label}</span>
+    <button type="button" onClick={onClick} className="flex min-w-[9rem] flex-1 items-center gap-1 rounded text-left text-gray-800 underline-offset-2 hover:text-brand-700 hover:underline">
+      {children}
+      <ChevronRight size={13} className={`shrink-0 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`} />
+    </button>
   </div>
 );
 
@@ -192,6 +206,10 @@ export const RemovePersonSection: React.FC<{
   const [handTo, setHandTo] = useState('');
   const [reason, setReason] = useState('');
   const [typed, setTyped] = useState('');
+  const [showTasks, setShowTasks] = useState(false);
+  const [theirTasks, setTheirTasks] = useState<Task[] | null>(null);
+  const [movingTeam, setMovingTeam] = useState(false);
+  const [moveNote, setMoveNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -203,6 +221,10 @@ export const RemovePersonSection: React.FC<{
     setTyped('');
     setError(null);
     setDone(null);
+    setShowTasks(false);
+    setTheirTasks(null);
+    setMovingTeam(false);
+    setMoveNote(null);
     if (!chosen) return;
     let live = true;
     peopleApi.offboardPreview(ws, chosen.user.id)
@@ -274,8 +296,67 @@ export const RemovePersonSection: React.FC<{
             <Fact label="Role">{ROLE_LABEL[chosen.role]}{chosen.designation ? ` · ${chosen.designation}` : ''}</Fact>
             {chosen.department && <Fact label="Department">{chosen.department}</Fact>}
             <Fact label="Reporting manager">{manager ? personName(manager) : <span className="text-gray-400">None</span>}</Fact>
-            <Fact label="Teams">{theirTeams.length ? theirTeams.map((t) => t.name).join(', ') : <span className="text-gray-400">None</span>}</Fact>
-            <Fact label="Open tasks">{preview ? preview.open_tasks : <span className="text-gray-400">Counting…</span>}</Fact>
+            {/* Changing their team is the thing an admin often came here to do, having reached
+                for "remove" because it was the only control on the page. */}
+            <ActionFact label="Teams" open={movingTeam} onClick={() => setMovingTeam(!movingTeam)}>
+              {theirTeams.length ? theirTeams.map((t) => t.name).join(', ') : <span className="text-gray-400">None</span>}
+            </ActionFact>
+            {movingTeam && (
+              <div className="ml-4 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white p-2.5 sm:ml-32">
+                <span className="text-xs text-gray-500">Move them to</span>
+                <select
+                  aria-label="Move to team" defaultValue={theirTeams[0]?.id ?? ''}
+                  onChange={async (e) => {
+                    const id = e.target.value;
+                    setMoveNote(null);
+                    try {
+                      await peopleApi.update(ws, chosen.user.id, { team_ids: id ? [id] : [] });
+                      setMoveNote(id ? `Moved to ${teams.find((t) => t.id === id)?.name}.` : 'Taken out of every team.');
+                      onChanged();
+                    } catch (err) { setMoveNote((err as Error).message); }
+                  }}
+                  className="h-8 rounded-lg border border-gray-300 px-2 text-sm transition-colors hover:border-gray-400 focus:border-brand-500 focus:outline-none"
+                >
+                  <option value="">No team</option>
+                  {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <span className="text-[11px] text-gray-500">They leave the team they are in now.</span>
+                {moveNote && <span className="w-full text-xs text-emerald-700">{moveNote}</span>}
+              </div>
+            )}
+            {/* Five open tasks is a number nobody can act on. Which five is the question. */}
+            {preview && preview.open_tasks > 0 ? (
+              <ActionFact
+                label="Open tasks" open={showTasks}
+                onClick={() => {
+                  setShowTasks(!showTasks);
+                  if (!theirTasks) peopleApi.tasks(ws, chosen.user.id).then(setTheirTasks).catch(() => setTheirTasks([]));
+                }}
+              >
+                {preview.open_tasks}
+              </ActionFact>
+            ) : (
+              <Fact label="Open tasks">{preview ? preview.open_tasks : <span className="text-gray-400">Counting…</span>}</Fact>
+            )}
+            {showTasks && (
+              <div className="ml-4 rounded-lg border border-gray-200 bg-white sm:ml-32">
+                {theirTasks === null ? <p className="px-3 py-2 text-sm text-gray-400">Loading…</p> : (
+                  <ul className="divide-y divide-gray-100">
+                    {theirTasks.slice(0, 20).map((t) => (
+                      <li key={t.id}>
+                        <Link to={`/l/${t.list_id}?task=${t.id}`} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-800 no-underline hover:bg-gray-50">
+                          <StatusDot status={t.status} size={11} />
+                          <span className="min-w-0 flex-1 truncate">{t.name}</span>
+                          {t.due_date && <span className="shrink-0 text-[11px] text-gray-400">{formatDue(t.due_date)}</span>}
+                        </Link>
+                      </li>
+                    ))}
+                    {theirTasks.length > 20 && <li className="px-3 py-1.5 text-xs text-gray-400">and {theirTasks.length - 20} more</li>}
+                    {theirTasks.length === 0 && <li className="px-3 py-2 text-sm text-gray-400">None you can see.</li>}
+                  </ul>
+                )}
+              </div>
+            )}
             <Fact label="Direct reports">{preview ? preview.direct_reports : <span className="text-gray-400">Counting…</span>}</Fact>
             {!!preview?.sole_lead_of.length && (
               <Fact label="Only lead of">

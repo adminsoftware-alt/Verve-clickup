@@ -6,6 +6,8 @@ import { Popover, TaskPicker, dayLabel, hours } from './pieces';
 import { CellCard, DayCard, HoverCard } from './Hover';
 import { TrackTime } from '../task/TrackTime';
 import { ask } from '../../components/ask';
+import { DaySheet } from './DaySheet';
+import { usePhone } from '../useBreakpoint';
 
 export interface EntryActions {
   onUpdate: (entry: SheetEntry, body: EntryUpdate) => Promise<void>;
@@ -144,10 +146,44 @@ export const Grid: React.FC<{
 }> = ({ sheet, editable, onCell, forUserId, onLogged, onDeleteRow, onOpenTask, onStartTimer, onAddTask, actions }) => {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const today = isoDay(new Date());
+  const phone = usePhone();
   const toggle = (id: string) => setOpen((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
+  /** The editable hour for one task on one day. The same component in both layouts. */
+  const cellFor = (row: SheetRow, i: number) => (
+    <Cell
+      seconds={row.seconds_per_day[i] ?? 0}
+      editable={editable && row.task.can_open}
+      muted={sheet.capacity_per_day[i] === 0}
+      label={`${row.task.name} on ${dayLabel(sheet.days[i])}`}
+      onSave={(value) => onCell(row.task.id, i, value)}
+      day={sheet.days[i]}
+      taskId={row.task.id}
+      forUserId={forUserId}
+      onLogged={onLogged}
+      card={(
+        <CellCard
+          task={row.task.name}
+          title={new Date(`${sheet.days[i]}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+          entries={row.entries.filter((e) => e.day === i)}
+          total={row.seconds_per_day[i] ?? 0}
+        />
+      )}
+    />
+  );
+
+  // Seven day columns and a task name need 1,000px. A phone gets one day at a time instead.
+  if (phone) {
+    return (
+      <DaySheet
+        sheet={sheet} renderCell={cellFor} onOpenTask={onOpenTask} onDeleteRow={onDeleteRow}
+        onStartTimer={onStartTimer} editable={editable}
+      />
+    );
+  }
+
   return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+    <div className="scroll-x rounded-xl border border-gray-200 bg-white">
       <div className="min-w-[1000px]" role="table" aria-label="Timesheet">
         <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: COLS }} role="row">
           <div className="flex items-center px-4 text-sm text-gray-700">Task / Location</div>
@@ -196,28 +232,7 @@ export const Grid: React.FC<{
                     )}
                   </div>
                 </div>
-                {row.seconds_per_day.map((sec, i) => (
-                  <Cell
-                    key={i}
-                    seconds={sec}
-                    editable={editable && row.task.can_open}
-                    muted={sheet.capacity_per_day[i] === 0}
-                    label={`${row.task.name} on ${dayLabel(sheet.days[i])}`}
-                    onSave={(value) => onCell(row.task.id, i, value)}
-                    day={sheet.days[i]}
-                    taskId={row.task.id}
-                    forUserId={forUserId}
-                    onLogged={onLogged}
-                    card={(
-                      <CellCard
-                        task={row.task.name}
-                        title={new Date(`${sheet.days[i]}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
-                        entries={row.entries.filter((e) => e.day === i)}
-                        total={sec}
-                      />
-                    )}
-                  />
-                ))}
+                {row.seconds_per_day.map((_, i) => <React.Fragment key={i}>{cellFor(row, i)}</React.Fragment>)}
                 <div className="flex items-center justify-end gap-2 border-l border-gray-100 px-3">
                   <span className="text-[15px] font-medium text-gray-900">{hours(row.total_seconds)}</span>
                   {rowMenu.length > 0 && (

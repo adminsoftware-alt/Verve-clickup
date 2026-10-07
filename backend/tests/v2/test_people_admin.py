@@ -328,6 +328,34 @@ def test_email_status_and_test(api, ws):
     assert r.status_code == 400 and "SMTP_HOST" in r.json()["detail"]
 
 
+def test_a_persons_own_history_says_what_moved(api, ws, vapl):
+    """The log could only be asked who did something, never who it was done to."""
+    team = vapl["accounts"]
+    ok(api.patch(f"/workspaces/{ws}/people/member", "owner",
+                 {"designation": "Executive", "level": 2, "team_ids": []}))
+    ok(api.patch(f"/workspaces/{ws}/people/member", "owner",
+                 {"designation": "Senior Executive", "level": 3, "team_ids": [team["id"]]}))
+
+    mine = ok(api.get(f"/workspaces/{ws}/audit", "owner", params={"target_id": "member"}))
+    assert mine and all(e["target_id"] == "member" for e in mine)
+
+    # A promotion records the values, not just which fields were touched: "designation changed"
+    # with no before and after is the one thing nobody can use.
+    promotion = next(e for e in mine if e["action"] == "person.updated" and e["data"].get("moved"))
+    moved = promotion["data"]["moved"]
+    assert moved["designation"] == {"from": "Executive", "to": "Senior Executive"}
+    assert moved["level"] == {"from": 2, "to": 3}
+
+    # Moving teams is its own entry, with both sides -- and they leave the team they were in.
+    transfer = next(e for e in mine if e["action"] == "person.teams_changed")
+    assert transfer["data"] == {"from": [], "to": ["Accounts"]}
+    assert transfer["verb"] == "moved the teams of"
+    assert ok(api.get(f"/workspaces/{ws}/people/member", "owner"))["team_ids"] == [team["id"]]
+
+    # Still an admin-only log, however it is asked.
+    assert api.get(f"/workspaces/{ws}/audit", "member", params={"target_id": "member"}).status_code == 403
+
+
 def test_audit_log_records_admin_changes(api, ws):
     ok(api.post(f"/workspaces/{ws}/people", "owner", {"email": "new@example.com", "name": "New Joiner"}), 201)
     ok(api.patch(f"/workspaces/{ws}/people/member", "owner", {"role": "limited"}))

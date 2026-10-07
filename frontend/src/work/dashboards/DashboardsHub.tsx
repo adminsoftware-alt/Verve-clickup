@@ -73,36 +73,15 @@ export const DashboardsHub: React.FC = () => {
     return [...map.values()].sort((a, b) => a.title.localeCompare(b.title));
   }, [visible, grouped]);
 
+  const shownTabs = tabs.filter((t) => t.show);
   return (
     <div className="flex h-full min-h-0 bg-white">
-      <aside className="w-56 shrink-0 border-r border-gray-200 px-3 py-4">
-        <h1 className="mb-3 flex items-center gap-2 px-2 text-base font-semibold text-gray-900"><BarChart3 size={18} /> Dashboards</h1>
-        <nav aria-label="Dashboard pages" className="space-y-0.5">
-          {tabs.filter((t) => t.show).map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              title={t.hint}
-              onClick={() => setParams(t.key === 'all' ? {} : { tab: t.key })}
-              className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm ${tab === t.key ? 'bg-brand-50 font-medium text-brand-700' : 'text-gray-700 hover:bg-gray-50'}`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
-        {FEATURES.dashboardPreview && (
-          <Link
-            to="/dashboards/preview"
-            className="mt-4 flex items-center gap-2 rounded-md border border-dashed border-teal-300 px-2 py-1.5 text-sm text-teal-700 no-underline hover:bg-teal-50"
-          >
-            <Sparkles size={14} /> Card previews
-          </Link>
-        )}
-      </aside>
-
+      {/* A whole column of chrome to hold three or four words. With this many boards the panel
+          was a navigation step in front of a list you can read in one screen, so the scopes sit
+          above the table as chips and the table gets the width. */}
       <main className="min-w-0 flex-1 overflow-auto px-6 py-4">
         <div className="mb-4 flex items-center gap-3">
-          <h2 className="text-lg font-semibold text-gray-900">{tabs.find((t) => t.key === tab)?.label}</h2>
+          <h1 className="flex items-center gap-2 text-lg font-semibold text-gray-900"><BarChart3 size={18} /> Dashboards</h1>
           <span className="text-sm text-gray-400">{visible.length}</span>
           <div className="ml-auto flex items-center gap-2 rounded-md border border-gray-200 px-2 py-1">
             <Search size={14} className="text-gray-400" />
@@ -125,7 +104,30 @@ export const DashboardsHub: React.FC = () => {
             </button>
           )}
         </div>
-        <p className="mb-4 text-xs text-gray-500">{tabs.find((t) => t.key === tab)?.hint}.</p>
+        {/* The scopes came off: with a handful of boards, All / Team / Company narrowed a list
+            that already fits on one screen, and every row says whose it is. The tabs still work
+            from a ?tab= link, and the filtering they drive is untouched. */}
+        {FEATURES.dashboardScopeTabs && shownTabs.length > 1 && (
+          <div className="mb-3 flex flex-wrap items-center gap-1">
+            {shownTabs.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                title={t.hint}
+                onClick={() => setParams(t.key === 'all' ? {} : { tab: t.key })}
+                className={`rounded-lg px-2.5 py-1 text-sm transition-colors ${
+                  tab === t.key ? 'bg-brand-50 font-medium text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {FEATURES.dashboardPreview && (
+          <Link to="/dashboards/preview" className="mb-3 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm text-teal-700 no-underline hover:bg-teal-50">
+            <Sparkles size={14} /> Card previews
+          </Link>
+        )}
         {note && <p className="mb-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800" role="status">{note}</p>}
 
         {error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}

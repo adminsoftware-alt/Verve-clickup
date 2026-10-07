@@ -1,11 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarRange, Check, ChevronLeft, ChevronRight, Plane, Plus, Settings, Trash2, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { AlertTriangle, CalendarRange, Check, ChevronLeft, ChevronRight, Landmark, Plane, Plus, Settings, Trash2, Users, X } from 'lucide-react';
 import { useMe, useWork } from '../WorkContext';
-import { Avatar } from '../ui';
-import { fromIso, iso, leaveApi, shortDate, type Holiday, type LeaveBalance, type LeavePart, type LeaveRequest, type LeaveType } from './leaveApi';
+import { Avatar, PriorityFlag } from '../ui';
+import {
+  dayCount, fromIso, iso, leaveApi, shortDate, yearLabel,
+  type Holiday, type LeaveBalance, type LeaveClashes, type LeavePart, type LeavePolicy, type LeaveRequest, type LeaveType,
+} from './leaveApi';
+import { LeaveAdmin } from './LeaveAdmin';
+import { LeavePolicyForm } from './LeavePolicyForm';
 import { ask } from '../../components/ask';
 
-type Tab = 'mine' | 'approvals' | 'calendar' | 'settings';
+type Tab = 'mine' | 'approvals' | 'everyone' | 'calendar' | 'settings';
 const STATUS: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800', approved: 'bg-emerald-100 text-emerald-800', rejected: 'bg-red-100 text-red-700', cancelled: 'bg-gray-100 text-gray-500',
 };
@@ -21,12 +27,25 @@ export const LeavePage: React.FC = () => {
   const { workspace, hierarchy } = useWork();
   const [tab, setTab] = useState<Tab>('mine');
   const [pending, setPending] = useState(0);
+  // HR is a team, not a role, so the only way to know is to ask whether they can see everything.
+  const [seesEveryone, setSeesEveryone] = useState(false);
   const isAdmin = hierarchy?.role === 'owner' || hierarchy?.role === 'admin';
   const ws = workspace?.id ?? '';
   const refreshCount = useCallback(() => { if (ws) leaveApi.list(ws, 'approvals').then((r) => setPending(r.length)).catch(() => undefined); }, [ws]);
   useEffect(() => { refreshCount(); }, [refreshCount]);
+  useEffect(() => {
+    if (!ws) return;
+    if (isAdmin) { setSeesEveryone(true); return; }
+    leaveApi.list(ws, 'all', { status: 'pending' }).then(() => setSeesEveryone(true)).catch(() => setSeesEveryone(false));
+  }, [ws, isAdmin]);
   if (!workspace) return null;
-  const tabs: [Tab, string][] = [['mine', 'My leave'], ['approvals', `Approvals${pending ? ` (${pending})` : ''}`], ['calendar', 'Team calendar'], ...(isAdmin ? [['settings', 'Settings'] as [Tab, string]] : [])];
+  const tabs: [Tab, string][] = [
+    ['mine', 'My leave'],
+    ['approvals', `Approvals${pending ? ` (${pending})` : ''}`],
+    ...(seesEveryone ? [['everyone', 'Everyone'] as [Tab, string]] : []),
+    ['calendar', 'Team calendar'],
+    ...(isAdmin ? [['settings', 'Settings'] as [Tab, string]] : []),
+  ];
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
       <header className="border-b border-gray-200 px-6 pt-4">
@@ -41,6 +60,7 @@ export const LeavePage: React.FC = () => {
       <main className="min-h-0 flex-1 overflow-auto bg-gray-50/60 p-6">
         {tab === 'mine' && <MyLeave ws={ws} />}
         {tab === 'approvals' && <Approvals ws={ws} onChanged={refreshCount} />}
+        {tab === 'everyone' && seesEveryone && <LeaveAdmin ws={ws} />}
         {tab === 'calendar' && <TeamCalendar ws={ws} />}
         {tab === 'settings' && isAdmin && <LeaveSettings ws={ws} />}
       </main>
@@ -51,15 +71,16 @@ export const LeavePage: React.FC = () => {
 // --- my leave -------------------------------------------------------------------------------------------------
 
 const MyLeave: React.FC<{ ws: string }> = ({ ws }) => {
-  const year = new Date().getFullYear();
   const [balances, setBalances] = useState<LeaveBalance[]>([]);
   const [requests, setRequests] = useState<LeaveRequest[] | null>(null);
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // No year is passed: the firm's leave year may not be the calendar one, and only the server
+  // knows when it starts.
   const load = useCallback(() => {
-    leaveApi.balances(ws, year).then(setBalances).catch((e) => setError(e.message));
+    leaveApi.balances(ws).then(setBalances).catch((e) => setError(e.message));
     leaveApi.list(ws, 'mine').then(setRequests).catch((e) => setError(e.message));
-  }, [ws, year]);
+  }, [ws]);
   useEffect(() => { load(); }, [load]);
   const cancel = async (r: LeaveRequest) => {
     if (!(await ask.confirm({ danger: true, title: `Cancel your ${r.type?.name ?? ''} leave on ${range(r)}?` }))) return;
@@ -67,12 +88,24 @@ const MyLeave: React.FC<{ ws: string }> = ({ ws }) => {
   };
   return (
     <div className="mx-auto max-w-4xl space-y-5">
+      {balances[0] && <p className="text-xs text-gray-500">Leave year: {yearLabel(balances[0])}</p>}
       <section aria-label="Balances" className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {balances.map((b) => (
           <div key={b.type.id} className="rounded-xl border border-gray-200 bg-white p-4">
             <div className="flex items-center gap-2 text-sm text-gray-600"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: b.type.color }} />{b.type.name}</div>
-            <div className="mt-1 text-2xl font-semibold text-gray-900">{b.allowance == null ? '—' : b.remaining % 1 ? b.remaining.toFixed(1) : b.remaining}</div>
-            <div className="text-xs text-gray-500">{b.allowance == null ? `${b.used} taken · no limit` : `left of ${b.allowance} · ${b.used} taken${b.pending ? ` · ${b.pending} pending` : ''}`}</div>
+            <div className="mt-1 text-2xl font-semibold text-gray-900">{b.allowance == null ? '—' : dayCount(b.remaining)}</div>
+            <div className="text-xs text-gray-500">
+              {b.allowance == null ? `${dayCount(b.used)} taken · no limit`
+                : `left of ${dayCount(b.allowance)} · ${dayCount(b.used)} taken${b.pending ? ` · ${dayCount(b.pending)} pending` : ''}`}
+            </div>
+            {/* Where the allowance came from, so nobody has to ask why it is not the round number. */}
+            {b.allowance != null && (b.carried_forward > 0 || b.adjusted !== 0) && (
+              <div className="mt-1 text-[11px] text-gray-400">
+                {dayCount(b.earned ?? 0)} earned
+                {b.carried_forward > 0 && ` + ${dayCount(b.carried_forward)} carried over`}
+                {b.adjusted !== 0 && ` ${b.adjusted > 0 ? '+' : '−'} ${dayCount(Math.abs(b.adjusted))} adjusted`}
+              </div>
+            )}
           </div>
         ))}
       </section>
@@ -89,7 +122,10 @@ const MyLeave: React.FC<{ ws: string }> = ({ ws }) => {
               <div className="min-w-0 flex-1">
                 <div className="font-medium text-gray-900">{r.type?.name ?? 'Leave'} · {range(r)}{PART[r.part]} <span className="font-normal text-gray-500">· {days(r.days)}</span></div>
                 <div className="text-xs text-gray-500">
-                  {r.status === 'pending' ? `Waiting for ${r.approver ? r.approver.display_name || r.approver.email : 'approval'}` : r.decided_by ? `${r.status === 'approved' ? 'Approved' : r.status === 'rejected' ? 'Declined' : 'Cancelled'} by ${r.decided_by.display_name || r.decided_by.email}` : ''}
+                  {r.status === 'pending'
+                    ? `Waiting for ${r.approver ? r.approver.display_name || r.approver.email : 'approval'}${r.waiting_days ? ` · ${r.waiting_days} day${r.waiting_days === 1 ? '' : 's'} so far` : ''}`
+                    : r.decided_by ? `${r.status === 'approved' ? 'Approved' : r.status === 'rejected' ? 'Declined' : 'Cancelled'} by ${r.decided_by.display_name || r.decided_by.email}` : ''}
+                  {r.cover ? ` · covered by ${r.cover.display_name || r.cover.email}` : ''}
                   {r.decision_note ? ` · “${r.decision_note}”` : ''}{r.reason ? ` · ${r.reason}` : ''}
                 </div>
               </div>
@@ -108,12 +144,35 @@ const MyLeave: React.FC<{ ws: string }> = ({ ws }) => {
 
 const RequestDialog: React.FC<{ ws: string; onClose: () => void; onDone: () => void }> = ({ ws, onClose, onDone }) => {
   const [types, setTypes] = useState<LeaveType[]>([]);
+  const [policy, setPolicy] = useState<LeavePolicy | null>(null);
+  const me = useMe();
   const today = iso(new Date());
   const [form, setForm] = useState({ type_id: '', start_date: today, end_date: today, part: 'full' as LeavePart, reason: '' });
+  const [clashes, setClashes] = useState<LeaveClashes | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { leaveApi.types(ws).then((t) => { setTypes(t); setForm((f) => ({ ...f, type_id: f.type_id || t[0]?.id || '' })); }).catch(() => undefined); }, [ws]);
+  useEffect(() => { leaveApi.policy(ws).then(setPolicy).catch(() => undefined); }, [ws]);
   const single = form.start_date === form.end_date;
+
+  // Telling someone what they will be leaving behind is the point of this, so it loads as they
+  // pick the dates rather than after the request has gone.
+  useEffect(() => {
+    if (!me || form.end_date < form.start_date) { setClashes(null); return; }
+    let live = true;
+    leaveApi.clashes(ws, me, form.start_date, form.end_date)
+      .then((c) => { if (live) setClashes(c); })
+      .catch(() => { if (live) setClashes(null); });
+    return () => { live = false; };
+  }, [ws, me, form.start_date, form.end_date]);
+
+  const earliest = useMemo(() => {
+    if (!policy) return undefined;
+    const from = new Date();
+    if (policy.min_notice_days > 0) from.setDate(from.getDate() + policy.min_notice_days);
+    else if (!policy.allow_backdated) return today;
+    return policy.min_notice_days > 0 ? iso(from) : undefined;
+  }, [policy, today]);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -133,7 +192,7 @@ const RequestDialog: React.FC<{ ws: string; onClose: () => void; onDone: () => v
           </select>
         </label>
         <div className="grid grid-cols-2 gap-3">
-          <label className="block text-xs font-medium text-gray-600">From<input type="date" aria-label="From" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value, end_date: e.target.value > form.end_date ? e.target.value : form.end_date })} className={`mt-1 block w-full ${input}`} /></label>
+          <label className="block text-xs font-medium text-gray-600">From<input type="date" aria-label="From" min={earliest} value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value, end_date: e.target.value > form.end_date ? e.target.value : form.end_date })} className={`mt-1 block w-full ${input}`} /></label>
           <label className="block text-xs font-medium text-gray-600">To<input type="date" aria-label="To" min={form.start_date} value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} className={`mt-1 block w-full ${input}`} /></label>
         </div>
         {single && (
@@ -144,7 +203,41 @@ const RequestDialog: React.FC<{ ws: string; onClose: () => void; onDone: () => v
           </div>
         )}
         <label className="block text-xs font-medium text-gray-600">Reason (seen by your manager and HR)<textarea aria-label="Reason" rows={2} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} className={`mt-1 block w-full ${input}`} /></label>
-        <p className="text-xs text-gray-500">Weekends and company holidays aren't counted. The request goes to your reporting manager.</p>
+
+        {/* The rules, before someone writes a request that breaks one. */}
+        <ul className="space-y-0.5 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+          <li>
+            {policy?.count_days_off_inside
+              ? 'Weekends and holidays in the middle of your leave are counted; ones at either end are not.'
+              : "Weekends and company holidays aren't counted."}
+          </li>
+          <li>The request goes to your reporting manager, or to HR if they are away.</li>
+          {policy && policy.min_notice_days > 0 && <li>{policy.min_notice_days} days' notice is needed.</li>}
+          {policy && !policy.allow_backdated && <li>Leave already taken has to be recorded by an admin.</li>}
+          {policy?.blackout.map((b) => (
+            <li key={`${b.from}-${b.to}`} className="text-amber-700">Closed: {b.from} to {b.to}{b.reason ? ` (${b.reason})` : ''}.</li>
+          ))}
+        </ul>
+
+        {/* What they are leaving behind. A warning, never a block: it is their leave to ask for. */}
+        {clashes && clashes.tasks.length > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-amber-900">
+              <AlertTriangle size={13} /> You have {clashes.tasks.length} thing{clashes.tasks.length === 1 ? '' : 's'} due in those days
+            </p>
+            <ul className="mt-1 space-y-0.5">
+              {clashes.tasks.slice(0, 5).map((t) => (
+                <li key={t.id} className="flex items-center gap-1.5 text-xs text-amber-900">
+                  {t.compliance && <Landmark size={11} className="shrink-0" />}
+                  <span className="min-w-0 truncate">{t.name}</span>
+                  <span className="shrink-0 text-amber-700">{shortDate(t.due_date.slice(0, 10))}</span>
+                </li>
+              ))}
+              {clashes.tasks.length > 5 && <li className="text-xs text-amber-700">and {clashes.tasks.length - 5} more</li>}
+            </ul>
+            <p className="mt-1 text-[11px] text-amber-700">Worth moving them or saying so below. You can still ask.</p>
+          </div>
+        )}
         {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p>}
         <div className="flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button><button type="submit" disabled={busy || !form.type_id} className={primary}>Send request</button></div>
       </form>
@@ -156,35 +249,125 @@ const RequestDialog: React.FC<{ ws: string; onClose: () => void; onDone: () => v
 
 const Approvals: React.FC<{ ws: string; onChanged: () => void }> = ({ ws, onChanged }) => {
   const [rows, setRows] = useState<LeaveRequest[] | null>(null);
-  const [notes, setNotes] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => leaveApi.list(ws, 'approvals').then(setRows).catch((e) => setError(e.message)), [ws]);
   useEffect(() => { load(); }, [load]);
-  const decide = async (r: LeaveRequest, approve: boolean) => {
-    try { await leaveApi.decide(ws, r.id, approve, notes[r.id]?.trim() || undefined); await load(); onChanged(); } catch (e) { setError((e as Error).message); }
-  };
   return (
     <div className="mx-auto max-w-4xl">
       {error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {rows === null ? <p className="text-sm text-gray-400">Loading…</p> : rows.length === 0 ? <p className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-400">Nothing waiting for you.</p> : (
         <ul className="space-y-2" aria-label="Leave to approve">
           {rows.map((r) => (
-            <li key={r.id} className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="flex flex-wrap items-center gap-3">
-                {r.user && <Avatar user={r.user} size={28} />}
-                <div className="min-w-0 flex-1 text-sm">
-                  <div className="font-medium text-gray-900">{r.user?.display_name || r.user?.email} · {r.type?.name} · {range(r)}{PART[r.part]}</div>
-                  <div className="text-xs text-gray-500">{days(r.days)}{r.reason ? ` · ${r.reason}` : ''}</div>
-                </div>
-                <input aria-label={`Note for ${r.user?.display_name || r.user?.email}`} value={notes[r.id] ?? ''} onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })} placeholder="Note (optional)" className={`w-48 ${input}`} />
-                <button type="button" onClick={() => decide(r, false)} className="flex items-center gap-1 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"><X size={14} /> Decline</button>
-                <button type="button" onClick={() => decide(r, true)} className="flex items-center gap-1 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"><Check size={14} /> Approve</button>
-              </div>
-            </li>
+            <ApprovalCard key={r.id} ws={ws} request={r} onDone={() => { load(); onChanged(); }} onError={setError} />
           ))}
         </ul>
       )}
     </div>
+  );
+};
+
+/**
+ * One request, with the two things a manager needs and never had: what the person has due in
+ * those days, and somewhere to name who holds it while they are gone.
+ */
+const ApprovalCard: React.FC<{
+  ws: string; request: LeaveRequest; onDone: () => void; onError: (m: string) => void;
+}> = ({ ws, request: r, onDone, onError }) => {
+  const { members } = useWork();
+  const [note, setNote] = useState('');
+  const [cover, setCover] = useState('');
+  const [clashes, setClashes] = useState<LeaveClashes | null>(null);
+  const [busy, setBusy] = useState(false);
+  const who = r.user ? r.user.display_name || r.user.email : 'them';
+
+  useEffect(() => {
+    if (!r.user) return;
+    let live = true;
+    leaveApi.clashes(ws, r.user.id, r.start_date, r.end_date)
+      .then((c) => { if (live) setClashes(c); })
+      .catch(() => { if (live) setClashes(null); });
+    return () => { live = false; };
+  }, [ws, r.user, r.start_date, r.end_date]);
+
+  const decide = async (approve: boolean) => {
+    setBusy(true);
+    try {
+      await leaveApi.decide(ws, r.id, approve, note.trim() || undefined, approve ? cover || null : null);
+      onDone();
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const covers = members.filter((m) => !m.deactivated && m.role !== 'guest' && m.user.id !== r.user?.id);
+  const filings = (clashes?.tasks ?? []).filter((t) => t.compliance);
+
+  return (
+    <li className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        {r.user && <Avatar user={r.user} size={28} />}
+        <div className="min-w-0 flex-1 text-sm">
+          <div className="font-medium text-gray-900">{who} · {r.type?.name} · {range(r)}{PART[r.part]}</div>
+          <div className="text-xs text-gray-500">
+            {days(r.days)}{r.reason ? ` · ${r.reason}` : ''}
+            {r.waiting_days ? ` · waiting ${r.waiting_days} day${r.waiting_days === 1 ? '' : 's'}` : ''}
+          </div>
+        </div>
+        {r.escalated_at && (
+          <span className="shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">HR has been told</span>
+        )}
+      </div>
+
+      {/* The one fact that stops a wrong approval: a statutory filing in the very days asked for. */}
+      {clashes && clashes.tasks.length > 0 && (
+        <div className={`mt-3 rounded-lg border px-3 py-2 ${filings.length ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'}`}>
+          <p className={`flex items-center gap-1.5 text-xs font-medium ${filings.length ? 'text-red-800' : 'text-amber-900'}`}>
+            <AlertTriangle size={13} />
+            {filings.length
+              ? `${filings.length} statutory filing${filings.length === 1 ? '' : 's'} due while ${who} is away`
+              : `${clashes.tasks.length} thing${clashes.tasks.length === 1 ? '' : 's'} due while ${who} is away`}
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {clashes.tasks.slice(0, 6).map((t) => (
+              <li key={t.id} className="flex items-center gap-1.5 text-xs">
+                {t.compliance && <Landmark size={11} className="shrink-0 text-red-700" />}
+                <Link to={`/l/${t.list_id}?task=${t.id}`} className="min-w-0 truncate text-gray-800 no-underline hover:underline">{t.name}</Link>
+                {t.priority ? <PriorityFlag priority={t.priority} withLabel={false} /> : null}
+                <span className="shrink-0 text-gray-500">{shortDate(t.due_date.slice(0, 10))}</span>
+              </li>
+            ))}
+            {clashes.tasks.length > 6 && <li className="text-xs text-gray-500">and {clashes.tasks.length - 6} more</li>}
+          </ul>
+        </div>
+      )}
+
+      {clashes && clashes.also_away.length > 0 && (
+        <p className="mt-2 flex items-start gap-1.5 text-xs text-gray-600">
+          <Users size={12} className="mt-0.5 shrink-0 text-gray-400" />
+          <span>
+            Also away then: {clashes.also_away.slice(0, 6).map((a) => `${a.user.display_name || a.user.email}${a.status === 'pending' ? ' (asked)' : ''}`).join(', ')}
+            {clashes.also_away.length > 6 && `, and ${clashes.also_away.length - 6} more`}
+          </span>
+        </p>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-end gap-2">
+        <label className="text-xs font-medium text-gray-600">Who covers the work
+          <select aria-label={`Who covers for ${who}`} value={cover} onChange={(e) => setCover(e.target.value)} className={`mt-1 block ${input}`}>
+            <option value="">Nobody named</option>
+            {covers.map((m) => <option key={m.user.id} value={m.user.id}>{m.user.display_name || m.user.email}</option>)}
+          </select>
+        </label>
+        <label className="min-w-0 flex-1 text-xs font-medium text-gray-600">Note
+          <input aria-label={`Note for ${who}`} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional, and they will see it" className={`mt-1 block w-full ${input}`} />
+        </label>
+        <button type="button" disabled={busy} onClick={() => decide(false)} className="flex items-center gap-1 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"><X size={14} /> Decline</button>
+        <button type="button" disabled={busy} onClick={() => decide(true)} className="flex items-center gap-1 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"><Check size={14} /> Approve</button>
+      </div>
+      {cover && <p className="mt-1 text-[11px] text-gray-500">They will be told they are covering.</p>}
+    </li>
   );
 };
 
@@ -272,6 +455,7 @@ const LeaveSettings: React.FC<{ ws: string }> = ({ ws }) => {
   const saveType = (t: LeaveType) => act(() => leaveApi.updateType(ws, t.id, { ...t }), 'Saved.');
   return (
     <div className="mx-auto grid max-w-5xl grid-cols-1 gap-5 lg:grid-cols-2">
+      <div className="lg:col-span-2"><LeavePolicyForm ws={ws} /></div>
       <section aria-label="Leave types" className="rounded-xl border border-gray-200 bg-white p-5">
         <h3 className="flex items-center gap-2 font-semibold text-gray-900"><Settings size={16} className="text-brand-600" /> Leave types</h3>
         <p className="mb-3 text-xs text-gray-500">Yearly allowance per person; leave it empty for no limit.</p>

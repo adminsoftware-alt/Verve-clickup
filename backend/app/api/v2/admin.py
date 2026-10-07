@@ -14,8 +14,9 @@ from sqlalchemy.orm import Session
 from app.api.v2.deps import current_user
 from app.db.models import User
 from app.db.session import get_db
+from app.schemas import costs as cs
 from app.schemas import work as s
-from app.services.work import audit, onboarding, people, people_admin
+from app.services.work import audit, costs, onboarding, people, people_admin
 from app.services.work.access import Access
 from app.services.work.errors import Invalid, NotFound
 
@@ -52,6 +53,44 @@ def offboard(workspace_id: uuid.UUID, user_id: str, data: s.OffboardIn, user: Us
     out = people_admin.offboard(db, _access(db, user, workspace_id), user_id, data)
     db.commit()
     return out
+
+
+# --- what running this costs ------------------------------------------------------------------
+
+
+@router.get("/workspaces/{workspace_id}/costs", response_model=cs.CostSummary)
+def cost_summary(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return costs.summary(db, _access(db, user, workspace_id))
+
+
+@router.get("/workspaces/{workspace_id}/costs/suggestions", response_model=List[cs.CostSuggestion])
+def cost_suggestions(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    _access(db, user, workspace_id)
+    return costs.suggestions()
+
+
+@router.post("/workspaces/{workspace_id}/costs", response_model=cs.CostSummary, status_code=status.HTTP_201_CREATED)
+def add_cost(workspace_id: uuid.UUID, data: cs.CostItemIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    access = _access(db, user, workspace_id)
+    costs.add(db, access, data)
+    db.commit()
+    return costs.summary(db, access)
+
+
+@router.patch("/workspaces/{workspace_id}/costs/{item_id}", response_model=cs.CostSummary)
+def update_cost(workspace_id: uuid.UUID, item_id: uuid.UUID, data: cs.CostItemIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    access = _access(db, user, workspace_id)
+    costs.update(db, access, item_id, data)
+    db.commit()
+    return costs.summary(db, access)
+
+
+@router.delete("/workspaces/{workspace_id}/costs/{item_id}", response_model=cs.CostSummary)
+def delete_cost(workspace_id: uuid.UUID, item_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    access = _access(db, user, workspace_id)
+    costs.remove(db, access, item_id)
+    db.commit()
+    return costs.summary(db, access)
 
 
 @router.get("/workspaces/{workspace_id}/blocked-emails", response_model=List[s.BlockedEmailOut])
@@ -164,9 +203,10 @@ def avatar(key: str):
 def audit_log(
     workspace_id: uuid.UUID, limit: int = Query(100, ge=1, le=500), before: Optional[datetime] = Query(None),
     action: Optional[str] = Query(None, max_length=60), actor_id: Optional[str] = Query(None, max_length=128),
+    target_id: Optional[str] = Query(None, max_length=128, description="Who it was done to"),
     user: User = Depends(current_user), db: Session = Depends(get_db),
 ):
-    return audit.events(db, _access(db, user, workspace_id), limit, before, action, actor_id)
+    return audit.events(db, _access(db, user, workspace_id), limit, before, action, actor_id, target_id)
 
 
 # --- joiner checklist ---------------------------------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 """ORM models for the v2 work hierarchy. Importing this package registers every table."""
 
-from app.db.models.account import BlockedEmail, User, Workspace, WorkspaceMember
+from app.db.models.account import BlockedEmail, CostItem, User, Workspace, WorkspaceMember
 from app.db.models.admin import AuditEvent, PersonTask
 from app.db.models.calendar_sync import CalendarConnection, CalendarSyncItem
 from app.db.models.collab import (
@@ -17,8 +17,12 @@ from app.db.models.dashboard import Dashboard, DashboardCard, DashboardComment, 
 from app.db.models.enums import LocationKind, PermissionLevel, StatusGroup, ViewType, WorkspaceRole
 from app.db.models.goal import Goal, GoalCheckIn, GoalTarget
 from app.db.models.hierarchy import Folder, ListAssignee, Space, TaskList
-from app.db.models.notify import AutomationRun, ClientCompliance, ComplianceObligation, ComplianceTask, PushSubscription
-from app.db.models.leave import BillingRate, ClientFee, Holiday, ImportedRecord, LeaveRequest, LeaveType
+from app.db.models.notify import (
+    AutomationRun, ClientCompliance, ComplianceObligation, ComplianceTask, EmailLog, PushSubscription,
+)
+from app.db.models.leave import (
+    BillingRate, ClientFee, Holiday, ImportedRecord, LeaveAdjustment, LeavePolicy, LeaveRequest, LeaveType,
+)
 from app.db.models.planning import Automation, CalendarFeed, LineupItem, TimeBlock
 from app.db.models.share import Share
 from app.db.models.spaces_extra import (
@@ -68,11 +72,14 @@ __all__ = [
     "ClientCompliance",
     "ComplianceObligation",
     "ComplianceTask",
+    "EmailLog",
     "PushSubscription",
     "BillingRate",
     "ClientFee",
     "Holiday",
     "ImportedRecord",
+    "LeaveAdjustment",
+    "LeavePolicy",
     "LeaveRequest",
     "LeaveType",
     "AuditEvent",

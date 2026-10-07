@@ -10,7 +10,7 @@ export interface Comment {
   mentions: UserRef[]; mention_teams: TeamRef[]; assignee: UserRef | null; resolved_at: string | null;
   resolved_by: string | null; created_at: string; edited_at: string | null; reactions: Reaction[]; can_edit: boolean;
 }
-export interface TaskRef { id: string; name: string; list_id: string; status: Status | null }
+export interface TaskRef { id: string; name: string; list_id: string; status: Status | null; priority?: number | null; due_date?: string | null }
 export interface CommentWithTask extends Comment { task: TaskRef }
 export interface Activity { id: string; user: UserRef | null; kind: string; data: Record<string, unknown>; created_at: string }
 export interface ChecklistItem { id: string; name: string; resolved: boolean; orderindex: number; assignee: UserRef | null }
@@ -20,6 +20,12 @@ export interface ChecklistTemplate { id: string; name: string; items: string[]; 
 export interface Attachment { id: string; filename: string; content_type: string; size: number; user: UserRef | null; created_at: string }
 
 export type InboxTab = 'primary' | 'other' | 'later' | 'cleared' | 'all';
+export type InboxDue = 'overdue' | 'today' | 'week' | 'none';
+/** What the Inbox is narrowed to. Empty lists and nulls mean "everything". */
+export interface InboxFilters { groups: string[]; priority: number[]; due: InboxDue | null; unread: boolean }
+export const NO_INBOX_FILTERS: InboxFilters = { groups: [], priority: [], due: null, unread: false };
+export const inboxFilterCount = (f: InboxFilters) =>
+  f.groups.length + f.priority.length + (f.due ? 1 : 0) + (f.unread ? 1 : 0);
 export interface InboxItem {
   id: string; kind: string; category: 'primary' | 'other'; actor: UserRef | null; task: TaskRef | null;
   comment: { id: string; body: string } | null; reminder: { id: string; title: string; remind_at: string } | null;
@@ -102,7 +108,14 @@ export const collabApi = {
   deleteAttachment: (id: string) => request('DELETE', `/attachments/${id}`),
 
   // Inbox
-  inbox: (ws: string, tab: InboxTab) => request<InboxItem[]>('GET', `/workspaces/${ws}/inbox`, undefined, { tab }),
+  inbox: (ws: string, tab: InboxTab, f: InboxFilters = NO_INBOX_FILTERS) =>
+    request<InboxItem[]>('GET', `/workspaces/${ws}/inbox`, undefined, {
+      tab,
+      group: f.groups.length ? f.groups.join(',') : undefined,
+      priority: f.priority.length ? f.priority.join(',') : undefined,
+      due: f.due ?? undefined,
+      unread: f.unread ? true : undefined,
+    }),
   counts: (ws: string) => request<InboxCounts>('GET', `/workspaces/${ws}/inbox/counts`),
   updateNotification: (id: string, body: Partial<{ read: boolean; cleared: boolean; saved: boolean; snoozed_until: string; unsnooze: boolean }>) =>
     request('PATCH', `/notifications/${id}`, body),

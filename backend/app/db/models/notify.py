@@ -4,7 +4,9 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, false, func, text, true
+from sqlalchemy import (
+    Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, false, func, text, true,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,6 +23,39 @@ class AutomationRun(Base):
     rule_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("automations.id", ondelete="CASCADE"), nullable=False)
     task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
     key: Mapped[str] = mapped_column(String(64), nullable=False)  # e.g. the due date it fired for
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EmailLog(Base):
+    """One scheduled email: who it was for, what it covered, and whether it went.
+
+    The unique key is (workspace, person, kind, period), so a job that runs every hour sends a
+    given digest once and then finds its own row. That makes "has this already gone out?" a read
+    rather than a column on the membership, which is what stopped there being more than two
+    cadences -- and it means support can answer "did Priya get Tuesday's?" by looking.
+    """
+
+    __tablename__ = "email_log"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "user_id", "kind", "period", name="uq_email_log_once"),
+        Index("ix_email_log_recent", "workspace_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    #: "daily", "weekly", "monthly", "overdue", "invite_reminder".
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: The window it covered, in a form that cannot repeat: "2026-10-07", "2026-W41", "2026-10".
+    period: Mapped[str] = mapped_column(String(16), nullable=False)
+    to_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    subject: Mapped[str] = mapped_column(String(300), nullable=False)
+    #: How many things it was about. A row is written even for nought, so an empty day is not
+    #: reconsidered every hour until midnight.
+    items: Mapped[int] = mapped_column(Integer, server_default=text("0"), nullable=False, default=0)
+    sent: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False, default=False)
+    #: Why it did not go, where it did not: no SMTP, a refused address, a timeout.
+    problem: Mapped[Optional[str]] = mapped_column(String(300))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

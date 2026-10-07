@@ -54,6 +54,8 @@ KIND_LABELS = {
     "automation": "Automation messages",
     "leave_request": "Leave requests to approve",
     "leave_decision": "Decisions on my leave",
+    "leave_cover": "When I'm asked to cover someone's work",
+    "leave_escalated": "Leave requests nobody has decided (HR)",
     "timesheet_reminder": "Timesheet reminders",
     "escalation": "Escalations about my team's tasks",
     "space_join_request": "Requests to join my Spaces",

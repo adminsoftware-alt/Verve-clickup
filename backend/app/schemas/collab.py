@@ -58,6 +58,9 @@ class TaskRefOut(BaseModel):
     name: str
     list_id: uuid.UUID
     status: Optional[StatusOut] = None
+    # Shown on the row, and what the Inbox's priority and due filters sort on.
+    priority: Optional[int] = None
+    due_date: Optional[datetime] = None
 
 
 class CommentWithTask(CommentOut):
@@ -135,6 +138,9 @@ class InboxItem(BaseModel):
     saved: bool
     snoozed_until: Optional[datetime]
     created_at: datetime
+
+
+InboxDue = Literal["overdue", "today", "week", "none"]
 
 
 class InboxCounts(BaseModel):

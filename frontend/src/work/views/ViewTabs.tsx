@@ -52,7 +52,9 @@ export const ViewTabs: React.FC<{
   /** Shown on the right of the strip, e.g. how many tasks are in view. */
   aside?: React.ReactNode;
 }> = ({ value, onChange, aside, only }) => (
-  <div role="tablist" aria-label="Views" className="flex items-center gap-1 border-b border-gray-200 px-6">
+  // The tabs are wider than a phone -- five of them is 489px -- so the strip scrolls sideways
+  // rather than hiding whichever ones did not fit.
+  <div role="tablist" aria-label="Views" className="scroll-x flex items-center gap-1 border-b border-gray-200 px-4 sm:px-6">
     {VIEWS.filter((v) => !only || only.includes(v.key)).map((v) => {
       const on = v.key === value;
       return (

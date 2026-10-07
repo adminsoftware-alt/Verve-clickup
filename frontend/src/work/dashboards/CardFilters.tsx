@@ -21,6 +21,8 @@ import { workApi, type TagUsage } from '../api';
 import type { Filters } from './api';
 
 const PANEL_WIDTH = 280;
+/** Roughly what the panel grows to with a search box and a list; enough to decide which way to open. */
+const PANEL_MAX_HEIGHT = 360;
 /** Above this many choices the value list gets its own search box. */
 const SEARCHABLE = 8;
 
@@ -245,8 +247,18 @@ export const CardFilterMenu: React.FC<{
     setOpenField(null);
     setSearch('');
     const rect = triggerRef.current.getBoundingClientRect();
-    const left = Math.max(8, Math.min(rect.right - PANEL_WIDTH, window.innerWidth - PANEL_WIDTH - 8));
-    setPos({ top: rect.bottom + 4, left });
+    // Hang it from the left of its trigger, the way a dropdown is expected to open, and only
+    // pull it leftwards when that would run off the right edge. Right-aligning it unconditionally
+    // sent the panel 280px to the left of a button near the start of the row, where it ended up
+    // underneath the sidebar.
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 8));
+    // Below the trigger, unless there is more room above it -- a filter button low on a long
+    // Dashboard would otherwise open a panel that runs off the bottom of the window.
+    const room = window.innerHeight - rect.bottom;
+    const top = room < PANEL_MAX_HEIGHT && rect.top > room
+      ? Math.max(8, rect.top - Math.min(PANEL_MAX_HEIGHT, rect.top - 8) - 4)
+      : rect.bottom + 4;
+    setPos({ top, left });
   };
 
   useEffect(() => {

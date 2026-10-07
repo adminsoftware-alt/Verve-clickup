@@ -1201,6 +1201,20 @@ class Engine:
                 })
         from app.services.work.leave import daily_capacity
 
+        # Everyone this card is about, not only those who logged something. A week where seven of
+        # twelve people recorded nothing should read "29h of 480h", not "29h of 200h" -- the second
+        # improves as more people fail to fill it in, which is exactly backwards. The set is the
+        # one the capacity card uses, so the two cards on a Dashboard cannot disagree about how
+        # many people are in the team.
+        covered: Set[str] = set(people)
+        for f in self.matching(config, loaded):
+            covered.update(f.assignees)
+        seen = self.time_people()
+        if seen is not None:
+            covered &= seen  # someone who may not see another's time does not get their row either
+        for uid in covered:
+            people.setdefault(uid, [0] * len(days))
+
         # Each person's working hours less holidays and approved leave; the header uses the usual week.
         own = daily_capacity(self.db, self.access.workspace_id, list(people), days)
         capacity = [CAPACITY_SECONDS if day.weekday() < 5 else 0 for day in days]
@@ -1216,12 +1230,16 @@ class Engine:
             }
             for uid, secs in people.items()
         ]
-        rows.sort(key=lambda r: (r["user"]["display_name"] or r["user"]["email"]).lower())
+        # Whoever logged something first, then the people who logged nothing: a manager is
+        # looking for the empty rows, and burying them alphabetically hides the point.
+        rows.sort(key=lambda r: (r["total"] == 0, (r["user"]["display_name"] or r["user"]["email"]).lower()))
         return {
             "days": [day.isoformat() for day in days],
             "capacity_per_day": capacity,
             "rows": rows,
-            "sees_everyone": self.time_people() is None,
+            # How many of them have not recorded anything at all, so the card can say it plainly.
+            "nobody_logged": sum(1 for r in rows if r["total"] == 0),
+            "sees_everyone": seen is None,
         }
 
     # --- drill-down --------------------------------------------------------------------

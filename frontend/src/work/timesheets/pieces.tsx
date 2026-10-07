@@ -87,13 +87,13 @@ export const WeekNav: React.FC<{ start: string | null; end: string | null; onGo:
     onGo(isoDay(d));
   };
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1 sm:gap-2">
       <button type="button" title="Previous week" onClick={() => shift(-7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
       <button type="button" title="Next week" onClick={() => shift(7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
       <button
         type="button"
         onClick={() => picker.current?.showPicker?.()}
-        className="relative flex items-center gap-1.5 rounded px-1 text-2xl font-medium text-gray-900 hover:bg-gray-50"
+        className="relative flex items-center gap-1.5 whitespace-nowrap rounded px-1 text-lg font-medium text-gray-900 hover:bg-gray-50 sm:text-2xl"
         aria-label="Pick a week"
       >
         {start && end ? rangeLabel(start, end) : '…'}
@@ -108,7 +108,7 @@ export const WeekNav: React.FC<{ start: string | null; end: string | null; onGo:
           className="pointer-events-none absolute left-0 top-full h-0 w-0 opacity-0"
         />
       </button>
-      <button type="button" onClick={() => onGo(isoDay(new Date()))} className="ml-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+      <button type="button" onClick={() => onGo(isoDay(new Date()))} className="ml-auto shrink-0 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 sm:ml-2">
         This week
       </button>
     </div>

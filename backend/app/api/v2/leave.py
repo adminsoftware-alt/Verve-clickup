@@ -22,6 +22,23 @@ def _access(db: Session, user: User, workspace_id: uuid.UUID) -> Access:
     return Access.for_workspace(db, user.id, workspace_id)
 
 
+# --- the policy ---------------------------------------------------------------------------------------------
+
+
+@router.get("/workspaces/{workspace_id}/leave/policy", response_model=lv.LeavePolicyOut)
+def get_leave_policy(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Everyone reads it: the request form has to say what the rules are before someone breaks one."""
+    access = _access(db, user, workspace_id)
+    return leave.policy_out(db, leave.policy(db, access.workspace_id))
+
+
+@router.put("/workspaces/{workspace_id}/leave/policy", response_model=lv.LeavePolicyOut)
+def put_leave_policy(workspace_id: uuid.UUID, data: lv.LeavePolicyIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    out = leave.save_policy(db, _access(db, user, workspace_id), data)
+    db.commit()
+    return out
+
+
 # --- types and holidays -------------------------------------------------------------------------------------
 
 
@@ -69,10 +86,14 @@ def remove_holiday(workspace_id: uuid.UUID, holiday_id: uuid.UUID, user: User = 
 
 @router.get("/workspaces/{workspace_id}/leave", response_model=List[lv.LeaveRequestOut])
 def leave_requests(
-    workspace_id: uuid.UUID, scope: Literal["mine", "approvals", "all"] = Query("mine"), year: Optional[int] = Query(None, ge=2000, le=2100),
+    workspace_id: uuid.UUID,
+    scope: Literal["mine", "approvals", "all"] = Query("mine"),
+    year: Optional[int] = Query(None, ge=2000, le=2100, description="A leave year, named by the year it starts in"),
+    status_filter: Optional[Literal["pending", "approved", "rejected", "cancelled"]] = Query(None, alias="status"),
+    user_id: Optional[str] = Query(None, description="One person, with scope=all"),
     user: User = Depends(current_user), db: Session = Depends(get_db),
 ):
-    out = leave.list_requests(db, _access(db, user, workspace_id), scope, year)
+    out = leave.list_requests(db, _access(db, user, workspace_id), scope, year, status_filter, user_id)
     db.commit()
     return out
 
@@ -86,7 +107,7 @@ def request_leave(workspace_id: uuid.UUID, data: lv.LeaveRequestIn, user: User =
 
 @router.post("/workspaces/{workspace_id}/leave/{leave_id}/decision", response_model=lv.LeaveRequestOut)
 def decide_leave(workspace_id: uuid.UUID, leave_id: uuid.UUID, data: lv.LeaveDecision, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    out = leave.decide(db, _access(db, user, workspace_id), leave_id, data.approve, data.note)
+    out = leave.decide(db, _access(db, user, workspace_id), leave_id, data.approve, data.note, data.cover_id)
     db.commit()
     return out
 
@@ -105,12 +126,41 @@ def leave_calendar(workspace_id: uuid.UUID, start: date = Query(...), end: date 
     return out
 
 
+@router.get("/workspaces/{workspace_id}/leave/clashes", response_model=lv.LeaveClashes)
+def leave_clashes(
+    workspace_id: uuid.UUID, start: date = Query(...), end: date = Query(...), user_id: Optional[str] = Query(None),
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+):
+    """What the person already has due in those days, and who else is away then."""
+    access = _access(db, user, workspace_id)
+    out = leave.clashes(db, access, user_id or user.id, start, end)
+    db.commit()
+    return out
+
+
 @router.get("/workspaces/{workspace_id}/leave/balances", response_model=List[lv.LeaveBalance])
 def leave_balances(
-    workspace_id: uuid.UUID, user_id: Optional[str] = Query(None), year: int = Query(..., ge=2000, le=2100),
+    workspace_id: uuid.UUID, user_id: Optional[str] = Query(None),
+    year: Optional[int] = Query(None, ge=2000, le=2100, description="Omit for the leave year we are in"),
     user: User = Depends(current_user), db: Session = Depends(get_db),
 ):
     out = leave.balances(db, _access(db, user, workspace_id), user_id or user.id, year)
+    db.commit()
+    return out
+
+
+@router.get("/workspaces/{workspace_id}/leave/adjustments", response_model=List[lv.LeaveAdjustmentOut])
+def leave_adjustments(
+    workspace_id: uuid.UUID, year: int = Query(..., ge=2000, le=2100), user_id: Optional[str] = Query(None),
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+):
+    return leave.adjustments(db, _access(db, user, workspace_id), user_id or user.id, year)
+
+
+@router.put("/workspaces/{workspace_id}/leave/adjustments", response_model=List[lv.LeaveAdjustmentOut])
+def put_leave_adjustment(workspace_id: uuid.UUID, data: lv.LeaveAdjustmentIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Grant days, take them back, or (with zero) remove the adjustment."""
+    out = leave.set_adjustment(db, _access(db, user, workspace_id), data)
     db.commit()
     return out
 

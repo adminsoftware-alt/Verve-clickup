@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FileSpreadsheet, History, KeyRound, ListChecks, Mail, RotateCcw, Save, ShieldBan, Trash2, UserMinus, UserPlus } from 'lucide-react';
+import { ChevronRight, FileSpreadsheet, History, KeyRound, ListChecks, Mail, RotateCcw, Save, ShieldBan, Trash2, UserMinus, UserPlus, Wallet } from 'lucide-react';
 import { Avatar } from '../ui';
 import { peopleApi, type AuditEvent, type BlockedEmail, type JoinerPlan, type JoinerRule, type SignInRules } from './peopleApi';
 import { useHub } from './TeamsHub';
 import { AddPersonDialog } from './PersonDialogs';
 import { ImportPeopleDialog } from './AdminDialogs';
 import { RemovePersonSection } from './RemovePerson';
+import { RunningCosts } from './RunningCosts';
 import { ask } from '../../components/ask';
+import { FEATURES } from '../../config/features';
 
 const card = 'rounded-xl border border-gray-200 bg-white p-5';
 const input = 'rounded-md border border-gray-300 px-2 py-1.5 text-sm';
@@ -29,10 +31,11 @@ export const AdminPage: React.FC = () => {
     <div className="mx-auto max-w-5xl space-y-5 p-6">
       <h2 className="text-lg font-semibold text-gray-900">Admin</h2>
       <PeopleSection />
+      <CostsSection ws={ws} />
       <EmailSection ws={ws} />
       <SignInSection ws={ws} />
       <BlockedSection ws={ws} />
-      <JoinerPlanSection ws={ws} />
+      {FEATURES.joinerChecklistSection && <JoinerPlanSection ws={ws} />}
       <AuditSection ws={ws} />
     </div>
   );
@@ -81,6 +84,14 @@ const PeopleSection: React.FC = () => {
     </Section>
   );
 };
+
+/** What the firm pays to keep this running, on every scale the question gets asked in. */
+const CostsSection: React.FC<{ ws: string }> = ({ ws }) => (
+  <Section id="costs" icon={<Wallet size={17} className="text-brand-600" />} title="Running costs"
+    hint="What this application costs to run — per day, per month, per year, and per person. Figures you record; usage the app measures.">
+    <div className={card}><RunningCosts ws={ws} /></div>
+  </Section>
+);
 
 // --- barred addresses ----------------------------------------------------------------------------------------
 
@@ -241,18 +252,73 @@ const SCHEDULE: [string, string][] = [
 const LEAVER: [string, string][] = [['delete', 'Delete'], ['retain_birthday', 'Keep as “Ex – Name”'], ['keep', 'Keep as is']];
 const WHO: [string, string][] = [['person', 'The joiner'], ['manager', 'Their manager'], ['hr', 'HR']];
 
+/** What a rule does, in words, for the row you read rather than the row you edit. */
+function describeRule(rule: JoinerRule): string {
+  const when = SCHEDULE.find(([v]) => v === rule.schedule)?.[1] ?? rule.schedule;
+  const place = rule.where.folder !== undefined
+    ? `their team's List in ${rule.where.folder || '—'}`
+    : rule.where.list || '—';
+  const who = (rule.assignees ?? []).map((a) => ({ person: 'the joiner', manager: 'their manager', hr: 'HR' }[a] ?? a));
+  const people = who.length === 0 ? 'nobody'
+    : who.length === 1 ? who[0]
+    : `${who.slice(0, -1).join(', ')} and ${who[who.length - 1]}`;
+  return `${when}, in ${place} · for ${people}`;
+}
+
+/** Who it is for, when that is not everybody -- the reason a joiner might not get this one. */
+function limitOf(rule: JoinerRule): string | null {
+  if (rule.when === 'all') return null;
+  return WHEN.find(([v]) => v === rule.when)?.[1] ?? rule.when;
+}
+
 const RuleRow: React.FC<{ rule: JoinerRule; onChange: (r: JoinerRule) => void }> = ({ rule: raw, onChange }) => {
+  const [open, setOpen] = useState(false);
   const rule = { ...raw, checklist: raw.checklist ?? [], assignees: raw.assignees ?? [] };
   const set = (p: Partial<JoinerRule>) => onChange({ ...rule, ...p });
   const whereKind = rule.where.folder !== undefined ? 'folder' : 'list';
+  const limit = limitOf(rule);
   return (
-    <li className={`rounded-lg border p-3 ${rule.enabled ? 'border-gray-200' : 'border-dashed border-gray-200 opacity-60'}`} aria-label={`Rule ${rule.key}`}>
+    <li className={`overflow-hidden rounded-xl border transition-colors ${
+      rule.enabled ? 'border-gray-200 bg-white' : 'border-dashed border-gray-200 bg-gray-50/60'}`} aria-label={`Rule ${rule.key}`}>
+      {/* The line you read. The tick turns the rule off without opening anything. */}
+      <div className="flex items-start gap-3 px-3.5 py-2.5">
+        <input
+          type="checkbox" checked={rule.enabled} aria-label={`Use ${rule.key}`}
+          onChange={(e) => set({ enabled: e.target.checked })}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 accent-brand-600"
+        />
+        {/* The name has the line to itself. The detail sits under it and wraps, rather than
+            squeezing the one thing you are scanning for into an ellipsis. */}
+        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex min-w-0 flex-1 items-start gap-3 text-left">
+          <span className="min-w-0 flex-1">
+            <span className={`block truncate text-sm font-medium ${rule.enabled ? 'text-gray-900' : 'text-gray-500'}`}>
+              {rule.name.replace('{name}', 'their name')}
+            </span>
+            <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-gray-500">
+              <span>{describeRule(rule)}</span>
+              {rule.checklist.length > 0 && <span className="text-gray-400">· {rule.checklist.length} steps</span>}
+              <span className="text-gray-400">
+                · {rule.leaver === 'delete' ? 'deleted when they leave' : rule.leaver === 'retain_birthday' ? 'kept as “Ex – …”' : 'kept when they leave'}
+              </span>
+              {limit && (
+                <span className="rounded-full bg-amber-50 px-1.5 py-px text-[11px] text-amber-800" title="Not everyone gets this one">
+                  {limit}
+                </span>
+              )}
+            </span>
+          </span>
+          <ChevronRight size={15} className={`mt-0.5 shrink-0 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`} />
+        </button>
+      </div>
+
+      {/* Everything else, only on the rule you opened. */}
+      {open && (
+      <div className="space-y-2 border-t border-gray-100 bg-gray-50/70 px-3.5 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <input type="checkbox" checked={rule.enabled} aria-label={`Use ${rule.key}`} onChange={(e) => set({ enabled: e.target.checked })} />
         <input aria-label={`Task name for ${rule.key}`} value={rule.name} onChange={(e) => set({ name: e.target.value })} className={`min-w-60 flex-1 ${input}`} />
         <select aria-label={`Who gets ${rule.key}`} value={rule.when} onChange={(e) => set({ when: e.target.value })} className={input}>{WHEN.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
         <select aria-label={`Where ${rule.key} goes`} value={whereKind} onChange={(e) => set({ where: e.target.value === 'folder' ? { folder: rule.where.list ?? '' } : { list: rule.where.folder ?? '' } })} className={input}>
           <option value="folder">In their team's List inside Folder</option><option value="list">In the List</option>
         </select>
@@ -270,12 +336,14 @@ const RuleRow: React.FC<{ rule: JoinerRule; onChange: (r: JoinerRule) => void }>
           <select aria-label={`When ${rule.key}'s person leaves`} value={rule.leaver} onChange={(e) => set({ leaver: e.target.value })} className={input}>{LEAVER.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
         </label>
       </div>
-      <details className="mt-2 text-sm">
-        <summary className="cursor-pointer text-gray-500">Checklist ({rule.checklist.length})</summary>
+      <label className="block text-sm">
+        <span className="text-gray-500">Checklist inside the task — one per line</span>
         <textarea aria-label={`Checklist for ${rule.key}`} rows={Math.max(3, rule.checklist.length)} value={rule.checklist.join('\n')}
           onChange={(e) => set({ checklist: e.target.value.split('\n').map((l) => l.trimStart()).filter((l, i, all) => l || i < all.length - 1) })}
           className={`mt-1 block w-full ${input}`} placeholder="One item per line" />
-      </details>
+      </label>
+      </div>
+      )}
     </li>
   );
 };
@@ -298,12 +366,22 @@ const JoinerPlanSection: React.FC<{ ws: string }> = ({ ws }) => {
   return (
     <Section id="joiner" icon={<ListChecks size={17} className="text-brand-600" />} title="Joiner checklist"
       hint="The tasks created for every new person, from the “Common Operational Tasks” SOP. Run it from a person's profile, when adding someone, or when importing.">
-      <div className="mb-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
-        <label className="font-medium text-gray-700">Space<input aria-label="Joiner Space" value={plan.space_name} onChange={(e) => setPlan({ ...plan, space_name: e.target.value })} className={`mt-1 block w-full ${input}`} /></label>
-        <label className="font-medium text-gray-700">HR team<input aria-label="HR team" value={plan.hr_team_name} onChange={(e) => setPlan({ ...plan, hr_team_name: e.target.value })} className={`mt-1 block w-full ${input}`} /></label>
-        <label className="font-medium text-gray-700">Reviewer designations<input aria-label="Reviewer designations" value={plan.reviewer_designations.join(', ')} onChange={(e) => setPlan({ ...plan, reviewer_designations: e.target.value.split(',').map((d) => d.trim()) })} className={`mt-1 block w-full ${input}`} /></label>
-      </div>
-      <ul className="space-y-2">
+      <p className="mb-3 text-[13px] text-gray-600">
+        A new person gets <b>{plan.rules.filter((r) => r.enabled).length} of these {plan.rules.length} tasks</b> — the ones that
+        apply to them. Open a line to change it.
+      </p>
+
+      {/* Set once when the workspace is built, and then never again. Behind a disclosure. */}
+      <details className="mb-3 rounded-lg border border-gray-200">
+        <summary className="cursor-pointer px-3 py-2 text-[13px] text-gray-600">Where these tasks live</summary>
+        <div className="grid grid-cols-1 gap-3 border-t border-gray-100 px-3 py-3 text-sm sm:grid-cols-3">
+          <label className="font-medium text-gray-700">Space<input aria-label="Joiner Space" value={plan.space_name} onChange={(e) => setPlan({ ...plan, space_name: e.target.value })} className={`mt-1 block w-full ${input}`} /></label>
+          <label className="font-medium text-gray-700">HR team<input aria-label="HR team" value={plan.hr_team_name} onChange={(e) => setPlan({ ...plan, hr_team_name: e.target.value })} className={`mt-1 block w-full ${input}`} /></label>
+          <label className="font-medium text-gray-700">Reviewer designations<input aria-label="Reviewer designations" value={plan.reviewer_designations.join(', ')} onChange={(e) => setPlan({ ...plan, reviewer_designations: e.target.value.split(',').map((d) => d.trim()) })} className={`mt-1 block w-full ${input}`} /></label>
+        </div>
+      </details>
+
+      <ul className="space-y-1.5">
         {plan.rules.map((r, i) => <RuleRow key={r.key} rule={r} onChange={(next) => setPlan({ ...plan, rules: plan.rules.map((x, j) => (j === i ? next : x)) })} />)}
       </ul>
       <div className="mt-4 flex flex-wrap items-center gap-2">

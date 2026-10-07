@@ -125,7 +125,9 @@ export const PeriodBar: React.FC<{
       )}
       {!value && <span className="mr-auto text-xs text-gray-400">Each card is on its own window — pick one to line them up.</span>}
       <PeriodMenu
-        label={value ? (choices.find(([v]) => v === preset)?.[1] ?? periodLabel(value)) : 'Mixed'}
+        // With no shared window the button says what it is for rather than naming a state nobody
+        // can pick: "Mixed" read like a period you had chosen, and sat where "This week" would.
+        label={value ? (choices.find(([v]) => v === preset)?.[1] ?? periodLabel(value)) : 'Period'}
         preset={preset}
         choices={choices}
         disabled={!canEdit}
