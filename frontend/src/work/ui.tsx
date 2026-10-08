@@ -174,7 +174,7 @@ export const Portal: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 export interface MenuItem { label: string; icon?: React.ReactNode; onClick: () => void; danger?: boolean }
 
 const MENU_WIDTH = 184;
-const MENU_ITEM_HEIGHT = 34;
+const MENU_ITEM_HEIGHT = 36;
 
 export const Menu: React.FC<{
   trigger: React.ReactNode;
@@ -220,12 +220,12 @@ export const Menu: React.FC<{
     };
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(null);
     const onMove = (e: Event) => { if (!popoverRef.current?.contains(e.target as Node)) setOpen(null); };
-    document.addEventListener('mousedown', onDown);
+    document.addEventListener('mousedown', onDown, true);
     document.addEventListener('keydown', onKey);
     window.addEventListener('scroll', onMove, true);
     window.addEventListener('resize', onMove);
     return () => {
-      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('mousedown', onDown, true);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', onMove, true);
       window.removeEventListener('resize', onMove);
@@ -251,7 +251,7 @@ export const Menu: React.FC<{
             ref={popoverRef}
             role="menu"
             style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
-            className="z-[200] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+            className="z-[200] overflow-hidden rounded-xl border border-gray-200 bg-white p-1 shadow-xl ring-1 ring-black/[0.03]"
           >
             {items.map((item) => (
               <button
@@ -259,10 +259,15 @@ export const Menu: React.FC<{
                 type="button"
                 role="menuitem"
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(null); item.onClick(); }}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-gray-100 ${item.danger ? 'text-red-600' : 'text-gray-700'}`}
+                // The row is the hit area, inset from the edge so the highlight reads as a
+                // rounded row rather than a band across the whole popover.
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
+                  item.danger ? 'text-red-600 hover:bg-red-50' : 'text-gray-700 hover:bg-gray-100'}`}
               >
-                {item.icon}
-                {item.label}
+                {/* A minimum rather than a fixed width: a plain icon lines up with every other row,
+                    and a composite one -- a tick beside a status dot -- is not squeezed into 16px. */}
+                <span className="flex min-w-4 shrink-0 items-center text-gray-400">{item.icon}</span>
+                <span className="min-w-0 flex-1 truncate">{item.label}</span>
               </button>
             ))}
           </div>
@@ -362,6 +367,32 @@ export const NameDialog: React.FC<{
  * later in the page), and not while you're typing (Esc then just leaves the field) or a
  * menu is open.
  */
+/**
+ * Close when the click lands anywhere else.
+ *
+ * Anything that opens over the page should go away when you turn your attention elsewhere --
+ * hunting for the × is work the interface should not ask for. Dialogs get this from their
+ * backdrop and menus from the Menu component; this is for the panels that have neither, and
+ * `also` covers the trigger, so clicking it again toggles rather than closing and reopening.
+ */
+export function useClickAway(
+  ref: React.RefObject<HTMLElement | null>,
+  onAway: () => void,
+  active = true,
+  also?: React.RefObject<HTMLElement | null>,
+): void {
+  useEffect(() => {
+    if (!active) return;
+    const away = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (ref.current?.contains(target) || also?.current?.contains(target)) return;
+      onAway();
+    };
+    document.addEventListener('mousedown', away, true);
+    return () => document.removeEventListener('mousedown', away, true);
+  }, [ref, also, onAway, active]);
+}
+
 export function useEscapeToClose(ref: React.RefObject<HTMLElement | null>, onClose: () => void): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

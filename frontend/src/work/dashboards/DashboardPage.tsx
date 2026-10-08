@@ -3,7 +3,7 @@ import { FEATURES } from '../../config/features';
 import { FavoriteStar } from '../Favorites';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  BarChart3, ChevronRight, Copy, Download, Expand, FileSpreadsheet, Filter, GripVertical, ImageDown, LayoutDashboard, Mail, MoreHorizontal, Pencil, PieChart as PieChartIcon, Plus, Printer, RefreshCw,
+  BarChart3, ChevronRight, Copy, Download, Expand, FileSpreadsheet, GripVertical, ImageDown, LayoutDashboard, Mail, MoreHorizontal, Pencil, PieChart as PieChartIcon, Plus, Printer, RefreshCw,
   RotateCcw, Share2, Trash2, Undo2, Users,
 } from 'lucide-react';
 import { useWork } from '../WorkContext';
@@ -528,19 +528,25 @@ export const DashboardPage: React.FC<{
           </div>
         </nav>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs empty:mt-0">
-          {/* Home is always your own work, so it doesn't carry the filter chip; on a Dashboard you
-              built, the chip is how the filter that applies to every card is read and changed. */}
-          {heading === undefined && (
-            <button
-              type="button"
-              onClick={() => canEdit && setDialog({ type: 'filters' })}
+          {/* One filter over the whole board, in the same two-step panel the cards use, so
+              "urgent only" or "just my team" is one control rather than eight. It is set on the
+              Dashboard and applied on top of whatever each card already filters by. */}
+          <span className="flex items-center gap-1.5">
+            <CardFilterMenu
+              value={dash.filters ?? {}}
               disabled={!canEdit}
-              className={`flex items-center gap-1 rounded-md border px-2 py-1 ${summary.length ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600'} disabled:cursor-default`}
-              title={canEdit ? 'Filters for every card' : 'Dashboard filters'}
-            >
-              <Filter size={12} /> {summary.length ? summary.join(' · ') : 'No Dashboard filters'}
-            </button>
-          )}
+              triggerLabel="Filter all cards"
+              title="Filters for every card"
+              onApply={saveFilters}
+            />
+            {/* The chip beside it already says how many; this says which. No icon and no "Me":
+                a Dashboard filtered to yourself is the ordinary case, not news. */}
+            {summary.length > 0 && (
+              <span className="text-gray-500" title="Applied to every card on this Dashboard">
+                {summary.join(' · ')}
+              </span>
+            )}
+          </span>
           {RELATION_NOTE[dash.relation] && <span className="text-gray-400">{RELATION_NOTE[dash.relation]}</span>}
           {editMode && (
             <>
@@ -587,6 +593,7 @@ export const DashboardPage: React.FC<{
                       <CardFilterMenu
                         value={card.config.filters ?? {}}
                         disabled={!canEdit}
+                        compact
                         hideDue
                         onApply={(filters) => setCardFilters(card, filters)}
                       />

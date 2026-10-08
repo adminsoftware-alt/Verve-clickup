@@ -16,11 +16,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import Attachment, Checklist, ChecklistItem, PermissionLevel, Task, User, WorkspaceMember
+from app.db.models import Attachment, Checklist, ChecklistItem, ChecklistTemplate, PermissionLevel, Task, User, WorkspaceMember
 from app.schemas import work as s
 from app.services.work import events
-from app.services.work.access import Opened, open_task
+from app.services.work.access import Access, Opened, open_task
 from app.services.work.errors import Forbidden, Invalid, NotFound
+from app.services.work.permissions import can_manage_workspace
 
 BACKEND_DIR = Path(__file__).resolve().parents[3]
 
@@ -76,6 +77,58 @@ def add_checklist(db: Session, opened: Opened[Task], name: str, items: List[str]
     events.record(db, opened.obj, opened.access.user_id, "checklist", {"name": name})
     db.flush()
     return cl
+
+
+# --- saved checklists ----------------------------------------------------------------------------
+
+
+def checklist_templates(db: Session, access: Access) -> List[ChecklistTemplate]:
+    """Every saved checklist in the workspace, newest name order."""
+    return list(db.scalars(
+        select(ChecklistTemplate)
+        .where(ChecklistTemplate.workspace_id == access.workspace_id)
+        .order_by(ChecklistTemplate.name)
+    ))
+
+
+def _own_template(db: Session, access: Access, template_id: uuid.UUID) -> ChecklistTemplate:
+    tpl = db.get(ChecklistTemplate, template_id)
+    if tpl is None or tpl.workspace_id != access.workspace_id:
+        raise NotFound("Template not found")
+    # Whoever wrote it can change it; so can an admin, who has to clear up after leavers.
+    if tpl.created_by != access.user_id and not can_manage_workspace(access.role):
+        raise Forbidden("Only the person who saved this template, or an admin, can change it")
+    return tpl
+
+
+def save_checklist_template(db: Session, access: Access, name: str, items: List[str]) -> ChecklistTemplate:
+    """Keep a checklist for next time. A second save under the same name replaces the first."""
+    existing = db.scalar(select(ChecklistTemplate).where(
+        ChecklistTemplate.workspace_id == access.workspace_id, ChecklistTemplate.name == name))
+    if existing is not None:
+        _own_template(db, access, existing.id)
+        existing.items = list(items)
+        db.flush()
+        return existing
+    tpl = ChecklistTemplate(workspace_id=access.workspace_id, name=name, items=list(items), created_by=access.user_id)
+    db.add(tpl)
+    db.flush()
+    return tpl
+
+
+def update_checklist_template(db: Session, access: Access, template_id: uuid.UUID, name: Optional[str], items: Optional[List[str]]) -> ChecklistTemplate:
+    tpl = _own_template(db, access, template_id)
+    if name is not None:
+        tpl.name = name
+    if items is not None:
+        tpl.items = list(items)
+    db.flush()
+    return tpl
+
+
+def delete_checklist_template(db: Session, access: Access, template_id: uuid.UUID) -> None:
+    db.delete(_own_template(db, access, template_id))
+    db.flush()
 
 
 def _open_checklist(db: Session, user_id: str, checklist_id: uuid.UUID) -> Tuple[Checklist, Opened[Task]]:

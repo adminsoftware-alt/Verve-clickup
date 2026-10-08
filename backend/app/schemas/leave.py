@@ -12,6 +12,40 @@ HexColor = Annotated[str, StringConstraints(pattern=r"^#[0-9a-fA-F]{6}$")]
 Currency = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
 
 
+class Blackout(BaseModel):
+    """Days of the year nobody may book, written month-day so they come round again."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    from_: Annotated[str, StringConstraints(pattern=r"^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")] = Field(alias="from")
+    to: Annotated[str, StringConstraints(pattern=r"^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")]
+    reason: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)]] = None
+
+    def model_dump(self, **kwargs):  # stored and read back under the name people wrote
+        kwargs.setdefault("by_alias", True)
+        return super().model_dump(**kwargs)
+
+
+class LeavePolicyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: 4 = April, the financial year most Indian firms run on. 1 is the calendar year.
+    year_start_month: Annotated[int, Field(ge=1, le=12)] = 4
+    #: None: nothing carries over. 0 is a different answer, so they cannot share a value.
+    carry_forward_days: Optional[Annotated[float, Field(ge=0, le=366)]] = None
+    prorate_joiners: bool = True
+    min_notice_days: Annotated[int, Field(ge=0, le=180)] = 0
+    allow_backdated: bool = True
+    count_days_off_inside: bool = False
+    escalate_after_days: Optional[Annotated[int, Field(ge=1, le=90)]] = None
+    hr_team_id: Optional[uuid.UUID] = None
+    blackout: List[Blackout] = Field(default_factory=list, max_length=24)
+
+
+class LeavePolicyOut(LeavePolicyIn):
+    hr_team_name: Optional[str] = None
+
+
 class LeaveTypeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -64,8 +98,12 @@ class LeaveRequestIn(BaseModel):
 
 
 class LeaveDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     approve: bool
     note: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]] = None
+    #: Who holds the work while they are away. The approver's call, not the asker's.
+    cover_id: Optional[str] = None
 
 
 class LeaveRequestOut(BaseModel):
@@ -84,14 +122,75 @@ class LeaveRequestOut(BaseModel):
     decision_note: Optional[str]
     created_at: datetime
     can_decide: bool = False
+    #: Who is covering the work. Set when the leave is approved.
+    cover: Optional[UserOut] = None
+    #: When HR was told this had been waiting too long, if it ever was.
+    escalated_at: Optional[datetime] = None
+    #: How many days it has been waiting for a decision. None once decided.
+    waiting_days: Optional[int] = None
 
 
 class LeaveBalance(BaseModel):
     type: LeaveTypeOut
+    #: What they may take in this leave year: earned + carried forward + adjusted. None: no limit.
     allowance: Optional[float]
     used: float
     pending: float
     remaining: float  # 9999 when there is no limit
+    #: The three parts of the allowance, so a person can see where the number came from.
+    earned: Optional[float] = None
+    carried_forward: float = 0
+    adjusted: float = 0
+    #: The leave year this is about, named by the calendar year it starts in.
+    year: Optional[int] = None
+    year_start: Optional[date] = None
+    year_end: Optional[date] = None
+
+
+class LeaveAdjustmentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str
+    type_id: uuid.UUID
+    year: Annotated[int, Field(ge=2000, le=2100)]
+    #: Positive grants days, negative takes them back, zero removes the adjustment.
+    days: Annotated[float, Field(ge=-366, le=366)]
+    reason: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)]] = None
+
+
+class LeaveAdjustmentOut(BaseModel):
+    id: uuid.UUID
+    type: Optional[LeaveTypeOut]
+    year: int
+    days: float
+    reason: Optional[str]
+    created_by: Optional[UserOut]
+    created_at: datetime
+
+
+class ClashTask(BaseModel):
+    """Something this person has due in the days they want off."""
+
+    id: uuid.UUID
+    name: str
+    list_id: uuid.UUID
+    due_date: datetime
+    priority: Optional[int] = None
+    #: A statutory filing, which is the kind of date a firm cannot move.
+    compliance: bool = False
+
+
+class ClashPerson(BaseModel):
+    user: UserOut
+    start_date: date
+    end_date: date
+    status: str
+    days: float
+
+
+class LeaveClashes(BaseModel):
+    tasks: List[ClashTask]
+    also_away: List[ClashPerson]
 
 
 class LeaveCalendarOut(BaseModel):

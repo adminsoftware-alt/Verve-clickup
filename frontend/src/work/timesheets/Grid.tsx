@@ -4,8 +4,10 @@ import { Menu, StatusDot, formatDuration, parseDuration } from '../ui';
 import { isoDay, type EntryUpdate, type SheetEntry, type SheetRow, type TimeTag, type Timesheet } from './api';
 import { Popover, TaskPicker, dayLabel, hours } from './pieces';
 import { CellCard, DayCard, HoverCard } from './Hover';
-import { AddPeriod } from './AddPeriod';
+import { TrackTime } from '../task/TrackTime';
 import { ask } from '../../components/ask';
+import { DaySheet } from './DaySheet';
+import { usePhone } from '../useBreakpoint';
 
 export interface EntryActions {
   onUpdate: (entry: SheetEntry, body: EntryUpdate) => Promise<void>;
@@ -41,9 +43,11 @@ const Cell: React.FC<{
   card?: React.ReactNode;
   /** The day and task this cell stands for, so a period can be logged against them. */
   day: string;
-  taskName: string;
-  onAddPeriod: (started: string, ended: string, note: string | null) => Promise<void>;
-}> = ({ seconds, editable, muted, onSave, label, card, day, taskName, onAddPeriod }) => {
+  taskId: string;
+  /** Whose sheet this is, when an admin is filling in somebody else's. */
+  forUserId?: string;
+  onLogged: () => void;
+}> = ({ seconds, editable, muted, onSave, label, card, day, taskId, forUserId, onLogged }) => {
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const commit = async () => {
@@ -90,7 +94,7 @@ const Cell: React.FC<{
     <div className={`${base} group/cell w-full pl-1`}>
       {editable && (
         <Popover
-          width={280}
+          width={432}
           align="left"
           trigger={(open, active) => (
             <button
@@ -104,7 +108,19 @@ const Cell: React.FC<{
             </button>
           )}
         >
-          {(close) => <AddPeriod day={day} taskName={taskName} onAdd={onAddPeriod} onDone={close} />}
+          {/* The same control as the task panel, opened on this cell's day and narrowed to what
+              is already in it. One component, so the two can never drift apart. */}
+          {(close) => (
+            <TrackTime
+              taskId={taskId}
+              canTrack
+              day={day}
+              forUserId={forUserId}
+              onlyThatDay
+              onClose={close}
+              onChanged={onLogged}
+            />
+          )}
         </Popover>
       )}
       {button}
@@ -118,20 +134,56 @@ export const Grid: React.FC<{
   sheet: Timesheet;
   editable: boolean;
   onCell: (taskId: string, dayIndex: number, seconds: number) => Promise<void>;
-  /** One entry at a stated period, as against a duration ending at the moment of typing. */
-  onAddPeriod: (taskId: string, started: string, ended: string, note: string | null) => Promise<void>;
+  /** Whose sheet this is, when an admin is filling in somebody else's. */
+  forUserId?: string;
+  /** Something was logged from a cell; the week needs reading again. */
+  onLogged: () => void;
   onDeleteRow: (row: SheetRow) => void;
   onOpenTask: (taskId: string) => void;
   onStartTimer?: (taskId: string) => void;
   onAddTask: (taskId: string) => Promise<void>;
   actions: EntryActions;
-}> = ({ sheet, editable, onCell, onAddPeriod, onDeleteRow, onOpenTask, onStartTimer, onAddTask, actions }) => {
+}> = ({ sheet, editable, onCell, forUserId, onLogged, onDeleteRow, onOpenTask, onStartTimer, onAddTask, actions }) => {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const today = isoDay(new Date());
+  const phone = usePhone();
   const toggle = (id: string) => setOpen((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
+  /** The editable hour for one task on one day. The same component in both layouts. */
+  const cellFor = (row: SheetRow, i: number) => (
+    <Cell
+      seconds={row.seconds_per_day[i] ?? 0}
+      editable={editable && row.task.can_open}
+      muted={sheet.capacity_per_day[i] === 0}
+      label={`${row.task.name} on ${dayLabel(sheet.days[i])}`}
+      onSave={(value) => onCell(row.task.id, i, value)}
+      day={sheet.days[i]}
+      taskId={row.task.id}
+      forUserId={forUserId}
+      onLogged={onLogged}
+      card={(
+        <CellCard
+          task={row.task.name}
+          title={new Date(`${sheet.days[i]}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+          entries={row.entries.filter((e) => e.day === i)}
+          total={row.seconds_per_day[i] ?? 0}
+        />
+      )}
+    />
+  );
+
+  // Seven day columns and a task name need 1,000px. A phone gets one day at a time instead.
+  if (phone) {
+    return (
+      <DaySheet
+        sheet={sheet} renderCell={cellFor} onOpenTask={onOpenTask} onDeleteRow={onDeleteRow}
+        onStartTimer={onStartTimer} editable={editable}
+      />
+    );
+  }
+
   return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+    <div className="scroll-x rounded-xl border border-gray-200 bg-white">
       <div className="min-w-[1000px]" role="table" aria-label="Timesheet">
         <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: COLS }} role="row">
           <div className="flex items-center px-4 text-sm text-gray-700">Task / Location</div>
@@ -180,27 +232,7 @@ export const Grid: React.FC<{
                     )}
                   </div>
                 </div>
-                {row.seconds_per_day.map((sec, i) => (
-                  <Cell
-                    key={i}
-                    seconds={sec}
-                    editable={editable && row.task.can_open}
-                    muted={sheet.capacity_per_day[i] === 0}
-                    label={`${row.task.name} on ${dayLabel(sheet.days[i])}`}
-                    onSave={(value) => onCell(row.task.id, i, value)}
-                    day={sheet.days[i]}
-                    taskName={row.task.name}
-                    onAddPeriod={(started, ended, note) => onAddPeriod(row.task.id, started, ended, note)}
-                    card={(
-                      <CellCard
-                        task={row.task.name}
-                        title={new Date(`${sheet.days[i]}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
-                        entries={row.entries.filter((e) => e.day === i)}
-                        total={sec}
-                      />
-                    )}
-                  />
-                ))}
+                {row.seconds_per_day.map((_, i) => <React.Fragment key={i}>{cellFor(row, i)}</React.Fragment>)}
                 <div className="flex items-center justify-end gap-2 border-l border-gray-100 px-3">
                   <span className="text-[15px] font-medium text-gray-900">{hours(row.total_seconds)}</span>
                   {rowMenu.length > 0 && (

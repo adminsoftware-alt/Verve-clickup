@@ -74,18 +74,39 @@ def test_everyone_gets_their_own_work_and_leads_get_their_team(api, org):
     assert (team["name"], team["team"]["id"], team["your_level"]) == ("HR – people", org["team"]["id"], "full")
     board = ok(api.get(f"/dashboards/{team['id']}", "lead"))
     assert board["filters"]["assignees"] == [f"team:{org['team']['id']}"]
-    assert "assignee" in {c["config"]["group_by"] for c in board["cards"] if c["type"] == "bar"}
+    # The board is the nine cards a manager reads, not every chart that could be drawn: one
+    # chart, by priority. The per-person bars are still built and can be added back from "+ Card".
+    assert {c["config"]["group_by"] for c in board["cards"] if c["type"] == "bar"} == {"priority"}
+    assert [c["title"] for c in board["cards"] if c["type"] == "task_list"] == [
+        "Overdue tasks", "Due today", "Due in the next 7 days"]
+    assert "Unassigned" not in {c["title"] for c in board["cards"]}  # an assignee is required now
     assert api.get(f"/dashboards/{team['id']}", "member2").status_code == 404
     assert "team" not in {x["standard"] for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", "member2"))}
 
     # Owners and admins get the whole company, managers included; guests get nothing made for them.
+    # They get no personal board of their own -- the Company one is theirs -- though they still
+    # see everyone else's.
     for boss in ("owner", "admin"):
-        kinds = {x["standard"] for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", boss))}
-        assert {"my_work", "company"} <= kinds
+        boards = ok(api.get(f"/workspaces/{org['ws']}/dashboards", boss))
+        assert "company" in {x["standard"] for x in boards}
+        assert not [x for x in boards if x["standard"] == "my_work" and x["owner"]["id"] == boss]
+        assert [x for x in boards if x["standard"] == "my_work"]  # other people's, which they oversee
     company = [x for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", "owner")) if x["standard"] == "company"]
     assert len(company) == 1  # one for the whole workspace, however many admins open the Hub
     assert ok(api.get(f"/dashboards/{company[0]['id']}", "owner"))["filters"]["assignees"] is None  # everyone
     assert ok(api.get(f"/workspaces/{org['ws']}/dashboards", "guest")) == []
+
+
+def test_home_opens_on_the_company_for_an_admin(api, org):
+    """An admin's own open-task count is not the question they open the app with."""
+    url = f"/workspaces/{org['ws']}/dashboards/home"
+    for boss in ("owner", "admin"):
+        home = ok(api.get(url, boss))
+        assert home["standard"] == "company"
+        assert home["filters"].get("assignees") is None  # everyone, not just them
+        assert ok(api.get(url, boss))["id"] == home["id"]  # the same one every time
+    # And the two of them land on the one Company board, not one each.
+    assert ok(api.get(url, "owner"))["id"] == ok(api.get(url, "admin"))["id"]
 
 
 def test_home_opens_on_your_own_dashboard(api, org):
@@ -209,8 +230,10 @@ def test_the_dashboards_made_for_people_answer_the_old_home_page(api, org):
     for_lead = {x["standard"]: x for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", "lead"))}
     team = ok(api.get(f"/dashboards/{for_lead['team']['id']}", "lead"))
     theirs = {c["type"] for c in team["cards"]}
-    assert {"capacity", "behind", "timesheet", "bar", "pie", "task_list", "variance"} <= theirs
-    assert "completed" not in theirs
+    assert {"calculation", "capacity", "bar", "timesheet", "task_list"} <= theirs
+    # Taken off the standard board, and still built: each one renders, a board that already has
+    # one keeps it, and any of them can be added back from "+ Card".
+    assert theirs.isdisjoint({"behind", "pie", "variance", "completed", "time_report"})
 
 
 def test_members_see_only_their_own_dashboards(api, org):
@@ -415,6 +438,38 @@ def test_timesheet_has_a_column_per_day_and_capacity(api, seeded):
     assert row["tasks"][0]["name"] == seeded["tasks"]["A"]["name"] and row["tasks"][0]["status"]
 
 
+def test_the_timesheet_counts_everyone_it_covers_not_only_those_who_logged(api, seeded):
+    """A week nobody fills in should look bad, not empty.
+
+    The denominator used to be summed over the rows, and a row only existed for somebody who had
+    logged something -- so the people who recorded nothing took their hours out of the total with
+    them, and the figure got better the more of them there were.
+    """
+    lst = seeded["list"]["id"]
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Theirs", "assignees": ["member2"]}), 201)
+    _log(api, seeded["tasks"]["A"]["id"], "member", 2)  # member works; member2 records nothing
+
+    dash = new_dashboard(api, seeded, "admin")
+    ok(api.post(f"/dashboards/{dash['id']}/cards", "admin",
+                {"type": "timesheet", "config": {"period": {"preset": "this_week"}}}), 201)
+    sheet = data(api, dash, "admin")[0]["data"]
+
+    rows = {r["user"]["id"]: r for r in sheet["rows"]}
+    assert "member2" in rows, "somebody who logged nothing still has to appear"
+    assert rows["member2"]["total"] == 0 and rows["member2"]["tasks"] == []
+    assert rows["member"]["total"] == 2 * HOUR
+    assert sheet["nobody_logged"] >= 1
+
+    # Whoever logged something comes first; the empty rows are what a manager is looking for,
+    # and they are at the bottom rather than scattered alphabetically.
+    assert sheet["rows"][0]["total"] > 0 and sheet["rows"][-1]["total"] == 0
+
+    # And the hours they were available for are in the total, so it cannot flatter the team.
+    able = sum(sum(r["capacity_per_day"]) for r in sheet["rows"])
+    assert able >= sum(rows["member2"]["capacity_per_day"]) + sum(rows["member"]["capacity_per_day"])
+    assert sum(rows["member2"]["capacity_per_day"]) > 0
+
+
 # --- building -----------------------------------------------------------------------------
 
 
@@ -510,7 +565,9 @@ def test_a_report_pauses_when_its_creator_loses_access(api, seeded, monkeypatch)
     monkeypatch.setattr(reports, "send_email", lambda *a: None)
     dash = new_dashboard(api, seeded, "member", template="simple")
     schedule = ok(api.post(f"/dashboards/{dash['id']}/reports", "member", {"recipient_ids": ["member"]}), 201)
-    ok(api.delete(f"/workspaces/{seeded['ws']}/members/member", "owner"), 204)
+    # Turning their access off, rather than deleting the membership: the schedule pauses on any
+    # loss of access, and someone holding open tasks cannot be deleted outright anyway.
+    ok(api.post(f"/workspaces/{seeded['ws']}/people/member/deactivate", "owner"))
     later = datetime.fromisoformat(schedule["next_run_at"]) + timedelta(minutes=1)
     with db_session.new_session() as db:
         reports.run_due(db, later)

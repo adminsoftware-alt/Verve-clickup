@@ -63,3 +63,8 @@ frontend/public/dashboard-proposal.html
 # One-off edit scripts used while building; not part of the app.
 backend/_*.py
 frontend/_*.py
+
+# Real staff names and work email addresses. These repositories are public, so the demo
+# spreadsheet stays on the machine it was made on.
+verve-demo-data.xlsx
+*.xlsx

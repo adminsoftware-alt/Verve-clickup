@@ -9,7 +9,9 @@ and set back to its List's first status.
 
 Dates move in the rule's timezone, so "the 1st of each month" stays the 1st locally.
 Occurrences that would already be in the past are skipped, so finishing a daily task a
-week late creates one task for today, not seven.
+week late creates one task for today, not seven. That skipping is what sync_to_due means:
+the series keeps its original rhythm. Turn it off, or use the days_after frequency, and
+each occurrence is measured from the day the one before it was actually finished instead.
 """
 
 import calendar
@@ -87,11 +89,16 @@ def next_dates(task: Task, rule: s.Recurrence, now: datetime) -> Optional[Tuple[
     local = base.astimezone(tz)
     anchor = local.date()
     today = now.astimezone(tz).date()
-    day = _step(rule, anchor, anchor)
-    for _ in range(MAX_STEPS):
-        if day >= today:
-            break
-        day = _step(rule, day, anchor)  # skip occurrences already in the past
+    if rule.frequency == "days_after":
+        day = today + timedelta(days=rule.interval)  # counted from the day it was finished
+    elif not rule.sync_to_due:
+        day = _step(rule, today, today)  # the rhythm restarts from today, not from the old due date
+    else:
+        day = _step(rule, anchor, anchor)
+        for _ in range(MAX_STEPS):
+            if day >= today:
+                break
+            day = _step(rule, day, anchor)  # skip occurrences already in the past
     if rule.until is not None and day > rule.until:
         return None
     moved = datetime.combine(day, local.timetz()).astimezone(timezone.utc)
@@ -133,7 +140,9 @@ def advance(db: Session, task: Task, actor_id: Optional[str], now: Optional[date
     dates = next_dates(task, rule, now)
     lst = db.get(TaskList, task.list_id)
     assert lst is not None
-    first = default_status(effective_statuses(db, lst))
+    statuses = effective_statuses(db, lst)
+    # The status the repeat opens in: the one the rule names, or the List's first.
+    first = next((st for st in statuses if st.id == rule.reset_status_id), None) or default_status(statuses)
     if dates is None:
         task.recurrence = None  # the series has ended
         task.recurrence_next_at = None

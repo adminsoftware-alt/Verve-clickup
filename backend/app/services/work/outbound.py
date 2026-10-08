@@ -23,11 +23,12 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models import (
-    LeaveRequest, LeaveType, Notification, PushSubscription, Status, StatusGroup, Task, TaskAssignee, TaskList, Team,
-    TeamMember, TimeEntry, User, Workspace, WorkspaceMember, WorkspaceRole,
+    EmailLog, LeaveRequest, LeaveType, Notification, PushSubscription, Space, Status, StatusGroup, Task,
+    TaskAssignee, TaskList, Team, TeamMember, TimeEntry, User, Workspace, WorkspaceMember, WorkspaceRole,
 )
 from app.schemas import outbound as o
 from app.schemas import work as s
+from app.services.work import email_links
 from app.services.work.access import Access
 from app.services.work.errors import Invalid, NotFound
 
@@ -241,7 +242,16 @@ def whatsapp(member: WorkspaceMember, text: str) -> bool:
 # --- email -----------------------------------------------------------------------------------------------------------
 
 
-def _email(to: str, subject: str, rows: List[Tuple[str, str, str]], intro: str) -> bool:
+def _email(to: str, subject: str, rows: List[Tuple[str, str, str]], intro: str,
+           link_text: str = "Open", footer: Optional[str] = None,
+           unsubscribe: Optional[str] = None, weekly_instead: Optional[str] = None) -> bool:
+    """One message: a line of introduction, then a row per thing, each with a link.
+
+    `link_text` and `footer` exist for the messages that go to somebody who is not a user yet.
+    "Open" and "change your settings in the Inbox" are good advice for a colleague and gibberish
+    for a person who has never signed in -- and the invitation reminder is the one email in here
+    that is read only by people in the second group.
+    """
     from app.services.work.dashboards.reports import send_email
 
     if not settings.SMTP_HOST:
@@ -249,14 +259,26 @@ def _email(to: str, subject: str, rows: List[Tuple[str, str, str]], intro: str) 
     esc = html.escape
     items = "".join(
         f'<tr><td style="padding:8px 0;border-bottom:1px solid #eee"><b style="color:#111827">{esc(t)}</b><br>'
-        f'<span style="color:#4b5563">{esc(line)}</span> <a href="{esc(url)}" style="color:#4f46e5">Open</a></td></tr>'
+        f'<span style="color:#4b5563">{esc(line)}</span> <a href="{esc(url)}" style="color:#4f46e5">{esc(link_text)}</a></td></tr>'
         for t, line, url in rows
     )
+    if footer is not None:
+        tail = esc(footer)
+    elif unsubscribe:
+        # A link, not an instruction. "Change it under Inbox → Settings" is useless advice to the
+        # seventy-three people here who have never signed in, and an email they cannot stop is an
+        # email they will mark as spam -- which costs the domain's reputation, not just the reader.
+        tail = (f'<a href="{esc(unsubscribe)}" style="color:#9ca3af">Stop these emails</a>'
+                f' &middot; <a href="{esc(weekly_instead or unsubscribe)}" style="color:#9ca3af">once a week instead</a>')
+    else:
+        tail = esc("Change what you get in Verve Workflow: Inbox → Settings.")
     body = (f'<div style="font-family:Segoe UI,Arial,sans-serif;max-width:600px;margin:0 auto;padding:16px">'
             f'<p style="color:#374151">{esc(intro)}</p><table style="width:100%;border-collapse:collapse">{items}</table>'
-            f'<p style="color:#9ca3af;font-size:12px;margin-top:16px">Change what you get in Verve Workflow: Inbox → Settings.</p></div>')
+            f'<p style="color:#9ca3af;font-size:12px;margin-top:16px">{tail}</p></div>')
     try:
-        send_email([to], subject, body)
+        # The header mail clients read to put an "Unsubscribe" button beside the sender's name,
+        # which is where people look before they reach for "report spam".
+        send_email([to], subject, body, unsubscribe=unsubscribe)
         return True
     except Exception:  # noqa: BLE001
         log.exception("Email to %s failed", to)
@@ -264,6 +286,101 @@ def _email(to: str, subject: str, rows: List[Tuple[str, str, str]], intro: str) 
 
 
 # --- the jobs ----------------------------------------------------------------------------------------------------------
+
+
+# --- whether a message should exist at all --------------------------------------------------------
+
+
+#: Consecutive failures to one address before the jobs stop trying. A mailbox that has refused
+#: five messages is not going to take the sixth, and the attempts cost a timeout each.
+BOUNCE_LIMIT = 5
+
+
+def address_is_dead(db: Session, workspace_id: uuid.UUID, email: str) -> bool:
+    """Has this address refused everything we have sent it lately?
+
+    Only a run of failures counts: one timeout on a Tuesday is the network, five in a row is a
+    mailbox that no longer exists. A single success anywhere in the recent history clears it.
+    """
+    recent = list(db.scalars(select(EmailLog).where(
+        EmailLog.workspace_id == workspace_id, EmailLog.to_email == email,
+        EmailLog.items > 0,  # a message with nothing in it was never attempted
+    ).order_by(EmailLog.created_at.desc()).limit(BOUNCE_LIMIT)))
+    return len(recent) >= BOUNCE_LIMIT and not any(r.sent for r in recent)
+
+
+def on_leave(db: Session, member: WorkspaceMember, day: date) -> bool:
+    """Is this person on approved leave today?
+
+    A digest that arrives on somebody's holiday is how an app teaches people to mute it. The
+    leave module already knows, and the chasing emails are exactly the ones worth holding: the
+    work is late, and the person responsible is on a beach and cannot do anything about it.
+    """
+    from app.services.work.leave import is_away
+
+    return is_away(db, member.workspace_id, member.user_id, day, day)
+
+
+def _skip(db: Session, member: WorkspaceMember, user: User, local: datetime) -> Optional[str]:
+    """Why this person should not be emailed right now, if they should not be."""
+    if on_leave(db, member, local.date()):
+        return "on leave"
+    if address_is_dead(db, member.workspace_id, user.email):
+        return f"the address has refused the last {BOUNCE_LIMIT} messages"
+    return None
+
+
+# --- sending a thing once per period ------------------------------------------------------------
+
+
+def _period_key(kind: str, local: datetime) -> str:
+    """The window a message covers, in a form that cannot come round twice."""
+    if kind == "weekly":
+        year, week, _ = local.isocalendar()
+        return f"{year}-W{week:02d}"
+    if kind == "monthly":
+        return local.strftime("%Y-%m")
+    return local.date().isoformat()  # daily, and anything else that runs at most once a day
+
+
+def already_sent(db: Session, workspace_id: uuid.UUID, user_id: str, kind: str, period: str) -> bool:
+    return db.scalars(select(EmailLog.id).where(
+        EmailLog.workspace_id == workspace_id, EmailLog.user_id == user_id,
+        EmailLog.kind == kind, EmailLog.period == period)).first() is not None
+
+
+def _once(db: Session, member: WorkspaceMember, user: User, kind: str, period: str,
+          subject: str, rows: List[Tuple[str, str, str]], intro: str,
+          link_text: str = "Open", footer: Optional[str] = None,
+          now: Optional[datetime] = None) -> bool:
+    """Send this message unless it has gone already. Returns whether it went this time.
+
+    The row is written whether or not the send worked, and whether or not there was anything to
+    say -- an empty Tuesday should be decided once, not reconsidered every hour until midnight.
+    """
+    if already_sent(db, member.workspace_id, user.id, kind, period):
+        return False
+    # An invitation reminder is the one message worth sending to somebody on leave: it is not
+    # about today's work, and it is the only way they ever become a user.
+    # The job's own clock, not the wall clock: a job replayed for last Monday has to decide who
+    # was on leave last Monday, and a check that only works today cannot be tested.
+    held = None if kind == "invite_reminder" else _skip(db, member, user, _local(member, now or datetime.now(timezone.utc)))
+    stop = email_links.url("unsubscribe", str(member.workspace_id), user.id)
+    weekly = email_links.url("digest_weekly", str(member.workspace_id), user.id)
+    ok = held is None and bool(rows) and _email(
+        user.email, subject, rows, intro, link_text, footer,
+        # An invitation reminder gives its own footer and stops after three; there is nothing to
+        # unsubscribe from, and offering it to somebody who is not yet a user is a confusing ask.
+        unsubscribe=None if footer is not None else stop,
+        weekly_instead=None if footer is not None else weekly,
+    )
+    db.add(EmailLog(
+        workspace_id=member.workspace_id, user_id=user.id, kind=kind, period=period,
+        to_email=user.email, subject=subject[:300], items=len(rows), sent=ok,
+        problem=None if ok else (held or ("nothing to say" if not rows else "the email could not be sent")),
+    ))
+    db.flush()
+    return ok
 
 
 def run_instant(db: Session, now: Optional[datetime] = None) -> int:
@@ -338,6 +455,420 @@ def run_daily_digests(db: Session, now: Optional[datetime] = None) -> int:
         if m.whatsapp_opt_in and due:
             whatsapp(m, f"Good morning. {len(due)} task{'s' if len(due) != 1 else ''} due today"
                         f"{f' ({len(overdue)} overdue)' if overdue else ''}: " + ", ".join(t.name for t in due[:5]))
+    db.flush()
+    return sent
+
+
+# --- a person's own week and month ---------------------------------------------------------------
+
+
+def _their_work(db: Session, member: WorkspaceMember):
+    from app.services.work import mywork
+
+    access = Access(db, member.user_id, member.workspace_id, member.role)
+    return access, mywork.my_tasks(db, access, include_closed=False)
+
+
+def _digest_people(db: Session, wanted: str):
+    """Everyone who has asked for this cadence, has signed in, and is still here."""
+    for m in db.scalars(select(WorkspaceMember).where(WorkspaceMember.deactivated_at.is_(None))):
+        if m.email_notifications != wanted:
+            continue
+        user = db.get(User, m.user_id)
+        # Somebody who has never signed in has no work to summarise. They get the invitation
+        # reminder below instead, which is the message that actually applies to them.
+        if user is None or user.auth_uid is None:
+            continue
+        yield m, user
+
+
+def run_weekly_digests(db: Session, now: Optional[datetime] = None) -> int:
+    """Monday morning: the week ahead, for people who want a week at a time rather than a day."""
+    now = now or datetime.now(timezone.utc)
+    sent = 0
+    for m, user in _digest_people(db, "weekly"):
+        local = _local(m, now)
+        if local.weekday() != 0 or local.hour < (m.digest_hour if m.digest_hour is not None else 8):
+            continue
+        period = _period_key("weekly", local)
+        if already_sent(db, m.workspace_id, user.id, "weekly", period):
+            continue
+        _, mine = _their_work(db, m)
+        end = datetime.combine(local.date() + timedelta(days=7), time.min, local.tzinfo)
+        ahead = sorted([t for t in mine if t.due_date and t.due_date < end], key=lambda t: t.due_date)
+        overdue = [t for t in ahead if t.is_overdue]
+        base = settings.APP_URL.rstrip("/")
+        rows = [(t.name, "Overdue" if t.is_overdue else f"Due {t.due_date:%a %d %b}", f"{base}/l/{t.list_id}?task={t.id}")
+                for t in ahead[:25]]
+        subject = f"Your week: {len(ahead)} due" + (f", {len(overdue)} already overdue" if overdue else "")
+        if _once(db, m, user, "weekly", period, subject, rows,
+                 f"The week ahead: {len(ahead)} task{'s' if len(ahead) != 1 else ''} due by "
+                 f"{(local.date() + timedelta(days=6)):%d %b}" + (f", {len(overdue)} of them already overdue." if overdue else "."),
+                 now=now):
+            sent += 1
+    db.flush()
+    return sent
+
+
+def run_monthly_digests(db: Session, now: Optional[datetime] = None) -> int:
+    """The first working morning of the month: what was finished, and what is still carried."""
+    from app.services.work import mywork
+
+    now = now or datetime.now(timezone.utc)
+    sent = 0
+    for m, user in _digest_people(db, "monthly"):
+        local = _local(m, now)
+        # The 1st, unless it falls at a weekend, in which case the following Monday.
+        first_working = local.day <= 3 and local.weekday() < 5 and (local.day == 1 or local.weekday() == 0)
+        if not first_working or local.hour < (m.digest_hour if m.digest_hour is not None else 8):
+            continue
+        period = _period_key("monthly", local)
+        if already_sent(db, m.workspace_id, user.id, "monthly", period):
+            continue
+        access, mine = _their_work(db, m)
+        last_month_end = datetime.combine(local.date().replace(day=1), time.min, local.tzinfo)
+        last_month_start = datetime.combine(
+            (local.date().replace(day=1) - timedelta(days=1)).replace(day=1), time.min, local.tzinfo)
+        done = mywork.my_tasks(db, access, include_closed=True)
+        finished = [t for t in done if t.date_done and last_month_start <= t.date_done < last_month_end]
+        overdue = [t for t in mine if t.is_overdue]
+        base = settings.APP_URL.rstrip("/")
+        rows = [(t.name, "Still overdue", f"{base}/l/{t.list_id}?task={t.id}") for t in overdue[:20]]
+        subject = f"Last month: {len(finished)} finished, {len(overdue)} still open and overdue"
+        intro = (f"In {last_month_start:%B} you finished {len(finished)} task{'s' if len(finished) != 1 else ''}. "
+                 + (f"{len(overdue)} are still overdue:" if overdue else "Nothing is overdue."))
+        # Worth sending even with nothing overdue, because the count of finished work is the point.
+        if not rows and finished:
+            rows = [("Nothing overdue", f"{len(finished)} finished in {last_month_start:%B}", f"{base}/my-tasks")]
+        if _once(db, m, user, "monthly", period, subject, rows, intro, now=now):
+            sent += 1
+    db.flush()
+    return sent
+
+
+# --- chasing work that is late --------------------------------------------------------------------
+
+
+#: How late a task has to be before it is worth a message of its own, rather than a line in the
+#: daily digest everybody has learned to skim.
+OVERDUE_AFTER_DAYS = 3
+
+
+def run_overdue_nudges(db: Session, now: Optional[datetime] = None) -> int:
+    """Once a week, the work that has been late for a while -- to the person, and to their manager.
+
+    The daily digest already lists what is overdue, which is precisely why it stops being read.
+    This goes out on one morning a week, carries only the tasks that have been late for more than
+    a few days, and copies the manager, because that is the difference between a reminder and a
+    conversation.
+    """
+    now = now or datetime.now(timezone.utc)
+    sent = 0
+    cutoff = now - timedelta(days=OVERDUE_AFTER_DAYS)
+    base = settings.APP_URL.rstrip("/")
+    by_manager: Dict[Tuple[uuid.UUID, str], List[Tuple[str, str, str]]] = {}
+
+    for m in db.scalars(select(WorkspaceMember).where(WorkspaceMember.deactivated_at.is_(None))):
+        local = _local(m, now)
+        if local.weekday() != 2 or local.hour < 9:  # Wednesday: late enough to act on, early enough to fix
+            continue
+        if m.email_notifications == "off":
+            continue
+        user = db.get(User, m.user_id)
+        if user is None or user.auth_uid is None:
+            continue
+        period = _period_key("weekly", local)
+        if already_sent(db, m.workspace_id, user.id, "overdue", period):
+            continue
+        _, mine = _their_work(db, m)
+        late = sorted([t for t in mine if t.is_overdue and t.due_date and t.due_date < cutoff],
+                      key=lambda t: t.due_date)
+        rows = [(t.name, f"Due {t.due_date:%d %b} — {(now - t.due_date).days} days ago",
+                 f"{base}/l/{t.list_id}?task={t.id}") for t in late[:20]]
+        subject = f"{len(late)} task{'s' if len(late) != 1 else ''} more than {OVERDUE_AFTER_DAYS} days late"
+        if _once(db, m, user, "overdue", period, subject, rows,
+                 "These have been overdue for a while. Move the date, hand them on, or close them:", now=now):
+            sent += 1
+        # The manager hears about it once, with everybody's together, rather than one mail a person.
+        if late and m.manager_id:
+            who = user.display_name or user.email
+            by_manager.setdefault((m.workspace_id, m.manager_id), []).extend(
+                (f"{who}: {name}", when, link) for name, when, link in rows[:5])
+
+    for (workspace_id, manager_id), rows in by_manager.items():
+        boss = db.get(WorkspaceMember, (workspace_id, manager_id))
+        user = db.get(User, manager_id)
+        if boss is None or boss.deactivated_at is not None or user is None or user.auth_uid is None:
+            continue
+        if boss.email_notifications == "off":
+            continue
+        period = _period_key("weekly", _local(boss, now))
+        if _once(db, boss, user, "overdue_team", period,
+                 f"Your team: {len(rows)} task{'s' if len(rows) != 1 else ''} running late", rows,
+                 "Work in your team that has been overdue for more than a few days:", now=now):
+            sent += 1
+    db.flush()
+    return sent
+
+
+def _logged_seconds(db: Session, workspace_id: uuid.UUID, user_id: str,
+                    start: datetime, end: Optional[datetime] = None) -> int:
+    """Hours this person put in, inside this workspace.
+
+    A time entry hangs off a task, not off a workspace, so the workspace is reached through the
+    List and the Space -- the same join the timesheet itself uses, because two different answers
+    to "how much did they log" is how a firm ends up arguing with its own reports.
+    """
+    q = (select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0))
+         .select_from(TimeEntry)
+         .join(Task, Task.id == TimeEntry.task_id)
+         .join(TaskList, TaskList.id == Task.list_id)
+         .join(Space, Space.id == TaskList.space_id)
+         .where(Space.workspace_id == workspace_id, TimeEntry.user_id == user_id,
+                TimeEntry.started_at >= start))
+    if end is not None:
+        q = q.where(TimeEntry.started_at < end)
+    return db.scalar(q) or 0
+
+
+# --- the end of someone's week ---------------------------------------------------------------------
+
+
+def run_friday_recaps(db: Session, now: Optional[datetime] = None) -> int:
+    """Friday afternoon: what you finished this week.
+
+    Every other message in here is a demand -- what is due, what is late, what you have not filled
+    in. This one is the only email that tells somebody they did something, which is why it is the
+    one they will open. It goes to everybody whose email is on at all, because a person on the
+    daily cadence still only hears about work they have not done.
+    """
+    from app.services.work import mywork
+
+    now = now or datetime.now(timezone.utc)
+    sent = 0
+    for m in db.scalars(select(WorkspaceMember).where(WorkspaceMember.deactivated_at.is_(None))):
+        if m.email_notifications == "off":
+            continue
+        user = db.get(User, m.user_id)
+        if user is None or user.auth_uid is None:
+            continue
+        local = _local(m, now)
+        if local.weekday() != 4 or local.hour < 16:  # Friday, late enough that the week is done
+            continue
+        period = _period_key("weekly", local)
+        if already_sent(db, m.workspace_id, user.id, "recap", period):
+            continue
+        access = Access(db, m.user_id, m.workspace_id, m.role)
+        week_start = datetime.combine(local.date() - timedelta(days=local.weekday()), time.min, local.tzinfo)
+        finished = [t for t in mywork.my_tasks(db, access, include_closed=True)
+                    if t.date_done and t.date_done >= week_start]
+        hours = _logged_seconds(db, m.workspace_id, m.user_id, week_start)
+        if not finished and not hours:
+            continue  # nothing to be pleased about; say nothing rather than rub it in
+        base = settings.APP_URL.rstrip("/")
+        rows = [(t.name, "Finished", f"{base}/l/{t.list_id}?task={t.id}") for t in finished[:20]]
+        if not rows:
+            rows = [(f"{round(hours / 3600, 1)}h logged", "No tasks closed, but the time is in", f"{base}/timesheets")]
+        subject = f"Your week: {len(finished)} finished, {round(hours / 3600, 1)}h logged"
+        if _once(db, m, user, "recap", period, subject, rows,
+                 f"Nice work. This week you closed {len(finished)} task{'s' if len(finished) != 1 else ''} "
+                 f"and logged {round(hours / 3600, 1)} hours.", now=now):
+            sent += 1
+    db.flush()
+    return sent
+
+
+# --- what a manager owes a decision on --------------------------------------------------------------
+
+
+def run_approval_reminders(db: Session, now: Optional[datetime] = None) -> int:
+    """Each weekday morning: leave and timesheets waiting on this manager, if there are any.
+
+    Only when there is something. A daily "you have nothing to approve" is how a person learns to
+    delete the message without reading the subject.
+    """
+    from app.db.models import LeaveRequest, TimesheetSubmission
+
+    now = now or datetime.now(timezone.utc)
+    sent = 0
+    base = settings.APP_URL.rstrip("/")
+    for m in db.scalars(select(WorkspaceMember).where(WorkspaceMember.deactivated_at.is_(None))):
+        if m.email_notifications == "off":
+            continue
+        user = db.get(User, m.user_id)
+        if user is None or user.auth_uid is None:
+            continue
+        local = _local(m, now)
+        if local.weekday() > 4 or local.hour < 9:
+            continue
+        period = local.date().isoformat()
+        if already_sent(db, m.workspace_id, user.id, "approvals", period):
+            continue
+
+        rows: List[Tuple[str, str, str]] = []
+        for r in db.scalars(select(LeaveRequest).where(
+                LeaveRequest.workspace_id == m.workspace_id, LeaveRequest.status == "pending",
+                LeaveRequest.approver_id == m.user_id).order_by(LeaveRequest.start_date).limit(15)):
+            who = db.get(User, r.user_id)
+            waited = (now - r.created_at).days
+            rows.append((f"{(who.display_name or who.email) if who else 'Someone'} — leave",
+                         f"{r.start_date:%d %b} to {r.end_date:%d %b}, {r.days:g} day(s)"
+                         + (f", waiting {waited} days" if waited else ""), f"{base}/leave"))
+        # Timesheets: whoever leads their Team, which is what the approvals screen uses.
+        theirs = set(_team_of(db, m.workspace_id, m.user_id))
+        if theirs:
+            for sub_ in db.scalars(select(TimesheetSubmission).where(
+                    TimesheetSubmission.workspace_id == m.workspace_id, TimesheetSubmission.status == "pending",
+                    TimesheetSubmission.user_id.in_(theirs)).order_by(TimesheetSubmission.period_start).limit(15)):
+                who = db.get(User, sub_.user_id)
+                rows.append((f"{(who.display_name or who.email) if who else 'Someone'} — timesheet",
+                             f"{sub_.period_start:%d %b} to {sub_.period_end:%d %b}", f"{base}/timesheets"))
+        if not rows:
+            continue  # nothing waiting: say nothing, and do not write a row that blocks tomorrow
+        subject = f"{len(rows)} thing{'s' if len(rows) != 1 else ''} waiting for your decision"
+        if _once(db, m, user, "approvals", period, subject, rows,
+                 "These are waiting on you. Each one is somebody who cannot get on until you answer:", now=now):
+            sent += 1
+    db.flush()
+    return sent
+
+
+# --- who is away, and whose week is empty -------------------------------------------------------------
+
+
+def run_manager_heads_up(db: Session, now: Optional[datetime] = None) -> int:
+    """Monday: who in your team is away this week, and who logged nothing last week.
+
+    Two facts a manager otherwise finds out by being surprised. They travel together because they
+    answer the same question -- is anybody's week about to go wrong -- and because two emails on a
+    Monday morning is one email too many.
+    """
+    from app.services.work.leave import LIVE
+
+    now = now or datetime.now(timezone.utc)
+    sent = 0
+    base = settings.APP_URL.rstrip("/")
+    for m in db.scalars(select(WorkspaceMember).where(WorkspaceMember.deactivated_at.is_(None))):
+        if m.email_notifications == "off":
+            continue
+        user = db.get(User, m.user_id)
+        if user is None or user.auth_uid is None:
+            continue
+        local = _local(m, now)
+        if local.weekday() != 0 or local.hour < 9:
+            continue
+        theirs = _team_of(db, m.workspace_id, m.user_id)
+        if not theirs:
+            continue
+        period = _period_key("weekly", local)
+        if already_sent(db, m.workspace_id, user.id, "heads_up", period):
+            continue
+
+        week_start, week_end = local.date(), local.date() + timedelta(days=6)
+        rows: List[Tuple[str, str, str]] = []
+        from app.db.models import LeaveRequest
+
+        for r in db.scalars(select(LeaveRequest).where(
+                LeaveRequest.workspace_id == m.workspace_id, LeaveRequest.user_id.in_(theirs),
+                LeaveRequest.status.in_(LIVE), LeaveRequest.start_date <= week_end,
+                LeaveRequest.end_date >= week_start).order_by(LeaveRequest.start_date)):
+            who = db.get(User, r.user_id)
+            rows.append((f"{(who.display_name or who.email) if who else 'Someone'} is away",
+                         f"{r.start_date:%d %b} to {r.end_date:%d %b}"
+                         + (" (not yet approved)" if r.status == "pending" else ""), f"{base}/leave"))
+
+        # Last week's silence. Somebody who logged nothing either did nothing or recorded nothing,
+        # and a manager wants to know which before the month closes.
+        last_start = datetime.combine(week_start - timedelta(days=7), time.min, local.tzinfo)
+        last_end = datetime.combine(week_start, time.min, local.tzinfo)
+        for uid in theirs:
+            member = db.get(WorkspaceMember, (m.workspace_id, uid))
+            if member is None or member.deactivated_at is not None:
+                continue
+            if is_away_all_week(db, m.workspace_id, uid, last_start.date(), last_end.date() - timedelta(days=1)):
+                continue  # they were on leave; an empty timesheet is the right answer
+            logged = _logged_seconds(db, m.workspace_id, uid, last_start, last_end)
+            if logged:
+                continue
+            who = db.get(User, uid)
+            rows.append((f"{(who.display_name or who.email) if who else 'Someone'} logged nothing",
+                         f"Week of {last_start:%d %b}", f"{base}/timesheets"))
+
+        if not rows:
+            continue
+        away = sum(1 for r in rows if "is away" in r[0])
+        subject = f"Your week: {away} away, {len(rows) - away} with no hours logged"
+        if _once(db, m, user, "heads_up", period, subject, rows,
+                 "Before the week starts, two things about your team:", now=now):
+            sent += 1
+    db.flush()
+    return sent
+
+
+def is_away_all_week(db: Session, workspace_id: uuid.UUID, user_id: str, start: date, end: date) -> bool:
+    """Approved leave covering every working day of the span."""
+    from app.db.models import LeaveRequest
+
+    day = start
+    while day <= end:
+        if day.weekday() < 5:
+            covered = db.scalars(select(LeaveRequest.id).where(
+                LeaveRequest.workspace_id == workspace_id, LeaveRequest.user_id == user_id,
+                LeaveRequest.status == "approved", LeaveRequest.start_date <= day,
+                LeaveRequest.end_date >= day)).first()
+            if covered is None:
+                return False
+        day += timedelta(days=1)
+    return True
+
+
+# --- the people who have never been through the door -----------------------------------------------
+
+
+#: How long to leave an invitation before saying it again, and how many times to bother.
+REMIND_INVITE_AFTER_DAYS = 4
+REMIND_INVITE_TIMES = 3
+
+
+def run_invite_reminders(db: Session, now: Optional[datetime] = None) -> int:
+    """Ask again, a few times, the people who were invited and have not signed in.
+
+    An invitation that arrives on a busy Tuesday is an invitation nobody opens. This says it again
+    after a few days -- three times, and then it stops, because a fourth is spam and the problem
+    is no longer the email.
+    """
+    from app.services.work.people import invite_link
+
+    now = now or datetime.now(timezone.utc)
+    sent = 0
+    for m in db.scalars(select(WorkspaceMember).where(
+            WorkspaceMember.deactivated_at.is_(None), WorkspaceMember.invite_sent_at.is_not(None))):
+        user = db.get(User, m.user_id)
+        if user is None or user.auth_uid is not None:
+            continue  # they are in; nothing to remind them of
+        local = _local(m, now)
+        if local.hour < 9 or local.weekday() > 4:
+            continue
+        since = (now - m.invite_sent_at).days
+        if since < REMIND_INVITE_AFTER_DAYS:
+            continue
+        already = db.scalar(select(func.count()).select_from(EmailLog).where(
+            EmailLog.workspace_id == m.workspace_id, EmailLog.user_id == user.id,
+            EmailLog.kind == "invite_reminder")) or 0
+        if already >= REMIND_INVITE_TIMES:
+            continue
+        # One a week after the first few days, so three reminders span a fortnight rather than
+        # three mornings.
+        period = _period_key("weekly", local)
+        workspace = db.get(Workspace, m.workspace_id)
+        name = workspace.name if workspace else "your workspace"
+        rows = [("Sign in to " + name, "Your account is waiting", invite_link())]
+        if _once(db, m, user, "invite_reminder", period, f"You still have an account waiting on {name}",
+                 rows, f"You were invited to {name} {since} days ago and have not signed in yet. "
+                       "It takes a minute, and your work is already there.",
+                 link_text="Sign in",
+                 footer=f"If you did not expect this, nobody at {name} will mind if you ignore it."):
+            sent += 1
     db.flush()
     return sent
 

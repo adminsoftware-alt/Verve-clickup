@@ -1,7 +1,7 @@
 // A view's saved setup, as in ClickUp: filters, sort, group by, visible columns, show closed.
 // Stored in the view's `settings`, so everyone opening the view sees the same thing.
 import type { Task } from '../api';
-import type { GroupBy } from './grouping';
+import { progressOf, type GroupBy } from './grouping';
 import { countRules, matchesGroup, readAdvanced, type FilterGroup } from './filterGroups';
 
 export type DueFilter = 'overdue' | 'today' | 'this_week' | 'next_week' | 'no_date' | 'has_date';
@@ -151,7 +151,14 @@ export function applyFilters(tasks: Task[], f: ViewFilters, me: string | undefin
   const wantAssignees = f.assignees.map((a) => (a === 'me' ? me : a));
   return tasks.filter((t) => {
     if (meMode && !t.assignees.some((u) => u.id === me)) return false;
-    if (f.statuses.length && !f.statuses.includes(t.status.name.toLowerCase())) return false;
+    // Two panels write into this one field. The older one stores a status name, lower-cased --
+    // "in review" -- because inside a List that is the useful distinction. The newer one stores
+    // one of the three states, "todo" / "doing" / "done", because above a List twenty near
+    // duplicate status names is not a filter anybody can use. A task matches either way, so
+    // whichever panel set it, the filter means what the person picked.
+    if (f.statuses.length
+      && !f.statuses.includes(t.status.name.toLowerCase())
+      && !f.statuses.includes(progressOf(t))) return false;
     if (wantAssignees.length) {
       const ok = wantAssignees.some((a) => (a === 'none' ? t.assignees.length === 0 : t.assignees.some((u) => u.id === a)));
       if (!ok) return false;

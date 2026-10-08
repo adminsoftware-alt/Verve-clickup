@@ -2,11 +2,12 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { FileSpreadsheet, LayoutGrid, List as ListIcon, Mail, Network, Plus, Search, Shapes, Shield, UserPlus, Users, X } from 'lucide-react';
 import { ImportPeopleDialog } from './AdminDialogs';
-import { useMe, useWork } from '../WorkContext';
+import { useIsManager, useMe, useWork } from '../WorkContext';
 import type { Role } from '../api';
 import { Avatar, AvatarStack, Portal } from '../ui';
 import { peopleApi, personName, type Person, type TeamFull } from './peopleApi';
 import { AddPersonDialog, InviteDialog, PersonPanel, ROLE_LABEL } from './PersonDialogs';
+import { FEATURES } from '../../config/features';
 
 interface Hub {
   ws: string; people: Person[]; teams: TeamFull[]; me: string; isAdmin: boolean; roles: Role[];
@@ -47,6 +48,7 @@ export const TeamsHub: React.FC = () => {
   useEffect(() => { reload(); }, [reload]);
   const role = hierarchy?.role;
   const isAdmin = role === 'owner' || role === 'admin';
+  const isManager = useIsManager();
   // Only the owner makes admins; nobody makes a second owner.
   const roles: Role[] = role === 'owner' ? ['admin', 'member', 'limited', 'guest'] : ['member', 'limited', 'guest'];
   const hub: Hub = useMemo(() => ({
@@ -57,6 +59,15 @@ export const TeamsHub: React.FC = () => {
   const mine = teams.filter((t) => t.members.some((u) => u.id === myId));
   const person = people.find((p) => p.user.id === open);
   if (!workspace) return <div className="p-10 text-center text-sm text-gray-500">Loading…</div>;
+  // Hiding the link is not the same as closing the door: this page is reachable by typing its
+  // address, so it says no here too.
+  if (!isManager) {
+    return (
+      <div className="p-10 text-center text-sm text-gray-500">
+        People &amp; Teams is for admins and the people who lead teams.
+      </div>
+    );
+  }
   const nav = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm no-underline ${isActive ? 'bg-brand-50 font-medium text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`;
   return (
@@ -68,14 +79,22 @@ export const TeamsHub: React.FC = () => {
           <NavLink to="/people/teams" end className={nav}><LayoutGrid size={15} /> All teams</NavLink>
           <NavLink to="/people/org" className={nav}><Network size={15} /> Org chart</NavLink>
           {isAdmin && <NavLink to="/people/admin" className={nav}><Shield size={15} /> Admin</NavLink>}
-          <NavLink to="/people/task-types" className={nav}><Shapes size={15} /> Task types</NavLink>
-          <p className="mb-1 mt-4 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">My teams</p>
-          {mine.length === 0 && <p className="px-2.5 text-xs text-gray-400">You're not in a team yet.</p>}
-          {mine.map((t) => (
-            <NavLink key={t.id} to={`/people/teams/${t.id}`} className={nav}>
-              <TeamBadge team={t} size={18} /> <span className="truncate">{t.name}</span>
-            </NavLink>
-          ))}
+          {/* Task types is a workspace setting, not a page about people. It still answers at
+              /people/task-types, and the manage entry inside a task'"'"'s Type field still opens it. */}
+          {FEATURES.taskTypesPage && <NavLink to="/people/task-types" className={nav}><Shapes size={15} /> Task types</NavLink>}
+          {/* "My teams" is a shortcut to the teams you are in. An admin is over all of them and
+              usually in none, so for them it is an empty heading above All teams. */}
+          {!isAdmin && (
+            <>
+              <p className="mb-1 mt-4 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">My teams</p>
+              {mine.length === 0 && <p className="px-2.5 text-xs text-gray-400">You'"'"'re not in a team yet.</p>}
+              {mine.map((t) => (
+                <NavLink key={t.id} to={`/people/teams/${t.id}`} className={nav}>
+                  <TeamBadge team={t} size={18} /> <span className="truncate">{t.name}</span>
+                </NavLink>
+              ))}
+            </>
+          )}
         </nav>
         <main className="min-h-0 min-w-0 flex-1 overflow-auto bg-gray-50/60">
           {error && <p className="m-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}

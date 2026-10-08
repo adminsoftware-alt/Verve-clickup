@@ -336,13 +336,22 @@ def render_report(db: Session, opened: OpenedDashboard, tz: ZoneInfo, now: Optio
 # --- sending ------------------------------------------------------------------------
 
 
-def send_email(recipients: List[str], subject: str, body_html: str) -> None:
+def send_email(recipients: List[str], subject: str, body_html: str,
+               unsubscribe: Optional[str] = None) -> None:
+    """One message. `unsubscribe`, where given, becomes the header mail clients read.
+
+    Gmail and Outlook put their own "Unsubscribe" beside the sender's name when they find it, and
+    that button is what a reader presses instead of "report spam" -- which is the difference
+    between one person opting out and the whole domain's reputation falling.
+    """
     if not settings.SMTP_HOST:
         raise EmailNotConfigured("Email is not configured on the server (SMTP_HOST is not set)")
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = settings.SMTP_FROM or settings.SMTP_USER or "timetriq@localhost"
     message["To"] = ", ".join(recipients)
+    if unsubscribe:
+        message["List-Unsubscribe"] = f"<{unsubscribe}>"
     message.set_content("This report is best viewed in an email client that shows HTML.")
     message.add_alternative(body_html, subtype="html")
     with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30) as smtp:
@@ -425,6 +434,7 @@ _stop = threading.Event()
 
 
 _compliance_hour: Optional[str] = None
+_escalation_hour: Optional[str] = None
 
 
 def _loop() -> None:
@@ -461,7 +471,7 @@ def _loop() -> None:
                     db.commit()
         except Exception:
             log.exception("Running due-date automations failed")
-        global _compliance_hour
+        global _compliance_hour, _escalation_hour
         hour = datetime.now(timezone.utc).strftime("%Y-%m-%d %H")
         if hour != _compliance_hour:  # compliance tasks: once an hour is plenty
             _compliance_hour = hour
@@ -473,7 +483,12 @@ def _loop() -> None:
                         db.commit()
             except Exception:
                 log.exception("Creating compliance tasks failed")
-        for job in ("run_instant", "run_daily_digests", "run_team_digests"):
+        # Every outbound job is "if it is the right hour for this person, and it has not gone
+        # already". Each decides that for itself from the email log, so running them all every
+        # minute costs a read and sends nothing twice.
+        for job in ("run_instant", "run_daily_digests", "run_weekly_digests", "run_monthly_digests",
+                    "run_overdue_nudges", "run_invite_reminders", "run_friday_recaps",
+                    "run_approval_reminders", "run_manager_heads_up", "run_team_digests"):
             try:
                 from app.services.work import outbound
 
@@ -498,6 +513,16 @@ def _loop() -> None:
                     db.commit()
         except Exception:
             log.exception("Completing finished sprints failed")
+        if hour != _escalation_hour:  # chasing a leave request once an hour is plenty
+            _escalation_hour = hour
+            try:
+                from app.services.work import leave as leave_service
+
+                with new_session() as db:
+                    if leave_service.run_escalations(db):
+                        db.commit()
+            except Exception:
+                log.exception("Escalating undecided leave failed")
         try:
             from app.services.work import calendar_sync
 

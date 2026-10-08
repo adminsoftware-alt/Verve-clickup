@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { CircleHelp, Clock3, CornerDownLeft, List as ListIcon, LogOut, Settings, UserRound } from 'lucide-react';
 
 import { useAuth } from './AuthContext';
-import { useWork } from '../work/WorkContext';
+import { useIsManager, useWork } from '../work/WorkContext';
 import { Avatar, Portal } from '../work/ui';
 import { recentItems, type RecentItem } from '../work/recent';
 import type { FolderNode, SpaceNode } from '../work/api';
@@ -50,12 +50,12 @@ const Dropdown: React.FC<{
       if (!button.current?.contains(target) && !panel.current?.contains(target)) close();
     };
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
-    document.addEventListener('mousedown', away);
+    document.addEventListener('mousedown', away, true);
     document.addEventListener('keydown', esc);
     window.addEventListener('resize', place);
     window.addEventListener('scroll', place, true);
     return () => {
-      document.removeEventListener('mousedown', away);
+      document.removeEventListener('mousedown', away, true);
       document.removeEventListener('keydown', esc);
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
@@ -172,6 +172,7 @@ export const HelpMenu: React.FC = () => (
 export const ProfileChip: React.FC = () => {
   const { logout } = useAuth();
   const { me, workspace, allMembers } = useWork();
+  const isManager = useIsManager();
 
   const mine = allMembers.find((m) => m.user.id === me);
   const user = mine?.user ?? { id: me || 'me', email: '', display_name: null };
@@ -199,7 +200,8 @@ export const ProfileChip: React.FC = () => {
               {role && <p className="mt-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">{role}</p>}
             </div>
           </div>
-          <Link to="/people" role="menuitem" onClick={close} className={item}><UserRound size={15} className="text-gray-400" /> People &amp; Teams</Link>
+          {/* Running teams is a manager's job, and the directory is part of it. */}
+          {isManager && <Link to="/people" role="menuitem" onClick={close} className={item}><UserRound size={15} className="text-gray-400" /> People &amp; Teams</Link>}
           <Link to="/settings" role="menuitem" onClick={close} className={item}><Settings size={15} className="text-gray-400" /> Settings</Link>
           <button type="button" role="menuitem" onClick={() => { close(); logout(); }} className={`${item} text-red-600 hover:bg-red-50`}>
             <LogOut size={15} /> Sign out

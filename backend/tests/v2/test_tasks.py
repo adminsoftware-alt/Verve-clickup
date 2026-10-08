@@ -76,9 +76,13 @@ def test_task_defaults_answer_the_mandatory_fields_from_the_list_history(api, fo
 def test_people_load_shows_what_is_already_booked_into_someones_days(api, workspace, folderless_list):
     """The number that should be in front of you before you hand over more work."""
     today = datetime.now(timezone.utc).replace(hour=9, minute=0, second=0, microsecond=0)
+    # The two days the work spans must both be working days, or the planner rightly puts nothing
+    # on the one with no capacity and the test fails on a Friday. Start it on the next Monday
+    # when today is Fri/Sat/Sun; the seven-day window from today still covers it either way.
+    span = today + timedelta(days=(7 - today.weekday()) % 7 if today.weekday() >= 4 else 0)
     ok(api.post(f"/lists/{folderless_list['id']}/tasks", "owner", {
         "name": "Two days of work", "assignees": ["member"], "priority": 2,
-        "start_date": iso(today), "due_date": iso(today + timedelta(days=1)),
+        "start_date": iso(span), "due_date": iso(span + timedelta(days=1)),
         "time_estimate_seconds": 6 * HOUR,
     }), 201)
     start = today.date().isoformat()

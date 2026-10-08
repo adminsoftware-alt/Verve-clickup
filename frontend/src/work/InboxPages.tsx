@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Archive, Bell, BellOff, Check, CheckCheck, Clock, Inbox as InboxIcon, MessageSquare, Plus, Settings, Trash2, UserCheck, X } from 'lucide-react';
+import { Archive, Bell, BellOff, Check, CheckCheck, Clock, Inbox as InboxIcon, MessageSquare, MoreHorizontal, Plus, Settings, SlidersHorizontal, Trash2, UserCheck, X } from 'lucide-react';
 import { useWork } from './WorkContext';
 import { disablePush, enablePush, outboundApi, type Delivery } from './outboundApi';
-import { collabApi, type CommentWithTask, type InboxItem, type InboxTab, type NotificationSetting, type Reminder } from './collabApi';
-import { Avatar, Portal, StatusDot } from './ui';
+import {
+  collabApi, inboxFilterCount, NO_INBOX_FILTERS,
+  type CommentWithTask, type InboxDue, type InboxFilters, type InboxItem, type InboxTab, type NotificationSetting, type Reminder,
+} from './collabApi';
+import { Avatar, formatDue, Menu, Portal, PriorityFlag, PRIORITIES, StatusDot, useClickAway } from './ui';
+import { usePhone } from './useBreakpoint';
 import { TaskPanel } from './TaskPanel';
 import { ReminderDialog } from './task/TaskActions';
 
@@ -43,6 +47,8 @@ function describe(item: InboxItem): string {
     case 'automation': return `Automation: ${d.rule ?? 'a rule ran'}`;
     case 'leave_request': return `asked for ${d.type} leave, ${dayRange(d.from, d.to)} (${d.days} day${d.days === 1 ? '' : 's'})`;
     case 'leave_decision': return `${d.status === 'approved' ? 'approved' : 'declined'} your ${d.type} leave, ${dayRange(d.from, d.to)}${d.note ? `: “${d.note}”` : ''}`;
+    case 'leave_cover': return `asked you to cover ${d.who}'s work while they are away, ${dayRange(d.from, d.to)} (${d.days} day${d.days === 1 ? '' : 's'})`;
+    case 'leave_escalated': return `${d.who}'s ${d.type} leave for ${dayRange(d.from, d.to)} has been waiting ${d.waited_days} day${d.waited_days === 1 ? '' : 's'} with no decision`;
     case 'escalation': return `Escalation: ${d.message || d.rule || 'this task needs attention'}`;
     case 'timesheet_reminder': return `Timesheet reminder: ${Math.round(d.tracked / 360) / 10}h logged so far this week, of ${Math.round(d.expected / 360) / 10}h. Please fill it in.`;
     case 'space_join_request': return `asked to join the ${d.space} Space${d.message ? `: “${d.message}”` : ''}`;
@@ -73,6 +79,90 @@ const Page: React.FC<{ icon: React.ReactNode; title: string; actions?: React.Rea
 const TABS: { key: InboxTab; label: string }[] = [
   { key: 'primary', label: 'Primary' }, { key: 'other', label: 'Other' }, { key: 'later', label: 'Later' }, { key: 'cleared', label: 'Cleared' },
 ];
+/** The groups the backend knows, in the order someone scans them. */
+const GROUPS: { key: string; label: string }[] = [
+  { key: 'assigned', label: 'Assigned to me' },
+  { key: 'mentions', label: 'Mentions' },
+  { key: 'comments', label: 'Comments & replies' },
+  { key: 'status', label: 'Status changes' },
+  { key: 'dates', label: 'Date changes' },
+  { key: 'shared', label: 'Shared with me' },
+  { key: 'reminders', label: 'Reminders & timesheets' },
+  { key: 'leave', label: 'Leave' },
+  { key: 'task_detail', label: 'Files & checklists' },
+];
+const DUE: { key: InboxDue; label: string }[] = [
+  { key: 'overdue', label: 'Overdue' },
+  { key: 'today', label: 'Due today' },
+  { key: 'week', label: 'Due in 7 days' },
+  { key: 'none', label: 'No due date' },
+];
+
+/** One dropdown of tick boxes. Closes on a click anywhere else, like every other menu here. */
+const FilterDrop: React.FC<{ label: string; active: number; children: React.ReactNode }> = ({ label, active, children }) => {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useClickAway(box, () => setOpen(false), open);
+  return (
+    <div ref={box} className="relative">
+      <button type="button" onClick={() => setOpen(!open)}
+        className={`flex min-h-[2.25rem] items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors ${active ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}>
+        {label}{active > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] font-semibold text-white">{active}</span>}
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-30 mt-1 w-56 rounded-xl border border-gray-200 bg-white p-1 shadow-lg" role="group" aria-label={label}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Tick: React.FC<{ on: boolean; onChange: () => void; children: React.ReactNode }> = ({ on, onChange, children }) => (
+  <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+    <input type="checkbox" checked={on} onChange={onChange} className="accent-brand-600" />
+    <span className="min-w-0 flex-1">{children}</span>
+  </label>
+);
+
+const InboxFilterBar: React.FC<{ value: InboxFilters; onChange: (f: InboxFilters) => void }> = ({ value, onChange }) => {
+  const count = inboxFilterCount(value);
+  const toggle = <T,>(list: T[], item: T) => (list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-4 py-2 sm:px-6">
+      <SlidersHorizontal size={14} className="text-gray-400" />
+      <FilterDrop label="What happened" active={value.groups.length}>
+        {GROUPS.map((g) => (
+          <Tick key={g.key} on={value.groups.includes(g.key)} onChange={() => onChange({ ...value, groups: toggle(value.groups, g.key) })}>{g.label}</Tick>
+        ))}
+      </FilterDrop>
+      <FilterDrop label="Priority" active={value.priority.length}>
+        {[1, 2, 3, 4].map((n) => (
+          <Tick key={n} on={value.priority.includes(n)} onChange={() => onChange({ ...value, priority: toggle(value.priority, n) })}>
+            <span className="flex items-center gap-1.5"><PriorityFlag priority={n} /></span>
+          </Tick>
+        ))}
+        <p className="px-2 pb-1 pt-0.5 text-[11px] text-gray-400">Only items about a task can have one.</p>
+      </FilterDrop>
+      <FilterDrop label="Due" active={value.due ? 1 : 0}>
+        {DUE.map((d) => (
+          // One at a time: "overdue and due today" is just "due in 7 days".
+          <Tick key={d.key} on={value.due === d.key} onChange={() => onChange({ ...value, due: value.due === d.key ? null : d.key })}>{d.label}</Tick>
+        ))}
+      </FilterDrop>
+      <button type="button" onClick={() => onChange({ ...value, unread: !value.unread })}
+        className={`min-h-[2.25rem] rounded-full border px-3 py-1.5 text-sm transition-colors ${value.unread ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}>
+        Unread only
+      </button>
+      {count > 0 && (
+        <button type="button" onClick={() => onChange(NO_INBOX_FILTERS)} className="ml-auto text-sm text-gray-500 underline-offset-2 hover:text-gray-800 hover:underline">
+          Clear {count === 1 ? 'filter' : `all ${count} filters`}
+        </button>
+      )}
+    </div>
+  );
+};
+
 const SNOOZE = [
   { label: 'Later today (3h)', at: () => new Date(Date.now() + 3 * 3600_000) },
   { label: 'Tomorrow 9 am', at: () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d; } },
@@ -82,17 +172,19 @@ const SNOOZE = [
 export const InboxPage: React.FC = () => {
   const { workspace } = useWork();
   const [tab, setTab] = useState<InboxTab>('primary');
+  const [filters, setFilters] = useState<InboxFilters>(NO_INBOX_FILTERS);
   const [items, setItems] = useState<InboxItem[] | null>(null);
   const [counts, setCounts] = useState({ primary: 0, other: 0, later: 0 });
   const [openTask, setOpenTask] = useState<string | null>(null);
   const [snoozing, setSnoozing] = useState<string | null>(null);
   const [settings, setSettings] = useState(false);
+  const phone = usePhone();
   const load = useCallback(async () => {
     if (!workspace) return;
-    const [list, c] = await Promise.all([collabApi.inbox(workspace.id, tab), collabApi.counts(workspace.id)]);
+    const [list, c] = await Promise.all([collabApi.inbox(workspace.id, tab, filters), collabApi.counts(workspace.id)]);
     setItems(list);
     setCounts(c);
-  }, [workspace, tab]);
+  }, [workspace, tab, filters]);
   useEffect(() => { setItems(null); load().catch(() => undefined); }, [load]);
   useEffect(() => {
     const t = setInterval(() => load().catch(() => undefined), 30_000);
@@ -125,36 +217,55 @@ export const InboxPage: React.FC = () => {
   return (
     <Page icon={<InboxIcon size={18} />} title="Inbox" actions={<>
       {workspace && tab !== 'cleared' && (
+        // On a phone the two bulk actions are icons: their labels are half the header.
         <>
-          <button type="button" onClick={() => collabApi.readAll(workspace.id, tab).then(load).then(inboxChanged)} className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><CheckCheck size={14} /> Mark all read</button>
-          <button type="button" onClick={() => collabApi.clearAll(workspace.id, tab).then(load).then(inboxChanged)} className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><Archive size={14} /> Clear all</button>
+          <button type="button" title="Mark all read" aria-label="Mark all read" onClick={() => collabApi.readAll(workspace.id, tab).then(load).then(inboxChanged)} className="tap flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><CheckCheck size={14} /> <span className="hidden sm:inline">Mark all read</span></button>
+          <button type="button" title="Clear all" aria-label="Clear all" onClick={() => collabApi.clearAll(workspace.id, tab).then(load).then(inboxChanged)} className="tap flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><Archive size={14} /> <span className="hidden sm:inline">Clear all</span></button>
         </>
       )}
       <button type="button" title="Notification settings" onClick={() => setSettings(true)} className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><Settings size={16} /></button>
     </>}>
-      <nav className="flex gap-5 border-b border-gray-200 bg-white px-6" aria-label="Inbox tabs">
+      <nav className="scroll-x flex gap-5 border-b border-gray-200 bg-white px-4 sm:px-6" aria-label="Inbox tabs">
         {TABS.map((t) => (
-          <button key={t.key} type="button" onClick={() => setTab(t.key)} className={`-mb-px flex items-center gap-1.5 border-b-2 py-2.5 text-sm ${tab === t.key ? 'border-brand-600 font-medium text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
+          <button key={t.key} type="button" onClick={() => setTab(t.key)} className={`-mb-px flex min-h-[2.75rem] shrink-0 items-center gap-1.5 border-b-2 py-2.5 text-sm ${tab === t.key ? 'border-brand-600 font-medium text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
             {t.label}
             {t.key !== 'cleared' && counts[t.key as 'primary'] > 0 && <span className="rounded-full bg-brand-100 px-1.5 text-[11px] font-semibold text-brand-700">{counts[t.key as 'primary']}</span>}
           </button>
         ))}
       </nav>
-      <p className="px-6 pt-3 text-xs text-gray-500">
-        {tab === 'primary' ? 'Things that need you: assignments, mentions, replies, assigned comments and reminders.'
+      <InboxFilterBar value={filters} onChange={setFilters} />
+      <p className="px-4 pt-3 text-xs text-gray-500 sm:px-6">
+        {inboxFilterCount(filters) > 0 ? 'Narrowed by the filters above.'
+          : tab === 'primary' ? 'Things that need you: assignments, mentions, replies, assigned comments and reminders.'
           : tab === 'other' ? 'Activity on tasks you watch.' : tab === 'later' ? 'Snoozed and saved items.' : 'Cleared items are kept for 30 days.'}
       </p>
-      <ul className="mx-6 my-3 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white" aria-label="Notifications">
+      <ul className="mx-3 my-3 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white sm:mx-6" aria-label="Notifications">
         {items === null ? <li className="px-4 py-6 text-center text-sm text-gray-400">Loading…</li>
-          : items.length === 0 ? <li className="px-4 py-10 text-center text-sm text-gray-400">{tab === 'primary' ? "You're all caught up." : 'Nothing here.'}</li>
+          : items.length === 0 ? (
+            <li className="px-4 py-10 text-center text-sm text-gray-400">
+              {inboxFilterCount(filters) > 0 ? (
+                <>Nothing matches these filters. <button type="button" onClick={() => setFilters(NO_INBOX_FILTERS)} className="text-brand-700 underline">Clear them</button></>
+              ) : tab === 'primary' ? "You're all caught up." : 'Nothing here.'}
+            </li>
+          )
           : items.map((item) => (
             <li key={item.id} className={`group relative flex items-start gap-3 px-4 py-3 ${item.read ? '' : 'bg-brand-50/40'}`}>
               <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${item.read ? 'bg-transparent' : 'bg-brand-600'}`} />
               {item.actor ? <Avatar user={item.actor} size={28} /> : <span className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-700"><Bell size={14} /></span>}
               <button type="button" onClick={() => open(item)} className="min-w-0 flex-1 text-left">
                 {item.task && (
-                  <span className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
-                    {item.task.status && <StatusDot status={item.task.status} size={11} />}<span className="truncate">{item.task.name}</span>
+                  // On a phone the name wraps rather than truncating: "Up..." is not a task.
+                  <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-medium text-gray-900">
+                    {item.task.status && <StatusDot status={item.task.status} size={11} />}
+                    <span className="min-w-0 break-words sm:truncate">{item.task.name}</span>
+                    {item.task.priority ? (
+                      <span title={PRIORITIES[item.task.priority]?.label} className="shrink-0"><PriorityFlag priority={item.task.priority} withLabel={false} /></span>
+                    ) : null}
+                    {item.task.due_date && (
+                      <span className={`shrink-0 rounded px-1.5 text-[11px] font-normal ${new Date(item.task.due_date) < new Date() ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-500'}`}>
+                        {formatDue(item.task.due_date)}
+                      </span>
+                    )}
                   </span>
                 )}
                 <span className="block text-sm text-gray-600">
@@ -162,14 +273,33 @@ export const InboxPage: React.FC = () => {
                   {item.reminder && <>: <b className="font-medium">{item.reminder.title}</b></>}
                 </span>
                 {item.comment && <span className="mt-1 block truncate rounded bg-gray-50 px-2 py-1 text-sm text-gray-700">{item.comment.body}</span>}
+                {phone && <span className="mt-0.5 block text-[11px] text-gray-400">{ago(item.created_at)}</span>}
               </button>
-              <span className="shrink-0 text-xs text-gray-400">{ago(item.created_at)}</span>
-              <span className="flex shrink-0 items-center gap-0.5 opacity-60 group-hover:opacity-100">
-                <button type="button" title={item.read ? 'Mark unread' : 'Mark read'} onClick={() => act(item.id, { read: !item.read })} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Check size={14} /></button>
-                {tab !== 'cleared' && <button type="button" title="Snooze" onClick={() => setSnoozing(snoozing === item.id ? null : item.id)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Clock size={14} /></button>}
-                {tab === 'later' && item.snoozed_until && <button type="button" title="Wake now" onClick={() => act(item.id, { unsnooze: true })} className="rounded p-1 text-gray-500 hover:bg-gray-100"><BellOff size={14} /></button>}
-                <button type="button" title={item.cleared ? 'Restore' : 'Clear'} onClick={() => act(item.id, { cleared: !item.cleared })} className="rounded p-1 text-gray-500 hover:bg-gray-100">{item.cleared ? <InboxIcon size={14} /> : <X size={14} />}</button>
-              </span>
+              {/* On a desktop the date sits in its own column; on a phone it rides with the text. */}
+              {!phone && <span className="shrink-0 text-xs text-gray-400">{ago(item.created_at)}</span>}
+              {phone ? (
+                <Menu
+                  align="right" label={`Actions for this notification`}
+                  items={[
+                    { label: item.read ? 'Mark unread' : 'Mark read', icon: <Check size={14} />, onClick: () => act(item.id, { read: !item.read }) },
+                    ...(tab !== 'cleared'
+                      ? SNOOZE.map((sn) => ({ label: `Snooze: ${sn.label}`, icon: <Clock size={14} />, onClick: () => act(item.id, { snoozed_until: sn.at().toISOString() }) }))
+                      : []),
+                    ...(tab === 'later' && item.snoozed_until
+                      ? [{ label: 'Wake now', icon: <BellOff size={14} />, onClick: () => act(item.id, { unsnooze: true }) }]
+                      : []),
+                    { label: item.cleared ? 'Restore' : 'Clear', icon: item.cleared ? <InboxIcon size={14} /> : <X size={14} />, onClick: () => act(item.id, { cleared: !item.cleared }) },
+                  ]}
+                  trigger={<span className="tap shrink-0 rounded-lg text-gray-400"><MoreHorizontal size={18} /></span>}
+                />
+              ) : (
+                <span className="flex shrink-0 items-center gap-0.5 opacity-60 group-hover:opacity-100">
+                  <button type="button" title={item.read ? 'Mark unread' : 'Mark read'} onClick={() => act(item.id, { read: !item.read })} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Check size={14} /></button>
+                  {tab !== 'cleared' && <button type="button" title="Snooze" onClick={() => setSnoozing(snoozing === item.id ? null : item.id)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Clock size={14} /></button>}
+                  {tab === 'later' && item.snoozed_until && <button type="button" title="Wake now" onClick={() => act(item.id, { unsnooze: true })} className="rounded p-1 text-gray-500 hover:bg-gray-100"><BellOff size={14} /></button>}
+                  <button type="button" title={item.cleared ? 'Restore' : 'Clear'} onClick={() => act(item.id, { cleared: !item.cleared })} className="rounded p-1 text-gray-500 hover:bg-gray-100">{item.cleared ? <InboxIcon size={14} /> : <X size={14} />}</button>
+                </span>
+              )}
               {snoozing === item.id && (
                 <span className="absolute right-10 mt-8 flex gap-1 rounded-md border border-gray-200 bg-white p-1 shadow" role="menu">
                   {SNOOZE.map((s) => <button key={s.label} type="button" role="menuitem" onClick={() => { setSnoozing(null); act(item.id, { snoozed_until: s.at().toISOString() }); }} className="rounded px-2 py-1 text-xs hover:bg-gray-100">{s.label}</button>)}

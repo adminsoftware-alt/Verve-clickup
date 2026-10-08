@@ -14,8 +14,9 @@ from sqlalchemy.orm import Session
 from app.api.v2.deps import current_user
 from app.db.models import User
 from app.db.session import get_db
+from app.schemas import costs as cs
 from app.schemas import work as s
-from app.services.work import audit, onboarding, people, people_admin
+from app.services.work import audit, costs, onboarding, people, people_admin
 from app.services.work.access import Access
 from app.services.work.errors import Invalid, NotFound
 
@@ -52,6 +53,66 @@ def offboard(workspace_id: uuid.UUID, user_id: str, data: s.OffboardIn, user: Us
     out = people_admin.offboard(db, _access(db, user, workspace_id), user_id, data)
     db.commit()
     return out
+
+
+# --- what running this costs ------------------------------------------------------------------
+
+
+@router.get("/workspaces/{workspace_id}/costs", response_model=cs.CostSummary)
+def cost_summary(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return costs.summary(db, _access(db, user, workspace_id))
+
+
+@router.get("/workspaces/{workspace_id}/costs/suggestions", response_model=List[cs.CostSuggestion])
+def cost_suggestions(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    _access(db, user, workspace_id)
+    return costs.suggestions()
+
+
+@router.post("/workspaces/{workspace_id}/costs", response_model=cs.CostSummary, status_code=status.HTTP_201_CREATED)
+def add_cost(workspace_id: uuid.UUID, data: cs.CostItemIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    access = _access(db, user, workspace_id)
+    costs.add(db, access, data)
+    db.commit()
+    return costs.summary(db, access)
+
+
+@router.patch("/workspaces/{workspace_id}/costs/{item_id}", response_model=cs.CostSummary)
+def update_cost(workspace_id: uuid.UUID, item_id: uuid.UUID, data: cs.CostItemIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    access = _access(db, user, workspace_id)
+    costs.update(db, access, item_id, data)
+    db.commit()
+    return costs.summary(db, access)
+
+
+@router.delete("/workspaces/{workspace_id}/costs/{item_id}", response_model=cs.CostSummary)
+def delete_cost(workspace_id: uuid.UUID, item_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    access = _access(db, user, workspace_id)
+    costs.remove(db, access, item_id)
+    db.commit()
+    return costs.summary(db, access)
+
+
+@router.get("/workspaces/{workspace_id}/blocked-emails", response_model=List[s.BlockedEmailOut])
+def list_blocked(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return people_admin.blocked_emails(db, _access(db, user, workspace_id))
+
+
+@router.post("/workspaces/{workspace_id}/blocked-emails", response_model=List[s.BlockedEmailOut], status_code=status.HTTP_201_CREATED)
+def block_email(workspace_id: uuid.UUID, data: s.BlockedEmailIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    access = _access(db, user, workspace_id)
+    people_admin.block_email(db, access, data.email, data.reason)
+    people_admin.revoke_sign_in(data.email)
+    db.commit()
+    return people_admin.blocked_emails(db, access)
+
+
+@router.delete("/workspaces/{workspace_id}/blocked-emails/{block_id}", response_model=List[s.BlockedEmailOut])
+def unblock_email(workspace_id: uuid.UUID, block_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    access = _access(db, user, workspace_id)
+    people_admin.unblock_email(db, access, block_id)
+    db.commit()
+    return people_admin.blocked_emails(db, access)
 
 
 @router.post("/workspaces/{workspace_id}/people/{user_id}/deactivate", response_model=s.PersonOut)
@@ -142,9 +203,10 @@ def avatar(key: str):
 def audit_log(
     workspace_id: uuid.UUID, limit: int = Query(100, ge=1, le=500), before: Optional[datetime] = Query(None),
     action: Optional[str] = Query(None, max_length=60), actor_id: Optional[str] = Query(None, max_length=128),
+    target_id: Optional[str] = Query(None, max_length=128, description="Who it was done to"),
     user: User = Depends(current_user), db: Session = Depends(get_db),
 ):
-    return audit.events(db, _access(db, user, workspace_id), limit, before, action, actor_id)
+    return audit.events(db, _access(db, user, workspace_id), limit, before, action, actor_id, target_id)
 
 
 # --- joiner checklist ---------------------------------------------------------------------------------------------------

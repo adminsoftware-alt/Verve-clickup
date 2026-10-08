@@ -185,6 +185,48 @@ def test_inbox_read_snooze_clear(api, org):
     assert api.patch(f"/notifications/{item['id']}", "member", {"read": True}).status_code == 404
 
 
+def test_the_inbox_narrows_by_what_happened_by_priority_and_by_due_date(api, org):
+    """An unread count of 605 is not a to-do list; the filters are how it becomes one."""
+    ws, tid = org["ws"], org["task"]["id"]
+    urgent_soon = ok(api.post(f"/lists/{org['list']['id']}/tasks", "owner", {
+        "name": "File the return", "assignees": ["member2"], "priority": 1,
+        "due_date": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+    }), 201)
+    ok(api.post(f"/lists/{org['list']['id']}/tasks", "owner", {
+        "name": "Tidy the drive", "assignees": ["member2"], "priority": 4,
+    }), 201)
+    ok(api.post(f"/tasks/{tid}/comments", "owner", {"body": "Any update @Member2", "mention_user_ids": ["member2"]}), 201)
+
+    def narrowed(**params):
+        return ok(api.get(f"/workspaces/{ws}/inbox", "member2", params={"tab": "primary", **params}))
+
+    assert len(narrowed()) == 3  # two assignments and a mention
+    assert kinds(narrowed(group="mentions")) == ["mentioned"]
+    assert kinds(narrowed(group="assigned")) == ["assigned", "assigned"]
+    assert kinds(narrowed(group="assigned,mentions")) == ["assigned", "assigned", "mentioned"]
+
+    # Priority and due date are the task's: the mention is about a task with neither, so a
+    # positive filter leaves it out -- and "No due date" rightly brings it back.
+    assert [i["task"]["name"] for i in narrowed(priority="1")] == ["File the return"]
+    assert sorted(i["task"]["name"] for i in narrowed(priority="1,4")) == ["File the return", "Tidy the drive"]
+    assert [i["task"]["name"] for i in narrowed(due="today")] == ["File the return"]
+    assert sorted(i["task"]["name"] for i in narrowed(due="none")) == ["Salary sheet", "Tidy the drive"]
+    assert narrowed(due="overdue") == []
+    # The row carries what it was filtered on, so the list can show it.
+    assert narrowed(priority="1")[0]["task"]["priority"] == 1 and narrowed(priority="1")[0]["task"]["due_date"]
+
+    # Filters combine, and reading an item takes it out of "unread only".
+    assert [i["task"]["name"] for i in narrowed(group="assigned", due="today")] == ["File the return"]
+    assert len(narrowed(unread="true")) == 3
+    first = narrowed(group="assigned", due="today")[0]
+    ok(api.patch(f"/notifications/{first['id']}", "member2", {"read": True}), 204)
+    assert len(narrowed(unread="true")) == 2
+
+    assert api.get(f"/workspaces/{ws}/inbox", "member2", params={"group": "nonsense"}).status_code == 400
+    assert api.get(f"/workspaces/{ws}/inbox", "member2", params={"priority": "high"}).status_code == 422
+    assert urgent_soon["priority"] == 1
+
+
 def test_reminders_arrive_in_the_inbox_when_due(api, org):
     soon = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
     r = ok(api.post(f"/workspaces/{org['ws']}/reminders", "member", {"task_id": org["task"]["id"], "remind_at": soon}), 201)
@@ -217,6 +259,36 @@ def test_checklists_progress_and_assigned_items(api, org):
     ok(api.post(f"/tasks/{tid}/shares", "owner", {"user_id": "member2", "level": "comment"}), 201)
     ok(api.patch(f"/checklist-items/{item['id']}", "member2", {"resolved": True}))
     assert api.patch(f"/checklist-items/{item['id']}", "member2", {"name": "x"}).status_code == 403
+
+
+def test_a_checklist_can_be_saved_and_used_again(api, org):
+    tid = org["task"]["id"]
+    [cl] = ok(api.post(f"/tasks/{tid}/checklists", "owner", {"name": "Joiner pack", "items": ["Laptop", "Email", "Induction"]}), 201)
+    items = [i["name"] for i in cl["items"]]
+    tpl = ok(api.post(f"/workspaces/{org['ws']}/checklist-templates", "owner", {"name": "Joiner pack", "items": items}), 201)
+    assert tpl["item_count"] == 3
+
+    # Everyone in the workspace can see it and start from it, in the order it was saved.
+    assert [t["name"] for t in ok(api.get(f"/workspaces/{org['ws']}/checklist-templates", "member"))] == ["Joiner pack"]
+    other = ok(api.post(f"/lists/{org['list']['id']}/tasks", "owner", {"name": "New starter"}), 201)
+    made = ok(api.post(f"/tasks/{other['id']}/checklists", "owner", {"name": tpl["name"], "items": tpl["items"]}), 201)
+    assert [i["name"] for i in made[0]["items"]] == ["Laptop", "Email", "Induction"]
+    assert not any(i["resolved"] for i in made[0]["items"])  # a template carries no progress
+
+    # Saving again under the same name replaces the items rather than making a second copy.
+    again = ok(api.post(f"/workspaces/{org['ws']}/checklist-templates", "owner", {"name": "Joiner pack", "items": ["Laptop"]}), 201)
+    assert again["id"] == tpl["id"] and again["items"] == ["Laptop"]
+    assert len(ok(api.get(f"/workspaces/{org['ws']}/checklist-templates", "owner"))) == 1
+
+
+def test_only_the_author_or_an_admin_changes_a_saved_checklist(api, org):
+    tpl = ok(api.post(f"/workspaces/{org['ws']}/checklist-templates", "member", {"name": "Filing steps", "items": ["Draft"]}), 201)
+    url = f"/workspaces/{org['ws']}/checklist-templates/{tpl['id']}"
+    assert api.patch(url, "member2", {"name": "Mine now", "items": []}).status_code == 403
+    assert api.delete(url, "member2").status_code == 403
+    assert ok(api.patch(url, "member", {"name": "Filing steps", "items": ["Draft", "Review"]}))["item_count"] == 2
+    assert api.delete(url, "owner").status_code == 204  # an admin clears up after leavers
+    assert ok(api.get(f"/workspaces/{org['ws']}/checklist-templates", "owner")) == []
 
 
 def test_repeating_task_copies_checklists_unticked(api, org):

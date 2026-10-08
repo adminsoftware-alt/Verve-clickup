@@ -13,7 +13,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft, CalendarCheck, CalendarClock, CalendarDays, CalendarRange, Check, ChevronDown, ChevronRight, Circle,
-  Flag, Hourglass, Search, Tag as TagIcon, User, X,
+  Flag, Hourglass, Search, SlidersHorizontal, Tag as TagIcon, User, X,
 } from 'lucide-react';
 
 import { useWork } from '../WorkContext';
@@ -21,6 +21,8 @@ import { workApi, type TagUsage } from '../api';
 import type { Filters } from './api';
 
 const PANEL_WIDTH = 280;
+/** Roughly what the panel grows to with a search box and a list; enough to decide which way to open. */
+const PANEL_MAX_HEIGHT = 360;
 /** Above this many choices the value list gets its own search box. */
 const SEARCHABLE = 8;
 
@@ -142,6 +144,13 @@ const toggle = <T,>(list: T[] | null | undefined, item: T): T[] | null => {
 export const CardFilterMenu: React.FC<{
   value: Filters;
   disabled?: boolean;
+  /** What the button says when nothing is set, and what the panel is called. The same control
+   *  serves one card and the whole Dashboard, and the wording is the only difference. */
+  triggerLabel?: string;
+  title?: string;
+  /** On a small tile the word does not fit beside the figure, so the funnel stands alone and
+   *  carries the count as a badge. It is still always on show. */
+  compact?: boolean;
   /** Cards whose period control already means "due in this window" keep Due date out. */
   hideDue?: boolean;
   /** Time cards are filtered by who tracked the hours, so only the people field applies. */
@@ -156,7 +165,7 @@ export const CardFilterMenu: React.FC<{
     onCustom: () => void;
   };
   onApply: (filters: Filters) => void;
-}> = ({ value, disabled, hideDue, peopleOnly, time, onApply }) => {
+}> = ({ value, disabled, triggerLabel = 'Filter', title = 'Filter this card', compact, hideDue, peopleOnly, time, onApply }) => {
   const { members, teams, hierarchy } = useWork();
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const [draft, setDraft] = useState<Filters>(value);
@@ -238,8 +247,18 @@ export const CardFilterMenu: React.FC<{
     setOpenField(null);
     setSearch('');
     const rect = triggerRef.current.getBoundingClientRect();
-    const left = Math.max(8, Math.min(rect.right - PANEL_WIDTH, window.innerWidth - PANEL_WIDTH - 8));
-    setPos({ top: rect.bottom + 4, left });
+    // Hang it from the left of its trigger, the way a dropdown is expected to open, and only
+    // pull it leftwards when that would run off the right edge. Right-aligning it unconditionally
+    // sent the panel 280px to the left of a button near the start of the row, where it ended up
+    // underneath the sidebar.
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 8));
+    // Below the trigger, unless there is more room above it -- a filter button low on a long
+    // Dashboard would otherwise open a panel that runs off the bottom of the window.
+    const room = window.innerHeight - rect.bottom;
+    const top = room < PANEL_MAX_HEIGHT && rect.top > room
+      ? Math.max(8, rect.top - Math.min(PANEL_MAX_HEIGHT, rect.top - 8) - 4)
+      : rect.bottom + 4;
+    setPos({ top, left });
   };
 
   useEffect(() => {
@@ -251,12 +270,12 @@ export const CardFilterMenu: React.FC<{
     };
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
     const away = (e: Event) => { if (!panelRef.current?.contains(e.target as Node)) close(); };
-    document.addEventListener('mousedown', onDown);
+    document.addEventListener('mousedown', onDown, true);
     document.addEventListener('keydown', onKey);
     window.addEventListener('scroll', away, true);
     window.addEventListener('resize', away);
     return () => {
-      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('mousedown', onDown, true);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', away, true);
       window.removeEventListener('resize', away);
@@ -331,6 +350,13 @@ export const CardFilterMenu: React.FC<{
 
   if (disabled) {
     if (!activeCount) return null;
+    if (compact) {
+      return (
+        <span title={`${activeCount} filter${activeCount === 1 ? '' : 's'}`} className="flex items-center gap-1 rounded-lg border border-gray-200 p-1.5 text-[10px] font-semibold text-gray-500">
+          <SlidersHorizontal size={12} /> {activeCount}
+        </span>
+      );
+    }
     return (
       <span className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-500">
         {activeCount} filter{activeCount === 1 ? '' : 's'}
@@ -347,21 +373,36 @@ export const CardFilterMenu: React.FC<{
         type="button"
         onClick={show}
         aria-expanded={open}
-        title="Filter this card"
-        className={`no-print flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium shadow-sm ${
+        aria-label={activeCount ? `${title} (${activeCount} set)` : title}
+        title={title}
+        className={`no-print relative flex items-center gap-1.5 rounded-lg border font-medium shadow-sm ${
+          compact ? 'p-1.5' : 'px-2.5 py-1.5 text-xs'} ${
           activeCount
             ? 'border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100'
             : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'}`}
       >
-        {activeCount ? `${activeCount} filter${activeCount === 1 ? '' : 's'}` : 'Filter'}
-        <ChevronDown size={13} className={activeCount ? 'text-teal-500' : 'text-gray-400'} />
+        {compact ? (
+          <>
+            <SlidersHorizontal size={13} className={activeCount ? 'text-teal-600' : 'text-gray-500'} />
+            {activeCount > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-teal-600 px-1 text-[9px] font-semibold leading-none text-white">
+                {activeCount}
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            {activeCount ? `${activeCount} filter${activeCount === 1 ? '' : 's'}` : triggerLabel}
+            <ChevronDown size={13} className={activeCount ? 'text-teal-500' : 'text-gray-400'} />
+          </>
+        )}
       </button>
 
       {open && createPortal(
         <div
           ref={panelRef}
           role="dialog"
-          aria-label="Filter this card"
+          aria-label={title}
           className="fixed z-50 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl"
           style={{ top: pos.top, left: pos.left, width: PANEL_WIDTH }}
         >

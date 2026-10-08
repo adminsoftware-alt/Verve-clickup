@@ -221,12 +221,3 @@ The ones worth knowing about:
 - **Google Sheets export** needs OAuth credentials that are not configured. PDF, CSV and
   Excel all work.
 - **One large JavaScript chunk.** Every build warns; the app has not been split yet.
-
----
-
-## Documentation
-
-`docs/` holds the fuller specification — product vision, requirements, user stories,
-architecture, database design, API specification, business logic, the workload engine,
-testing and security. It is gitignored on purpose: this repository is public and those
-documents are internal.

@@ -992,6 +992,8 @@ const TimesheetCard: React.FC<{
     onShift(move(days[0]), move(days[span - 1]));
   };
   const logged = rows.reduce((n, r) => n + r.total, 0);
+  // Everyone the card covers now gets a row, so the empty ones are countable here.
+  const nobodyLogged = rows.filter((r) => !r.total).length;
   const able = rows.reduce((n, r) => n + (r.capacity_per_day ?? capacity).reduce((m, v) => m + v, 0), 0);
   const range = span
     ? `${new Date(`${days[0]}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${new Date(`${days[span - 1]}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
@@ -1004,6 +1006,13 @@ const TimesheetCard: React.FC<{
         <span className="text-xs text-gray-500">logged of {formatDuration(able) || '0h'}</span>
         {able > logged + 60 && (
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">{formatDuration(able - logged)} to go</span>
+        )}
+        {/* The rows with nothing on them are the point of this card for a manager, so they are
+            counted out loud rather than left to be noticed. */}
+        {!!nobodyLogged && (
+          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+            {nobodyLogged} logged nothing
+          </span>
         )}
         {onShift && (
           <span className="no-print ml-auto flex items-center gap-1">

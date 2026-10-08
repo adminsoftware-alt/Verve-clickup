@@ -7,19 +7,22 @@ import {
   LayoutDashboard, CheckSquare, Calendar, Clock, 
   BarChart2, Settings as SettingsIcon,
   Bell, ChevronDown, MessageSquare,
-  Activity, Briefcase, Plus, X, Users
+  Activity, Briefcase, Plus, X, Users, Menu, Sparkles
 } from 'lucide-react';
 import { SpacesSidebar } from '../work/SpacesSidebar';
 import { MyTasksNav } from '../work/MyTasksNav';
 import { FavoritesNav } from '../work/Favorites';
 import { GlobalSearch, SearchButton } from '../work/GlobalSearch';
+import { QuickAdd } from '../work/assistant/QuickAdd';
 import { RunningTimerChip } from '../work/RunningTimer';
 import { StatusSelector } from './StatusSelector';
 import { FEATURES } from '../config/features';
 import { HeaderInboxBell } from '../work/InboxPages';
 import { HelpMenu, ProfileChip, RecentMenu } from './HeaderBits';
-import { useWork } from '../work/WorkContext';
+import { useIsAdmin, useWork } from '../work/WorkContext';
 import { presenceService, type UserPresence } from '../services/presenceService';
+import { BottomNav } from './BottomNav';
+import { usePhone } from '../work/useBreakpoint';
 
 export const Layout: React.FC = () => {
   const { hasRole, user } = useAuth();  // signing out moved into the profile menu
@@ -35,8 +38,14 @@ export const Layout: React.FC = () => {
   const notificationsRef = useRef<HTMLDivElement>(null);
 
   const { workspace } = useWork();
+  const isWorkspaceAdmin = useIsAdmin();
   const workspaceName = workspace?.name ?? 'Verve Workflow';
   const [onlineUsers, setOnlineUsers] = useState<UserPresence[]>([]);
+  // On a phone the sidebar is a drawer. On anything wider it is always there and this is ignored.
+  const phone = usePhone();
+  const [drawer, setDrawer] = useState(false);
+  // Say-a-task. Ctrl/Cmd+K is already the search; this takes the next key along.
+  const [quickAdd, setQuickAdd] = useState(false);
 
   useEffect(() => {
     // Start presence tracking for the current user
@@ -67,9 +76,27 @@ export const Layout: React.FC = () => {
         setShowNotifications(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, []);
+  // Following a link puts the drawer away; so does Escape, and growing past a phone.
+  useEffect(() => { setDrawer(false); }, [location.pathname]);
+  useEffect(() => { if (!phone) setDrawer(false); }, [phone]);
+  useEffect(() => {
+    if (!drawer) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDrawer(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [drawer]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') { e.preventDefault(); setQuickAdd(true); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
   const runningTimers = Object.entries(timers).filter(([_, t]) => t.startTime !== null);
 
   const formatTime = (seconds: number) => {
@@ -80,7 +107,9 @@ export const Layout: React.FC = () => {
   };
 
   const baseNavItems = [
-    { name: 'Dashboard', path: '/', icon: <LayoutDashboard size={16} /> },
+    // An admin has no personal board -- the Company one is theirs, and it is the first row of
+    // Dashboards -- so the rail would otherwise carry two routes to the same place.
+    ...(isWorkspaceAdmin ? [] : [{ name: 'Dashboard', path: '/', icon: <LayoutDashboard size={16} /> }]),
     ...(FEATURES.legacyTasks ? [{ name: 'My Tasks', path: '/tasks', icon: <CheckSquare size={16} /> }] : []),
     ...(FEATURES.chat ? [{ name: 'Chat', path: '/chat', icon: <MessageSquare size={16} /> }] : []),
     ...(FEATURES.legacyTimeTracking ? [{ name: 'Time Tracking', path: '/time-entries', icon: <Clock size={16} /> }] : []),
@@ -120,23 +149,27 @@ export const Layout: React.FC = () => {
   );
 
   return (
-    <div style={{ 
-      display: 'flex', 
-      height: '100vh', 
-      background: 'linear-gradient(135deg, #FAFBFB 0%, #EEF2F1 100%)', 
-      overflow: 'hidden' 
-    }}>
-      
-      {/* Sidebar (Premium Glass Theme) */}
-      <aside className="glass-panel app-sidebar no-print" style={{ 
-        width: '240px', 
-        borderRight: '1px solid rgba(255,255,255,0.4)',
-        display: 'flex',
-        flexDirection: 'column',
-        padding: '20px 12px',
-        zIndex: 10,
-        overflowY: 'auto'
-      }}>
+    // 100dvh, not 100vh: on a phone the browser's own chrome slides away as you scroll, and
+    // 100vh keeps counting the space it used to take -- which puts the bottom of the app under
+    // the address bar.
+    <div
+      className="flex h-[100dvh] overflow-hidden"
+      style={{ background: 'linear-gradient(135deg, #FAFBFB 0%, #EEF2F1 100%)' }}
+    >
+      {/* The dimmed page behind an open drawer. Tapping it is how most people close one. */}
+      {phone && drawer && (
+        <div className="fixed inset-0 z-[55] bg-black/40 md:hidden" onClick={() => setDrawer(false)} aria-hidden />
+      )}
+
+      {/* Sidebar: a column on a desktop, a drawer over the page on a phone. */}
+      <aside
+        className={`glass-panel app-sidebar no-print z-10 flex w-60 shrink-0 flex-col overflow-y-auto px-3 py-5 transition-transform duration-200
+          max-md:z-[56] max-md:pb-nav
+          max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:w-[17rem] max-md:shadow-2xl
+          ${phone && !drawer ? 'max-md:-translate-x-full' : 'max-md:translate-x-0'}`}
+        style={{ borderRight: '1px solid rgba(255,255,255,0.4)' }}
+        aria-hidden={phone && !drawer}
+      >
         {/* Logo Area */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '0 6px', marginBottom: '20px' }}>
           <div style={{ display: 'flex' }}>
@@ -193,29 +226,30 @@ export const Layout: React.FC = () => {
       </aside>
 
       {/* Main Content Area */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+
         {/* Top Header */}
-        <header className="glass-panel no-print" style={{ 
-          height: '64px', 
-          borderBottom: '1px solid rgba(255,255,255,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 24px',
-          zIndex: 5
-        }}>
-          {/* Left: where you are, and where you've just been */}
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="max-w-[220px] truncate text-[0.95rem] font-semibold text-gray-800">{workspaceName}</span>
-            <RecentMenu />
+        <header
+          className="glass-panel no-print z-[5] flex h-14 shrink-0 items-center justify-between gap-2 px-3 sm:h-16 sm:px-6"
+          style={{ borderBottom: '1px solid rgba(255,255,255,0.5)' }}
+        >
+          {/* Left: the way into the drawer, where you are, and where you've just been */}
+          <div className="flex min-w-0 items-center gap-1 sm:gap-2">
+            <button
+              type="button" onClick={() => setDrawer(true)} aria-label="Open the menu" aria-expanded={drawer}
+              className="tap -ml-1 rounded-lg text-gray-600 hover:bg-black/5 md:hidden"
+            >
+              <Menu size={20} />
+            </button>
+            <span className="max-w-[9rem] truncate text-[0.95rem] font-semibold text-gray-800 sm:max-w-[220px]">{workspaceName}</span>
+            <span className="hidden sm:inline"><RecentMenu /></span>
           </div>
 
           {/* Right: Actions */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-4)' }}>
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-4">
             
-            {/* Multiplayer Avatar Stack */}
-            {onlineUsers.length > 0 && (
+            {/* Multiplayer Avatar Stack -- desktop only: a phone header is 390px wide. */}
+            {onlineUsers.length > 0 && !phone && (
               <div style={{ display: 'flex', alignItems: 'center', marginRight: '8px', paddingRight: '16px', borderRight: '1px solid var(--color-border)' }} title={`${onlineUsers.length} online`}>
                 <div style={{ display: 'flex', flexDirection: 'row-reverse' }}>
                   {onlineUsers.slice(0, 5).map((user, i) => (
@@ -251,7 +285,7 @@ export const Layout: React.FC = () => {
               </div>
             )}
             
-            {focusSession && (
+            {focusSession && !phone && (
               <div 
                 style={{ 
                   display: 'flex', 
@@ -440,6 +474,13 @@ export const Layout: React.FC = () => {
               </Link>
             )}
 
+            <button
+              type="button" onClick={() => setQuickAdd(true)}
+              title="Add a task by saying it (Ctrl+J)" aria-label="Add a task by saying it"
+              className="tap rounded-lg text-gray-500 hover:bg-black/5 hover:text-brand-700"
+            >
+              <Sparkles size={18} />
+            </button>
             <SearchButton />
             <RunningTimerChip />
 
@@ -540,14 +581,18 @@ export const Layout: React.FC = () => {
           </div>
         </header>
 
-        {/* Page Content: Space/Folder/List pages fill the pane and scroll internally */}
-        <div style={isLocationPage
-          ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }
-          : { flex: 1, overflowY: 'auto', padding: 'var(--spacing-8)' }}>
+        {/* Page Content: Space/Folder/List pages fill the pane and scroll internally.
+            On a phone `pb-nav` keeps the last row clear of the tab bar across the bottom. */}
+        <div
+          className={`min-h-0 flex-1 ${isLocationPage ? 'flex flex-col' : 'overflow-y-auto p-4 sm:p-8'} ${phone ? 'pb-nav' : ''}`}
+        >
           <Outlet />
           <GlobalSearch />
+          {quickAdd && <QuickAdd onClose={() => setQuickAdd(false)} />}
         </div>
       </main>
+
+      <BottomNav onMore={() => setDrawer(true)} moreOpen={drawer} />
     </div>
   );
 };

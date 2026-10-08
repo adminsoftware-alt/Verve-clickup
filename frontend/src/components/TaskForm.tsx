@@ -91,8 +91,8 @@ export const TaskForm: React.FC<TaskFormProps> = ({ initialTask, onSuccess, onCa
         }
       }
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('mousedown', handler, true);
+    return () => document.removeEventListener('mousedown', handler, true);
   }, [onCancel]);
 
   const toggleAssignee = (memberId: string) => {

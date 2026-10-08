@@ -6,6 +6,12 @@ import type { Role, Task } from '../api';
 import { Avatar, Portal, StatusDot, formatDue, useEscapeToClose } from '../ui';
 import { peopleApi, personName, type Person, type PersonInput, type TeamFull } from './peopleApi';
 import { ask } from '../../components/ask';
+import { FEATURES } from '../../config/features';
+import { PersonHistory, PersonHistoryHeading } from './PersonHistory';
+
+/** The three rungs the firm uses. The API refuses anything outside them, so a spreadsheet
+ *  carrying a 4 is an error rather than a quietly invented fourth level. */
+export const LEVELS = [1, 2, 3];
 
 export const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member', limited: 'Limited member', guest: 'Guest' };
 
@@ -59,6 +65,14 @@ const ProfileFields: React.FC<{
     {adminFields && (
       <>
         <Field label="Designation"><input aria-label="Designation" value={form.designation ?? ''} onChange={(e) => set({ designation: e.target.value })} placeholder="e.g. HR Business Partner" className={inputCls} /></Field>
+        {/* The rung, apart from the title: "Executive" and "Senior Executive" are two
+            designations at two levels, and only the number sorts the same way everywhere. */}
+        <Field label="Level">
+          <select aria-label="Level" value={form.level ?? ''} onChange={(e) => set({ level: e.target.value ? Number(e.target.value) : null })} className={inputCls}>
+            <option value="">No level</option>
+            {LEVELS.map((n) => <option key={n} value={n}>Level {n}</option>)}
+          </select>
+        </Field>
         <Field label="Department"><input aria-label="Department" value={form.department ?? ''} onChange={(e) => set({ department: e.target.value })} placeholder="e.g. HR" className={inputCls} /></Field>
         <Field label="Reporting manager">
           <select aria-label="Reporting manager" value={form.manager_id ?? ''} onChange={(e) => set({ manager_id: e.target.value || null })} className={inputCls}>
@@ -144,10 +158,15 @@ export const AddPersonDialog: React.FC<{
             <input type="checkbox" checked={!!form.send_invite} onChange={(e) => setForm((f) => ({ ...f, send_invite: e.target.checked }))} />
             Also email them an invitation
           </label>
-          <label className="mt-1 flex items-center gap-2 text-sm text-gray-700">
-            <input type="checkbox" checked={!!form.start_joiner_checklist} onChange={(e) => setForm((f) => ({ ...f, start_joiner_checklist: e.target.checked }))} />
-            Start the joiner checklist (induction, learning, reviews and HR reminders, as in the SOP)
-          </label>
+          {/* The joiner checklist is not a decision to make while typing someone's name in --
+              it is HR's, afterwards, from the person's own page. The plan, the tasks it makes and
+              the leaver rules that match it are all untouched. */}
+          {FEATURES.joinerChecklistOnAdd && (
+            <label className="mt-1 flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={!!form.start_joiner_checklist} onChange={(e) => setForm((f) => ({ ...f, start_joiner_checklist: e.target.checked }))} />
+              Start the joiner checklist (induction, learning, reviews and HR reminders, as in the SOP)
+            </label>
+          )}
           {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
@@ -228,6 +247,11 @@ export const PersonPanel: React.FC<{
   const [form, setForm] = useState<PersonInput>({});
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // Bumped after anything that moves them, so the history below reflects what just happened
+  // rather than needing the panel closed and reopened.
+  const [historyKey, setHistoryKey] = useState(0);
+  const [movingTeam, setMovingTeam] = useState(false);
+  const [moveNote, setMoveNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<'offboard' | 'joiner' | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
@@ -241,7 +265,7 @@ export const PersonPanel: React.FC<{
   const reports = useMemo(() => people.filter((p) => p.manager_id === person.user.id), [people, person.user.id]);
   const startEdit = () => {
     setForm({
-      name: person.user.display_name ?? '', designation: person.designation ?? '', department: person.department ?? '',
+      name: person.user.display_name ?? '', designation: person.designation ?? '', level: person.level, department: person.department ?? '',
       manager_id: person.manager_id, phone: person.phone ?? '', employee_code: person.employee_code ?? '',
       date_of_joining: person.date_of_joining, location: person.location ?? '', team_ids: person.team_ids, role: person.role,
       date_of_birth: person.date_of_birth, marriage_anniversary: person.marriage_anniversary, takes_interviews: person.takes_interviews,
@@ -252,7 +276,7 @@ export const PersonPanel: React.FC<{
     setError(null);
     const body: PersonInput = isAdmin ? { ...form } : { name: form.name, phone: form.phone, location: form.location };
     if (!isAdmin || person.role === 'owner' || body.role === person.role) delete body.role;
-    try { await peopleApi.update(ws, person.user.id, body); setEditing(false); onChanged(); } catch (e) { setError((e as Error).message); }
+    try { await peopleApi.update(ws, person.user.id, body); setEditing(false); setHistoryKey((k) => k + 1); onChanged(); } catch (e) { setError((e as Error).message); }
   };
   const resend = async () => {
     const out = await peopleApi.resend(ws, person.user.id);
@@ -260,12 +284,25 @@ export const PersonPanel: React.FC<{
     onChanged();
   };
   const remove = async () => {
-    if (!(await ask.confirm({ danger: true, title: `Remove ${personName(person)} from the workspace? Their tasks stay, but they lose access.` }))) return;
+    // The weakest of the three, and the one that looks strongest. It deletes the membership --
+    // including the record that they were ever turned off -- so nothing afterwards says they
+    // should not be added again. Say so, and point at the two that do more.
+    if (!(await ask.confirm({
+      danger: true,
+      title: `Remove ${personName(person)} from the workspace?`,
+      body: 'Their tasks, comments and time stay. They lose access now — but nothing stops them being added again later. To keep them out, use Offboard… and tick "Block this address", or block it under Admin → Blocked addresses.',
+      confirmLabel: 'Remove anyway',
+    }))) return;
     try { await peopleApi.remove(ws, person.user.id); onChanged(); onClose(); } catch (e) { setError((e as Error).message); }
   };
   const act = async (fn: () => Promise<unknown>, done?: string) => {
     setError(null);
-    try { await fn(); if (done) setNote(done); onChanged(); } catch (e) { setError((e as Error).message); }
+    try {
+      await fn();
+      if (done) { setNote(done); setMoveNote(done); }
+      setHistoryKey((k) => k + 1);
+      onChanged();
+    } catch (e) { setError((e as Error).message); setMoveNote(null); }
   };
   const photo = (file: File | undefined) => file && act(() => peopleApi.setAvatar(ws, person.user.id, file), 'Photo updated.');
   const makeOwner = async () => await ask.confirm(`Make ${personName(person)} the owner of this workspace? You become an admin.`)
@@ -327,9 +364,41 @@ export const PersonPanel: React.FC<{
                 {info(<Cake size={14} />, 'Birthday', person.date_of_birth ? new Date(`${person.date_of_birth}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : null)}
                 {info(<Heart size={14} />, 'Anniversary', person.marriage_anniversary ? new Date(`${person.marriage_anniversary}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : null)}
                 {isAdmin && info(<ClipboardCheck size={14} />, 'Joiner checklist', person.joiner_tasks ? `${person.joiner_tasks} tasks created` : 'Not started')}
-                {info(<Users size={14} />, 'Teams', person.team_ids.length ? (
-                  <span className="flex flex-wrap gap-1">{person.team_ids.map((id) => { const t = teams.find((x) => x.id === id); return t ? <Link key={id} to={`/people/teams/${id}`} onClick={onClose} className="rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700 no-underline">{t.name}</Link> : null; })}</span>
-                ) : null)}
+                {info(<Users size={14} />, 'Teams', (
+                  <span className="flex flex-wrap items-center gap-1">
+                    {person.team_ids.map((id) => { const t = teams.find((x) => x.id === id); return t ? <Link key={id} to={`/people/teams/${id}`} onClick={onClose} className="rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700 no-underline">{t.name}</Link> : null; })}
+                    {person.team_ids.length === 0 && <span className="text-xs text-gray-400">No team</span>}
+                    {canEdit && !left && (
+                      <button type="button" onClick={() => { setMovingTeam(!movingTeam); setMoveNote(null); }}
+                        className="rounded-full border border-dashed border-gray-300 px-2 py-0.5 text-xs text-gray-600 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700">
+                        {movingTeam ? 'Cancel' : 'Move…'}
+                      </button>
+                    )}
+                  </span>
+                ))}
+                {movingTeam && canEdit && (
+                  <div className="mb-2 ml-6 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-2.5">
+                    <span className="text-xs text-gray-600">Move to</span>
+                    <select
+                      aria-label={`Move ${personName(person)} to a team`}
+                      defaultValue={person.team_ids[0] ?? ''}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        act(
+                          () => peopleApi.update(ws, person.user.id, { team_ids: id ? [id] : [] }),
+                          id ? `Moved to ${teams.find((t) => t.id === id)?.name}.` : 'Taken out of every team.',
+                        ).then(() => setMovingTeam(false));
+                      }}
+                      className="h-8 rounded-lg border border-gray-300 bg-white px-2 text-sm transition-colors hover:border-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/15"
+                    >
+                      <option value="">No team</option>
+                      {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                    {/* The one thing people are unsure about, said before they pick. */}
+                    <span className="text-[11px] text-gray-500">They leave the team they are in now.</span>
+                    {moveNote && <span className="w-full text-xs text-emerald-700">{moveNote}</span>}
+                  </div>
+                )}
                 {reports.length > 0 && info(<UserPlus size={14} />, 'Direct reports', (
                   <span className="flex flex-wrap gap-1">{reports.map((r) => <button key={r.user.id} type="button" onClick={() => onOpenPerson(r.user.id)} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700 hover:bg-gray-200">{personName(r)}</button>)}</span>
                 ))}
@@ -346,6 +415,12 @@ export const PersonPanel: React.FC<{
                     : <button type="button" onClick={turnOff} className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100"><Power size={13} /> Turn off access</button>)}
                   {isAdmin && person.role !== 'owner' && !isMe && <button type="button" onClick={remove} className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"><Trash2 size={13} /> Remove from workspace</button>}
                 </div>
+                {isAdmin && (
+                  <>
+                    <PersonHistoryHeading />
+                    <PersonHistory ws={ws} userId={person.user.id} refreshKey={historyKey} />
+                  </>
+                )}
                 <h3 className="mb-1 mt-6 text-xs font-semibold uppercase tracking-wide text-gray-400">Assigned work {tasks ? tasks.length : ''}</h3>
                 {tasks === null ? <p className="text-sm text-gray-400">Loading…</p> : tasks.length === 0 ? <p className="text-sm text-gray-400">No open tasks you can see.</p> : (
                   <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">

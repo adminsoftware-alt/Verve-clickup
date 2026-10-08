@@ -1,14 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Archive, CalendarDays, Check, ChevronDown, ChevronRight, CircleDot, Flag, Hourglass, Lock, Plus, Repeat, Share2,
-  Shapes, Tag as TagIcon, Users, X,
+  Archive, CalendarDays, Check, ChevronDown, ChevronRight, CircleDot, Flag, Hourglass, Lock, Repeat, Share2,
+  Play, Shapes, Tag as TagIcon, Timer, Users, X,
 } from 'lucide-react';
 import { useWork, useMe } from './WorkContext';
 import { useAuth } from '../components/AuthContext';
 import { workApi, type Status, type Task, type TaskDetail, type TaskGroup, type TaskInput, type UserRef } from './api';
-import { Menu, PRIORITIES, Portal, StatusDot, useEscapeToClose } from './ui';
+import { Menu, PRIORITIES, Portal, StatusDot, formatDuration, useEscapeToClose } from './ui';
 import { ShareDialog } from './ShareDialog';
-import { TaskTimeSection } from './TaskTimeSection';
 import { AssigneePicker } from './task/AssigneePicker';
 import { rememberTask } from './recent';
 import { RecurrenceEditor } from './RecurrenceEditor';
@@ -19,12 +18,16 @@ import { FieldsDialog } from './fields/FieldsDialog';
 import { RichTextEditor } from './task/RichText';
 import { TaskRelations } from './task/TaskLinks';
 import { Select } from './Select';
+import { TrackTime } from './task/TrackTime';
+import { Subtasks } from './task/Subtasks';
+import { LayoutSwitch, SHELL, usePanelLayout } from './task/LayoutSwitch';
+import { Popover } from './timesheets/pieces';
 import { DurationInput } from './DurationInput';
 import { FEATURES } from '../config/features';
 import { TaskTypesDialog, TypeIcon } from './LocationSettings';
 import { TaskActions } from './task/TaskActions';
 import { LeaveWarning } from './leave/LeaveWarning';
-import { DateField } from './DateField';
+import { DateRange } from './DateField';
 import { TaskLists, TimeInStatusSection } from './task/TaskMore';
 import { Bar } from './Skeleton';
 import { ask } from '../components/ask';
@@ -38,8 +41,10 @@ import { ask } from '../components/ask';
  * needs the full width -- people and tags.
  */
 const Field: React.FC<{ label: string; icon?: React.ReactNode; wide?: boolean; children: React.ReactNode }> = ({ label, icon, wide, children }) => (
-  <div className={`group/field grid min-h-[34px] grid-cols-[104px_minmax(0,1fr)] items-center gap-2 rounded-lg px-1.5 transition-colors hover:bg-gray-50 ${wide ? 'md:col-span-2' : ''}`}>
-    <span className="flex items-center gap-1.5 text-[12px] font-medium text-gray-500">
+  // The whole row lights up, not just the control: the label is part of what you are aiming at,
+  // and a hover that stops halfway across reads as two things rather than one field.
+  <div className={`group/field grid min-h-9 grid-cols-[104px_minmax(0,1fr)] items-center gap-2 rounded-lg px-2 transition-colors hover:bg-gray-50 ${wide ? 'md:col-span-2' : ''}`}>
+    <span className="flex items-center gap-1.5 text-[12px] font-medium text-gray-500 transition-colors group-hover/field:text-gray-700">
       {icon && <span className="shrink-0 text-gray-400">{icon}</span>}
       <span className="truncate">{label}</span>
     </span>
@@ -106,15 +111,16 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
   const [groups, setGroups] = useState<TaskGroup[]>([]);
   const [subtasks, setSubtasks] = useState<Task[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [newSubtask, setNewSubtask] = useState('');
   const [tagDraft, setTagDraft] = useState('');
   const [sharing, setSharing] = useState(false);
+  const [layout, setLayout] = usePanelLayout();
+  // Only the full-screen shape is wide enough to carry a second column.
+  const sideBySide = layout === 'full';
   const [feedKey, setFeedKey] = useState(0);
   const [managingFields, setManagingFields] = useState(false);
   const [managingTypes, setManagingTypes] = useState(false);
   const [fieldError, setFieldError] = useState<string | null>(null);
   // As in ClickUp, only people who can open the List can be given the task.
-  const [timeVersion, setTimeVersion] = useState(0);
   const [assignable, setAssignable] = useState<UserRef[] | null>(null);
 
   const load = useCallback(async () => {
@@ -152,19 +158,6 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
     }
   };
 
-  const addSubtask = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!task || !newSubtask.trim()) return;
-    try {
-      await workApi.createTask(task.list_id, { name: newSubtask.trim(), parent_id: task.id });
-      setNewSubtask('');
-      await load();
-      onChanged();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
   const remove = async () => {
     if (!task || !await ask.confirm({ danger: true, title: `Delete "${task.name}" and its subtasks?` })) return;
     await workApi.deleteTask(task.id);
@@ -182,13 +175,13 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
 
   return (
     <Portal>
-    <div className="fixed inset-0 z-[90] flex justify-end bg-black/20" onMouseDown={onClose}>
+    <div className={`fixed inset-0 z-[90] flex bg-black/20 ${SHELL[layout].backdrop}`} onMouseDown={onClose}>
       <aside
         ref={panelRef}
         role="dialog"
         aria-label="Task details"
         onMouseDown={(e) => e.stopPropagation()}
-        className="flex h-full w-full max-w-[46rem] flex-col bg-white shadow-2xl"
+        className={`flex flex-col overflow-hidden bg-white ${SHELL[layout].panel}`}
       >
         {!task ? (
           error
@@ -222,6 +215,7 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                 <button type="button" title="Share task" onClick={() => setSharing(true)} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
                   <Share2 size={16} />
                 </button>
+                <LayoutSwitch value={layout} onChange={setLayout} />
                 <TaskActions task={task} onChanged={onChanged} onReload={() => { load(); setFeedKey((k) => k + 1); }} onOpen={onOpen} onDeleted={remove} />
                 <button type="button" title="Close" onClick={onClose} className="rounded p-1.5 text-gray-400 hover:bg-gray-100">
                   <X size={18} />
@@ -233,7 +227,9 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
               <div className="flex items-center gap-2 bg-amber-50 px-6 py-1.5 text-xs text-amber-800"><Archive size={13} /> This task is archived.</div>
             )}
             <div className="flex min-h-0 flex-1">
-            <div className="min-w-0 flex-1 overflow-y-auto px-6 py-4">
+            {/* Full screen caps each section at a readable column rather than stretching the
+                fields across a 27-inch monitor. */}
+            <div className={`min-w-0 flex-1 overflow-y-auto px-6 py-4 ${layout === 'full' ? '[&>*]:mx-auto [&>*]:w-full [&>*]:max-w-5xl' : ''}`}>
               <div className="mb-1 flex items-center gap-2">
                 {task.custom_id && on('custom_task_ids') && (
                   <button type="button" title="Copy task ID" onClick={() => navigator.clipboard?.writeText(task.custom_id!)}
@@ -320,12 +316,20 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                   />
                   <LeaveWarning dueDate={task.due_date} assignees={task.assignees} />
                 </Field>
-                <Field label="Start date" icon={<CalendarDays size={14} />}>
-                  <DateField label="Start date" disabled={!editable} value={task.start_date} onChange={(iso) => save({ start_date: iso })} />
+                <Field label="Dates" icon={<CalendarDays size={14} />}>
+                  <DateRange
+                    start={task.start_date} due={task.due_date} disabled={!editable} overdue={task.is_overdue}
+                    onChange={(patch) => save(patch)}
+                    recurrence={task.recurrence}
+                    statuses={statuses}
+                    onRecurrence={editable ? async (value) => {
+                      setError(null);
+                      setTask(await workApi.updateTask(taskId, { recurrence: value }));
+                      onChanged();
+                    } : undefined}
+                  />
                 </Field>
-                <Field label="Due date" icon={<CalendarDays size={14} />}>
-                  <DateField label="Due date" disabled={!editable} value={task.due_date} overdue={task.is_overdue} onChange={(iso) => save({ due_date: iso })} />
-                </Field>
+
                 {on('time_estimates') && <Field label="Time estimate" icon={<Hourglass size={14} />}>
                   <DurationInput
                     key={task.id + String(task.time_estimate_seconds)}
@@ -335,6 +339,41 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                     placeholder="3, 2.30, 45m"
                     onChange={(seconds) => { if (seconds !== task.time_estimate_seconds) save({ time_estimate_seconds: seconds }); }}
                   />
+                </Field>}
+                {on('time_tracking') && <Field label="Track time" icon={<Timer size={14} />}>
+                  {/* Beside the estimate on purpose: how long you thought it would take and how
+                      long it did are the same question asked twice. */}
+                  <Popover
+                    width={432}
+                    align="left"
+                    trigger={(open) => (
+                      // Just the button. The running total was on the row whether or not anyone
+                      // was asking; the hours, the entries and the timer are all one click away,
+                      // and the estimate beside it is the figure that is worth reading at a glance.
+                      <button
+                        type="button"
+                        onClick={open}
+                        title={task.time_tracked_seconds ? `${formatDuration(task.time_tracked_seconds)} tracked — open the timer and entries` : 'Start the timer, or add time'}
+                        aria-label="Track time"
+                        className={`flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-left text-sm transition-colors ${
+                          task.time_tracked_seconds
+                            ? 'border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100'
+                            : 'border-transparent text-gray-500 hover:border-gray-200 hover:bg-white'}`}
+                      >
+                        <Play size={13} className="shrink-0" fill={task.time_tracked_seconds ? 'currentColor' : 'none'} />
+                        {!task.time_tracked_seconds && <span className="text-gray-400">Start</span>}
+                      </button>
+                    )}
+                  >
+                    {(close) => (
+                      <TrackTime
+                        taskId={task.id}
+                        canTrack={editable}
+                        onClose={close}
+                        onChanged={() => { load(); onChanged(); }}
+                      />
+                    )}
+                  </Popover>
                 </Field>}
                 <Field label="Type" icon={<Shapes size={14} />}>
                   <Select
@@ -350,7 +389,7 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                     ]}
                   />
                 </Field>
-                <Field label="Group" icon={<Users size={14} />}>
+                {FEATURES.taskGroupField && <Field label="Group" icon={<Users size={14} />}>
                   <Select
                     label="Group"
                     variant="bare"
@@ -359,11 +398,12 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                     onChange={(v) => save({ group_id: v || null })}
                     choices={[{ value: '', label: 'No group' }, ...groups.map((g) => ({ value: g.id, label: g.name }))]}
                   />
-                </Field>
-                <Field label="Repeat" icon={<Repeat size={14} />}>
+                </Field>}
+                {FEATURES.taskRepeatField && <Field label="Repeat" icon={<Repeat size={14} />}>
                   <RecurrenceEditor
                     value={task.recurrence}
                     dueDate={task.due_date}
+                    statuses={statuses}
                     disabled={!editable}
                     onSave={async (value) => {
                       setError(null);
@@ -371,7 +411,7 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                       onChanged();
                     }}
                   />
-                </Field>
+                </Field>}
                 {on('sprint_points', false) && (
                   <Field label="Sprint points">
                     <input
@@ -383,7 +423,7 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                     />
                   </Field>
                 )}
-                {on('tags') && <Field label="Tags" icon={<TagIcon size={14} />} wide>
+                {FEATURES.taskTagsField && on('tags') && <Field label="Tags" icon={<TagIcon size={14} />} wide>
                   <div className="flex flex-wrap items-center gap-1.5 px-2">
                     {task.tags.map((tag) => (
                       <span key={tag.id} className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: tag.bg_color, color: tag.fg_color }}>
@@ -406,7 +446,7 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
 
               <TaskLists taskId={task.id} isSubtask={!!task.parent_id} editable={editable} enabled={on('multiple_lists')} onChanged={() => { load(); onChanged(); }} />
 
-              {((task.fields?.length ?? 0) > 0 || editable) && (
+              {FEATURES.taskCustomFields && ((task.fields?.length ?? 0) > 0 || editable) && (
                 <section className="mt-4 border-t border-gray-100 pt-3" aria-label="Custom fields">
                   <div className="mb-1 flex items-center gap-2">
                     <h4 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Custom fields</h4>
@@ -442,33 +482,24 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                 <RichTextEditor key={task.id} value={task.description ?? ''} disabled={!editable} onSave={(text) => save({ description: text || null })} />
               </div>
 
-              {on('time_tracking') && (
-                <TaskTimeSection
-                  key={timeVersion}
-                  taskId={task.id}
-                  canTrack={editable}
-                  onChanged={() => { setTimeVersion((v) => v + 1); load(); onChanged(); }}
-                />
-              )}
-              <TimeInStatusSection taskId={task.id} refreshKey={feedKey} />
+              {/* Time tracked was a whole section down here as well as the Track time field
+                  beside the estimate. The field carries the timer, the entries and the totals,
+                  so the section was the same thing said twice, further from the estimate it
+                  wants comparing against. TaskTimeSection still exists and still works. */}
+              {FEATURES.taskTimeInStatus && <TimeInStatusSection taskId={task.id} refreshKey={feedKey} />}
 
-              <div className="mt-4 border-t border-gray-100 pt-3">
-                <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">Subtasks {subtasks.length > 0 && <span className="text-gray-400">{subtasks.length}</span>}</h4>
-                <div className="divide-y divide-gray-100 rounded-md border border-gray-200">
-                  {subtasks.map((sub) => (
-                    <button key={sub.id} type="button" onClick={() => onOpen(sub.id)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50">
-                      <StatusDot status={sub.status} size={12} />
-                      <span className={`flex-1 ${sub.status.group === 'closed' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{sub.name}</span>
-                    </button>
-                  ))}
-                  {task.permission_level === 'full' && (
-                    <form onSubmit={addSubtask} className="flex items-center gap-2 px-3 py-2">
-                      <Plus size={14} className="text-gray-400" />
-                      <input value={newSubtask} onChange={(e) => setNewSubtask(e.target.value)} placeholder="Add subtask" className="flex-1 text-sm focus:outline-none" />
-                    </form>
-                  )}
-                </div>
-              </div>
+              <Subtasks
+                listId={task.list_id}
+                parentId={task.id}
+                subtasks={subtasks}
+                statuses={statuses}
+                people={assignable}
+                editable={editable}
+                canAdd={task.permission_level === 'full'}
+                onOpen={onOpen}
+                onChanged={() => { load(); onChanged(); }}
+                onError={setError}
+              />
 
               {/* Dependencies and links still work and still block a status change; they are
                   just not a section on the panel. */}
@@ -478,10 +509,20 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
               <Checklists taskId={task.id} editable={editable} me={meId} onChanged={() => { load(); setFeedKey((k) => k + 1); onChanged(); }} />
               <Attachments taskId={task.id} canAttach={task.permission_level !== 'view'} isFull={task.permission_level === 'full'} me={meId}
                 onChanged={() => { setFeedKey((k) => k + 1); onChanged(); }} />
-              <div className="mt-5 h-[26rem] overflow-hidden rounded-lg border border-gray-200">
-                <TaskFeed taskId={task.id} canComment={task.permission_level !== 'view'} refreshKey={feedKey} onChanged={onChanged} />
-              </div>
+              {/* On a narrow panel the activity follows the task, because there is nowhere
+                  else for it to go. Given the width, it belongs beside it: the history is read
+                  while the task is being read, not after scrolling past everything else. */}
+              {!sideBySide && (
+                <div className="mt-5 h-[26rem] overflow-hidden rounded-lg border border-gray-200">
+                  <TaskFeed taskId={task.id} canComment={task.permission_level !== 'view'} refreshKey={feedKey} onChanged={onChanged} />
+                </div>
+              )}
             </div>
+            {sideBySide && (
+              <aside aria-label="Activity" className="hidden w-[24rem] shrink-0 border-l border-gray-200 lg:block xl:w-[26rem]">
+                <TaskFeed taskId={task.id} canComment={task.permission_level !== 'view'} refreshKey={feedKey} onChanged={onChanged} />
+              </aside>
+            )}
             </div>
           </>
         )}

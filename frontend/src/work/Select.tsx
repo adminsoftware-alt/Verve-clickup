@@ -21,7 +21,7 @@ export interface Choice {
 
 /** A boxed field in a form; a bare one in a panel, where borders show only under the pointer. */
 const TRIGGER = {
-  boxed: 'flex h-9 w-full cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-800 transition-colors hover:border-gray-400',
+  boxed: 'flex h-9 w-full cursor-pointer items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 transition-colors hover:border-gray-400 hover:bg-gray-50/50',
   bare: 'flex h-8 w-full cursor-pointer items-center gap-2 rounded-md border border-transparent px-2 text-sm text-gray-800 transition-colors hover:border-gray-200 hover:bg-white',
 };
 

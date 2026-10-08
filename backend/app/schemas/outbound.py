@@ -16,7 +16,7 @@ class Channels(BaseModel):
 
 
 class DeliveryOut(BaseModel):
-    email_notifications: Literal["off", "instant", "daily"]
+    email_notifications: Literal["off", "instant", "daily", "weekly", "monthly"]
     digest_hour: int
     timezone: str
     weekly_team_digest: bool
@@ -29,7 +29,7 @@ class DeliveryOut(BaseModel):
 class DeliveryIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    email_notifications: Optional[Literal["off", "instant", "daily"]] = None
+    email_notifications: Optional[Literal["off", "instant", "daily", "weekly", "monthly"]] = None
     digest_hour: Optional[Annotated[int, Field(ge=0, le=23)]] = None
     timezone: Optional[Annotated[str, StringConstraints(max_length=64)]] = None
     weekly_team_digest: Optional[bool] = None

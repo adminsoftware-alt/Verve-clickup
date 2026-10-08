@@ -75,12 +75,10 @@ export const StatCard: React.FC<{
   return (
     <div className={`group/stat relative flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 transition-colors ${skin.card}`}>
       {/* The filter sits above the tile rather than inside it: the tile itself is the button
-          that opens the tasks, and a button inside a button is not a thing. */}
-      {filter && (
-        <span className="absolute right-2 top-2 z-10 opacity-0 transition-opacity focus-within:opacity-100 group-hover/stat:opacity-100">
-          {filter}
-        </span>
-      )}
+          that opens the tasks, and a button inside a button is not a thing. It is always on
+          show -- hidden until hover, it was a control nobody knew was there, and a card could
+          be filtered with nothing on screen saying so. The title keeps clear of it. */}
+      {filter && <span className="absolute right-2 top-2 z-10">{filter}</span>}
       <button
         type="button"
         onClick={onDrill}
@@ -91,7 +89,7 @@ export const StatCard: React.FC<{
         <Icon size={17} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-medium text-gray-600">{card.title}</span>
+        <span className={`block truncate text-xs font-medium text-gray-600 ${filter ? 'pr-7' : ''}`}>{card.title}</span>
         <span className="block text-2xl font-semibold leading-tight text-gray-900">
           {value === null || value === undefined ? <span className="text-gray-300">—</span> : value}
         </span>
@@ -127,7 +125,9 @@ export const PeriodBar: React.FC<{
       )}
       {!value && <span className="mr-auto text-xs text-gray-400">Each card is on its own window — pick one to line them up.</span>}
       <PeriodMenu
-        label={value ? (choices.find(([v]) => v === preset)?.[1] ?? periodLabel(value)) : 'Mixed'}
+        // With no shared window the button says what it is for rather than naming a state nobody
+        // can pick: "Mixed" read like a period you had chosen, and sat where "This week" would.
+        label={value ? (choices.find(([v]) => v === preset)?.[1] ?? periodLabel(value)) : 'Period'}
         preset={preset}
         choices={choices}
         disabled={!canEdit}

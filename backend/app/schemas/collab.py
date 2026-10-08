@@ -58,6 +58,9 @@ class TaskRefOut(BaseModel):
     name: str
     list_id: uuid.UUID
     status: Optional[StatusOut] = None
+    # Shown on the row, and what the Inbox's priority and due filters sort on.
+    priority: Optional[int] = None
+    due_date: Optional[datetime] = None
 
 
 class CommentWithTask(CommentOut):
@@ -84,6 +87,19 @@ class WatcherIn(BaseModel):
 class ChecklistIn(BaseModel):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)] = "Checklist"
     items: List[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]] = Field(default_factory=list, max_length=200)
+
+
+class ChecklistTemplateIn(BaseModel):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    items: List[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]] = Field(default_factory=list, max_length=200)
+
+
+class ChecklistTemplateOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    items: List[str]
+    item_count: int
+    created_at: datetime
 
 
 class ChecklistUpdate(BaseModel):
@@ -122,6 +138,9 @@ class InboxItem(BaseModel):
     saved: bool
     snoozed_until: Optional[datetime]
     created_at: datetime
+
+
+InboxDue = Literal["overdue", "today", "week", "none"]
 
 
 class InboxCounts(BaseModel):

@@ -1,8 +1,9 @@
 """The Inbox (notifications), notification settings and reminders."""
 
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from datetime import datetime, time, timedelta, timezone
+from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
@@ -26,6 +27,20 @@ from app.db.models import PermissionLevel
 
 CLEARED_DAYS = 30
 
+# What the filter offers, as groups rather than raw kinds: "Comments" is one thing to a person
+# and three kinds to the database. A group with nothing in it is simply never chosen.
+KIND_GROUPS: Dict[str, List[str]] = {
+    "assigned": ["assigned", "assignees"],
+    "mentions": ["mentioned", "chat_mention"],
+    "comments": ["comment", "reply", "assigned_comment"],
+    "status": ["status"],
+    "dates": ["due_date"],
+    "shared": ["shared", "space_join_request", "space_join_decision"],
+    "reminders": ["reminder", "timesheet_reminder", "escalation", "automation"],
+    "leave": ["leave_request", "leave_decision"],
+    "task_detail": ["attachment", "checklist_item", "custom_field"],
+}
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -46,9 +61,56 @@ def _mine(access: Access):
     return and_(Notification.user_id == access.user_id, Notification.workspace_id == access.workspace_id)
 
 
-def items(db: Session, access: Access, tab: str, limit: int = 100) -> List[c.InboxItem]:
+def _their_zone(db: Session, access: Access) -> ZoneInfo:
+    """"Due today" means today where the person is, as it does in the daily digest."""
+    member = db.get(WorkspaceMember, (access.workspace_id, access.user_id))
+    try:
+        return ZoneInfo((member.timezone if member else None) or "Asia/Kolkata")
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo("Asia/Kolkata")
+
+
+def _due_filter(due: str, now: datetime, zone: ZoneInfo):
+    if due == "none":
+        return Task.due_date.is_(None)
+    tomorrow = datetime.combine(now.astimezone(zone).date() + timedelta(days=1), time.min, zone)
+    if due == "overdue":
+        return and_(Task.due_date.is_not(None), Task.due_date < now)
+    if due == "today":
+        return and_(Task.due_date >= now, Task.due_date < tomorrow)
+    if due == "week":  # the rest of today and the six days after it
+        return and_(Task.due_date >= now, Task.due_date < tomorrow + timedelta(days=6))
+    raise Invalid(f"Unknown due filter: {due}")
+
+
+def items(
+    db: Session,
+    access: Access,
+    tab: str,
+    limit: int = 100,
+    groups: Optional[List[str]] = None,
+    unread: bool = False,
+    priority: Optional[List[int]] = None,
+    due: Optional[str] = None,
+) -> List[c.InboxItem]:
     now = _now()
-    rows = list(db.scalars(select(Notification).where(_mine(access), _tab_filter(tab, now)).order_by(Notification.created_at.desc()).limit(limit)))
+    q = select(Notification).where(_mine(access), _tab_filter(tab, now))
+    if groups:
+        unknown = [g for g in groups if g not in KIND_GROUPS]
+        if unknown:
+            raise Invalid(f"Unknown filter: {', '.join(sorted(unknown))}")
+        q = q.where(Notification.kind.in_([k for g in groups for k in KIND_GROUPS[g]]))
+    if unread:
+        q = q.where(Notification.read_at.is_(None))
+    if priority or due:
+        # Both of these ask something about a task, so an item that is not about one -- a
+        # timesheet reminder, a leave decision -- cannot match and the join drops it.
+        q = q.join(Task, Task.id == Notification.task_id)
+        if priority:
+            q = q.where(Task.priority.in_(priority))
+        if due:
+            q = q.where(_due_filter(due, now, _their_zone(db, access)))
+    rows = list(db.scalars(q.order_by(Notification.created_at.desc()).limit(limit)))
     if not rows:
         return []
     users = {u.id: u for u in db.scalars(select(User).where(User.id.in_({r.actor_id for r in rows if r.actor_id})))}
@@ -67,7 +129,11 @@ def items(db: Session, access: Access, tab: str, limit: int = 100) -> List[c.Inb
         out.append(c.InboxItem(
             id=r.id, kind=r.kind, category=r.category,
             actor=s.UserOut.model_validate(users[r.actor_id]) if r.actor_id in users else None,
-            task=c.TaskRefOut(id=task.id, name=task.name, list_id=task.list_id, status=s.StatusOut.model_validate(statuses[task.status_id])) if task else None,
+            task=c.TaskRefOut(
+                id=task.id, name=task.name, list_id=task.list_id,
+                status=s.StatusOut.model_validate(statuses[task.status_id]) if task.status_id in statuses else None,
+                priority=task.priority, due_date=task.due_date,
+            ) if task else None,
             comment={"id": str(comment.id), "body": comment.body[:300]} if comment else None,
             reminder={"id": str(reminder.id), "title": reminder.title, "remind_at": reminder.remind_at.isoformat()} if reminder else None,
             data=r.data, read=r.read_at is not None, cleared=r.cleared_at is not None, saved=r.saved,

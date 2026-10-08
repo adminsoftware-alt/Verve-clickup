@@ -112,6 +112,10 @@ def list_dashboards(db: Session, access: Access) -> List[d.DashboardSummary]:
         level, relation = resolve(standing, dash, shares[dash.id])
         if level is None:
             continue
+        # An admin has no personal board of their own (see home_dashboard); one made before that
+        # rule is not offered back to them, though it is still there if the rule is lifted.
+        if standing.is_admin and dash.standard == standard.MY_WORK and dash.owner_id == access.user_id:
+            continue
         summary = d.DashboardSummary(**_summary_fields(dash, level, relation, shares[dash.id], users, teams, counts.get(dash.id, 0)))
         theirs = 0 if dash.owner_id == access.user_id else 1
         out.append(((rank.get(dash.standard or "", 3), theirs, -dash.updated_at.timestamp()), summary))
@@ -119,21 +123,27 @@ def list_dashboards(db: Session, access: Access) -> List[d.DashboardSummary]:
 
 
 def home_dashboard(db: Session, access: Access) -> OpenedDashboard:
-    """The caller's own "My work" Dashboard: what the app opens on. Made now if they haven't got one."""
+    """What the app opens on: "My work", or, for an admin, the Company board.
+
+    An admin is not doing the task work, so their own open-task count is not the question they
+    have when they open the app; "how is the firm doing" is. Made now if they haven't got one.
+    """
     standing = Standing.load(db, access)
     if standing.is_guest:
         raise Forbidden("Guests don't have a Dashboard of their own")
     standard.ensure(db, access, standing)
-    dash = db.scalars(
-        select(Dashboard).where(
-            Dashboard.workspace_id == access.workspace_id,
-            Dashboard.standard == standard.MY_WORK,
-            Dashboard.owner_id == access.user_id,
-        )
-    ).first()
+    wanted = standard.COMPANY if standing.is_admin else standard.MY_WORK
+    query = select(Dashboard).where(
+        Dashboard.workspace_id == access.workspace_id,
+        Dashboard.standard == wanted,
+    )
+    if wanted == standard.MY_WORK:
+        query = query.where(Dashboard.owner_id == access.user_id)
+    dash = db.scalars(query).first()
     if dash is None:
         raise NotFound("Dashboard not found")
-    return OpenedDashboard(dash, standing, PermissionLevel.full, "mine")
+    level, relation = resolve(standing, dash, [])
+    return OpenedDashboard(dash, standing, level or PermissionLevel.full, relation or "mine")
 
 
 def cards_of(db: Session, dashboard_id: uuid.UUID) -> List[DashboardCard]:

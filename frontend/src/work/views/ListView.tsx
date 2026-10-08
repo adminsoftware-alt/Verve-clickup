@@ -5,6 +5,7 @@ import { AvatarStack, PriorityFlag, StatusDot, StatusPill, formatDue, formatDura
 import { formatClock, useNow, useRunningTimer } from '../RunningTimer';
 import { NO_GROUP, type GroupBy, type StatusGroupOfTasks } from './grouping';
 import { COLUMNS, type ColumnKey } from './viewSettings';
+import { usePhone } from '../useBreakpoint';
 import { FieldEditor, fieldApplies } from '../fields/FieldValue';
 import { useWork } from '../WorkContext';
 import { TypeIcon } from '../LocationSettings';
@@ -38,6 +39,8 @@ export const ListView: React.FC<{
   onManageGroups?: () => void;
   /** Whether "+ Add Task" is offered in a group; onCreate gets that group's key. */
   canAddIn: (groupKey: string) => boolean;
+  /** Why there is nothing to show, so the empty state can say something true. */
+  emptyBecause?: 'filters' | 'none-assigned' | 'nothing-here';
   onCreate: (name: string, key: string) => Promise<void>;
   onOpenTask: (id: string) => void;
   columns: ColumnKey[];
@@ -48,7 +51,7 @@ export const ListView: React.FC<{
   onSelect: (ids: string[], on: boolean) => void;
   /** The "+" at the end of the column headers: add a column (a custom field). */
   onAddColumn?: () => void;
-}> = ({ tasks, statuses, listName, groupBy, makeGroups, canAddIn, onCreate, onManageGroups, onOpenTask, columns, fields, people, onSetField, selected, onSelect, onAddColumn }) => {
+}> = ({ tasks, statuses, listName, groupBy, makeGroups, canAddIn, onCreate, onManageGroups, onOpenTask, columns, fields, people, onSetField, selected, onSelect, onAddColumn, emptyBecause }) => {
   const { locate, taskTypes } = useWork();
   const taskTypeOf = (t: Task) => (t.type_id ? taskTypes.find((x) => x.id === t.type_id) : undefined);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -81,6 +84,8 @@ export const ListView: React.FC<{
     const full = allGroups.filter((g) => g.tasks.length > 0);
     return full.length ? full : allGroups.slice(0, 1);
   }, [allGroups, showEmpty]);
+  // Below `md` the grid is 1,058px of sideways dragging, so the rows become cards instead.
+  const phone = usePhone();
   const shown = COLUMNS.filter((c) => columns.includes(c.key));
   const template = `28px minmax(380px,1fr) ${shown.map((c) => c.width).join(' ')}${fields.map(() => ' 160px').join('')}${onAddColumn ? ' 36px' : ''}`;
   const selecting = selected.size > 0;
@@ -132,6 +137,77 @@ export const ListView: React.FC<{
       );
       case 'created_at': return <div key={key} className="text-gray-600">{formatDue(task.created_at)}</div>;
     }
+  };
+
+  /**
+   * One task as two lines. Only the facts worth a glance: a phone is for deciding what to do
+   * next, not for auditing a time estimate.
+   */
+  const renderCard = (task: Task, depth: number): React.ReactNode => {
+    const kids = children.get(task.id) ?? [];
+    const open = expandedTasks.has(task.id);
+    const isSelected = selected.has(task.id);
+    const closed = task.status.group === 'closed';
+    const due = task.due_date ? new Date(task.due_date) : null;
+    const late = !!due && !closed && due < new Date();
+    // The full breadcrumb is three folders deep -- "VAPL Common Operation Tasks / Monthly Review
+    // / PMS - Dev" truncates to the first folder, which every task shares. The List is the part
+    // that tells them apart.
+    const full = statuses ? null : listName(task.list_id);
+    const where = full ? full.split(' / ').pop() : null;
+    return (
+      <React.Fragment key={task.id}>
+        <div
+          onClick={() => onOpenTask(task.id)}
+          className={`tap-row flex cursor-pointer items-start gap-2.5 border-b border-gray-100 py-2.5 pr-1 text-sm ${isSelected ? 'bg-brand-50/60' : 'active:bg-gray-50'}`}
+          style={{ paddingLeft: depth * 16 }}
+        >
+          {selecting && (
+            <span className="flex pt-1" onClick={(e) => e.stopPropagation()}>
+              <input type="checkbox" aria-label={`Select ${task.name}`} checked={isSelected}
+                onChange={(e) => onSelect([task.id], e.target.checked)} />
+            </span>
+          )}
+          <span className="flex shrink-0 pt-1"><StatusDot status={task.status} /></span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start gap-1.5">
+              <span className={`min-w-0 flex-1 break-words ${closed ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{task.name}</span>
+              {task.priority ? <span className="shrink-0 pt-0.5"><PriorityFlag priority={task.priority} withLabel={false} /></span> : null}
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-500">
+              {where && <span className="max-w-[55%] truncate">{where}</span>}
+              {due && (
+                <span className={late ? 'font-medium text-red-600' : ''}>{formatDue(task.due_date)}</span>
+              )}
+              {task.assignees.length > 0 && <AvatarStack users={task.assignees} max={3} />}
+              {task.subtask_count > 0 && <span className="inline-flex items-center gap-0.5"><GitBranch size={11} />{task.subtask_count}</span>}
+              {!!task.checklist_total && (
+                <span className={`inline-flex items-center gap-0.5 ${task.checklist_done === task.checklist_total ? 'text-emerald-600' : ''}`}>
+                  <CheckSquare size={11} />{task.checklist_done}/{task.checklist_total}
+                </span>
+              )}
+              {!!task.comment_count && <span className="inline-flex items-center gap-0.5"><MessageSquare size={11} />{task.comment_count}</span>}
+              {!!task.attachment_count && <span className="inline-flex items-center gap-0.5"><Paperclip size={11} />{task.attachment_count}</span>}
+              {!!task.waiting_on_open && <span title="Waiting on unfinished work" className="text-red-500"><Ban size={11} /></span>}
+              {task.recurrence && <span title="Repeats" className="text-brand-500"><Repeat size={11} /></span>}
+              {task.tags.map((tag) => (
+                <span key={tag.id} className="rounded px-1.5 py-px font-medium" style={{ backgroundColor: tag.bg_color, color: tag.fg_color }}>{tag.name}</span>
+              ))}
+            </div>
+          </div>
+          {kids.length > 0 && (
+            <button
+              type="button" aria-label={open ? `Hide the subtasks of ${task.name}` : `Show the subtasks of ${task.name}`}
+              onClick={(e) => { e.stopPropagation(); toggle(expandedTasks, task.id, setExpandedTasks); }}
+              className="tap -mr-1 shrink-0 self-center rounded-lg text-gray-400"
+            >
+              {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
+          )}
+        </div>
+        {open && kids.map((kid) => renderCard(kid, depth + 1))}
+      </React.Fragment>
+    );
   };
 
   const renderRow = (task: Task, depth: number): React.ReactNode => {
@@ -228,12 +304,32 @@ export const ListView: React.FC<{
     );
   }
   if (groups.length === 0 || groups.every((g) => g.tasks.length === 0 && !canAddIn(g.key))) {
-    return <div className="px-6 py-16 text-center text-sm text-gray-400">{statuses ? 'No tasks match.' : 'No tasks here yet. Open a List to add one.'}</div>;
+    // Three different nothings, and they want three different answers. "Open a List to add one"
+    // was the old catch-all, and a member cannot act on it -- making Spaces and Lists is a
+    // manager's job, so it read as an instruction they were failing to follow.
+    return (
+      <div className="px-6 py-16 text-center">
+        <p className="text-sm text-gray-500">
+          {statuses ? 'No tasks match what you are filtering by.'
+            : emptyBecause === 'filters' ? 'No tasks match what you are filtering by.'
+            : emptyBecause === 'none-assigned' ? 'Nothing is assigned to you right now.'
+            : 'No tasks here yet.'}
+        </p>
+        {!statuses && emptyBecause === 'none-assigned' && (
+          <p className="mt-1 text-xs text-gray-400">
+            Work turns up here when someone puts your name on it. Switch to <b>Everyone</b> above to see what the team is on.
+          </p>
+        )}
+        {!statuses && emptyBecause === 'filters' && (
+          <p className="mt-1 text-xs text-gray-400">Clear a filter to widen it.</p>
+        )}
+      </div>
+    );
   }
 
   return (
-    <div className="overflow-x-auto px-6 pb-24">
-      <div style={{ minWidth: 440 + shown.reduce((n, c) => n + parseInt(c.width, 10), 0) + fields.length * 160 + (onAddColumn ? 36 : 0) }}>
+    <div className={phone ? 'px-3 pb-24' : 'scroll-x px-6 pb-24'}>
+      <div style={phone ? undefined : { minWidth: 440 + shown.reduce((n, c) => n + parseInt(c.width, 10), 0) + fields.length * 160 + (onAddColumn ? 36 : 0) }}>
       {emptyCount > 0 && allGroups.some((g) => g.tasks.length > 0) && (
         <div className="mt-3 flex justify-end">
           <button type="button" onClick={() => setShowEmpty(!showEmpty)} className="text-xs text-gray-400 hover:text-gray-700">
@@ -260,17 +356,20 @@ export const ListView: React.FC<{
               )}
             </div>
             {!isCollapsed && (
-              <div className="ml-6">
-                <div className="grid border-b border-gray-200 py-1.5 pr-4 text-xs font-medium text-gray-400" style={{ gridTemplateColumns: template }}>
-                  <span /><span className="pl-12">Name</span>{shown.map((c) => <span key={c.key}>{c.label}</span>)}{fields.map((f) => <span key={f.id} className="truncate pr-2">{f.name}</span>)}
-                  {onAddColumn && (
-                    <button type="button" title="Add a column" aria-label="Add a column" onClick={onAddColumn}
-                      className="flex h-5 w-5 items-center justify-center rounded-full text-brand-600 hover:bg-brand-50"><Plus size={14} /></button>
-                  )}
-                </div>
-                {group.tasks.map((t) => renderRow(t, 0))}
+              <div className={phone ? '' : 'ml-6'}>
+                {!phone && (
+                  <div className="grid border-b border-gray-200 py-1.5 pr-4 text-xs font-medium text-gray-400" style={{ gridTemplateColumns: template }}>
+                    <span /><span className="pl-12">Name</span>{shown.map((c) => <span key={c.key}>{c.label}</span>)}{fields.map((f) => <span key={f.id} className="truncate pr-2">{f.name}</span>)}
+                    {onAddColumn && (
+                      <button type="button" title="Add a column" aria-label="Add a column" onClick={onAddColumn}
+                        className="flex h-5 w-5 items-center justify-center rounded-full text-brand-600 hover:bg-brand-50"><Plus size={14} /></button>
+                    )}
+                  </div>
+                )}
+                {group.tasks.map((t) => (phone ? renderCard(t, 0) : renderRow(t, 0)))}
                 {(() => {
-                  // ClickUp's "Calculate" row: totals for the time columns.
+                  // ClickUp's "Calculate" row: totals for the time columns, which a phone has not got.
+                  if (phone) return null;
                   const est = group.tasks.reduce((n, t) => n + (t.time_estimate_seconds ?? 0), 0);
                   const tracked = group.tasks.reduce((n, t) => n + (t.time_tracked_seconds ?? 0), 0);
                   if (!est && !tracked) return null;

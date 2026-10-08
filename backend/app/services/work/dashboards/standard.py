@@ -60,27 +60,41 @@ def _people_cards(everyone: bool) -> List[Card]:
     """One Dashboard covering a group of people, broken down person by person."""
     whose = "the company" if everyone else "the team"
     return [
-        ("calculation", "Open tasks", {}, 3, 1),
-        ("calculation", "Overdue", {"filters": {"due": "overdue"}}, 3, 1),
-        ("calculation", "Unassigned", {"filters": {"assignees": ["none"]}}, 3, 1),
-        ("calculation", "Done this month", {"filters": {"done": "this_month"}, "include_closed": True}, 3, 1),
+        # Three figures, not four. "Unassigned" is taken off because an assignee is required on a
+        # new task, so the tile reads 0 for good -- a number that never moves is not worth a third
+        # of the top row. (Tasks made before that rule can still have nobody on them; they are a
+        # one-off clean-up, not a permanent card.)
+        # ("calculation", "Unassigned", {"filters": {"assignees": ["none"]}}, 3, 1),
+        ("calculation", "Open tasks", {}, 4, 1),
+        ("calculation", "Overdue", {"filters": {"due": "overdue"}}, 4, 1),
+        ("calculation", "Done this month", {"filters": {"done": "this_month"}, "include_closed": True}, 4, 1),
         ("capacity", f"Hours in {whose}: capacity, planned and logged", {"period": WEEK, "include_subtasks": True}, 12, 2),
+        ("bar", "Work by priority", {"group_by": "priority"}, 12, 3),
+        ("timesheet", "Hours per day this week", {"period": WEEK, "include_subtasks": True}, 12, 3),
+        # What is late, what is today, and what is coming -- side by side, because a manager reads
+        # them against each other rather than one at a time.
+        ("task_list", "Overdue tasks", {"filters": {"due": "overdue"}, "sort": "due"}, 4, 3),
+        ("task_list", "Due today", {"filters": {"due": "today"}, "sort": "due"}, 4, 3),
+        ("task_list", "Due in the next 7 days", {"filters": {"due": "next_7_days"}, "sort": "due"}, 4, 3),
+        # --- taken off the standard board, and still built -------------------------------------
+        # Every card type below renders exactly as it did; a board that already carries one keeps
+        # it, and any of them can be added back from "+ Card". They are off because fourteen cards
+        # is a scroll: by the time you reach the last one you have forgotten the overdue count.
+        #
         # Per-person charts run the full width: a firm of twenty needs the room, and past ten
         # people the card turns on its side and lists everyone rather than rolling up a tail.
-        ("bar", "Open tasks per person", {"group_by": "assignee"}, 12, 4),
-        ("bar", "Overdue per person", {"group_by": "assignee", "filters": {"due": "overdue"}}, 12, 4),
-        ("behind", f"Who's behind in {whose}", {}, 6, 3),
+        # ("bar", "Open tasks per person", {"group_by": "assignee"}, 12, 4),
+        # ("bar", "Overdue per person", {"group_by": "assignee", "filters": {"due": "overdue"}}, 12, 4),
+        # ("behind", f"Who's behind in {whose}", {}, 6, 3),
         # ("completed", "Finished this month: on time or late", {"period": MONTH}, 6, 3),
         # Finished work counts: a status split that leaves out Completed says the team has done
         # nothing, which is the opposite of what it is for.
-        ("pie", "Work by status", {"group_by": "status", "include_closed": True}, 6, 3),
-        ("bar", "Work by priority", {"group_by": "priority"}, 6, 3),
-        ("timesheet", "Hours per day this week", {"period": WEEK, "include_subtasks": True}, 12, 3),
-        ("time_report", "Hours this month per person", {"period": MONTH, "time_group_by": "user",
-                                                        "then_by": "task", "include_subtasks": True}, 12, 3),
-        ("task_list", "Nobody is on these", {"filters": {"assignees": ["none"]}, "sort": "due"}, 6, 3),
+        # ("pie", "Work by status", {"group_by": "status", "include_closed": True}, 6, 3),
+        # ("time_report", "Hours this month per person", {"period": MONTH, "time_group_by": "user",
+        #                                                 "then_by": "task", "include_subtasks": True}, 12, 3),
+        # ("task_list", "Nobody is on these", {"filters": {"assignees": ["none"]}, "sort": "due"}, 6, 3),
         # ("task_list", "To do", {"filters": {"status_groups": ["not_started", "active"]}, "sort": "due"}, 6, 3),
-        ("variance", "Estimate against actual, per person", {"period": MONTH, "include_subtasks": True}, 12, 4),
+        # ("variance", "Estimate against actual, per person", {"period": MONTH, "include_subtasks": True}, 12, 4),
     ]
 
 
@@ -115,7 +129,9 @@ def ensure(db: Session, access: Access, standing: Standing) -> None:
             select(Dashboard).where(Dashboard.workspace_id == access.workspace_id, Dashboard.standard.is_not(None))
         )
     }
-    if (MY_WORK, access.user_id, None) not in have:
+    # An admin's own handful of tasks is not what they open the app to look at, so they are
+    # not given a personal board; the Company one is their home. Everyone else gets theirs.
+    if not standing.is_admin and (MY_WORK, access.user_id, None) not in have:
         _make(db, access, MY_WORK, "My work", {"assignees": ["me"]}, _my_work_cards())
     for team_id in sorted(standing.led_teams, key=str):
         if any(kind == TEAM and had == team_id for kind, _, had in have):

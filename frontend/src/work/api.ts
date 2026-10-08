@@ -152,12 +152,17 @@ export interface TaskGroupRef { id: string; name: string; color: string }
 export interface TaskGroup extends TaskGroupRef { location: LocationKind; location_id: string; orderindex: number }
 /** How a task repeats. weekdays: 0 = Monday. */
 export interface Recurrence {
-  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  /** days_after counts from the day the task was finished, not from its due date. */
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'days_after';
   interval: number;
   weekdays?: number[] | null;
   month_day?: number | null;
   trigger: 'on_done' | 'on_schedule';
   action: 'new_task' | 'reopen';
+  /** Keep the series pinned to the original due dates; off measures from the day it was done. */
+  sync_to_due?: boolean;
+  /** The status the next one opens in. Null means the List's own first status. */
+  reset_status_id?: string | null;
   until?: string | null;
   count?: number | null;
   tz: string;
@@ -247,8 +252,15 @@ export interface Workload { days: string[]; rows: WorkloadRow[]; unscheduled: Ta
 export interface TimeEntry {
   id: string; task_id: string; user: UserRef; started_at: string; ended_at: string | null;
   duration_seconds: number | null; running: boolean; description: string | null; billable: boolean;
+  tags?: { id: string; name: string }[];
 }
-export interface TaskTime { total_seconds: number; entries: TimeEntry[]; shows_everyone: boolean }
+export interface TaskTime {
+  total_seconds: number;
+  /** The same, plus every subtask underneath. */
+  subtree_seconds: number;
+  entries: TimeEntry[];
+  shows_everyone: boolean;
+}
 export interface RunningTimer { entry: TimeEntry; task_name: string; list_id: string }
 
 export type TaskInput = Partial<{
@@ -363,10 +375,19 @@ export const workApi = {
   peopleLoad: (workspaceId: string, userIds: string[], start: string, days = 7) =>
     request<PeopleLoad>('GET', `/workspaces/${workspaceId}/people-load?${
       userIds.map((id) => `user_ids=${encodeURIComponent(id)}`).join('&')}&start=${start}&days=${days}`),
-  logTime: (taskId: string, duration_seconds: number, description?: string, span?: { started_at: string; ended_at: string }) =>
-    request<TimeEntry>('POST', `/tasks/${taskId}/time`, span
-      ? { ...span, description: description || null }
-      : { duration_seconds, description: description || null }),
+  logTime: (
+    taskId: string, duration_seconds: number, description?: string,
+    span?: { started_at: string; ended_at: string }, billable = false, tag_ids: string[] = [],
+    /** Whose time it is. Admins log for other people from their timesheet. */
+    user_id?: string,
+  ) =>
+    request<TimeEntry>('POST', `/tasks/${taskId}/time`, {
+      ...(span ?? { duration_seconds }),
+      description: description || null,
+      billable,
+      tag_ids,
+      ...(user_id ? { user_id } : {}),
+    }),
   deleteTime: (entryId: string) => request('DELETE', `/time/${entryId}`),
   startTimer: (taskId: string) => request<TimeEntry>('POST', `/tasks/${taskId}/timer`),
   stopTimer: () => request<TimeEntry>('POST', '/timer/stop'),

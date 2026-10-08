@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Archive, ArchiveRestore, Bell, Copy, Eye, EyeOff, GitMerge, LayoutTemplate, Link2, MoreHorizontal, MoveRight, Star, Trash2, Users, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Bell, Copy, Eye, EyeOff, GitMerge, LayoutTemplate, Link2, ListPlus, MoreHorizontal, MoveRight, Star, Trash2, Users, X } from 'lucide-react';
 import { ShareWithPeople } from './ShareWithPeople';
+import { spacesApi } from '../spacesApi';
+import { FEATURES } from '../../config/features';
 import { PeoplePicker } from '../PeoplePicker';
 import { ALL_PARTS, PART_LABELS, type CopyParts } from './CopyParts';
 import { notify } from '../../components/notify';
@@ -179,6 +181,42 @@ const MoveDialog: React.FC<{ task: TaskDetail; mode: 'move' | 'duplicate'; onClo
   );
 };
 
+/**
+ * Put a task in a second List without moving it.
+ *
+ * It keeps one home List -- its statuses, its custom ID and its fields come from there -- and
+ * simply also shows in the other. One task, two places, not a copy.
+ */
+const AddToListDialog: React.FC<{ task: TaskDetail; onClose: () => void; onDone: () => void }> = ({ task, onClose, onDone }) => {
+  const lists = useWritableLists();
+  const [target, setTarget] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const go = async () => {
+    if (!target || busy) return;
+    setBusy(true);
+    setError(null);
+    try { await spacesApi.addToList(task.id, target); onDone(); }
+    catch (e) { setError((e as Error).message); setBusy(false); }
+  };
+  return (
+    <Dialog title="Also show in another List" onClose={onClose}>
+      <p className="mb-3 text-xs text-gray-500">
+        The task stays where it is and also appears in the List you pick. Its statuses and custom
+        ID keep coming from its home List.
+      </p>
+      <ListPicker label="Show it in" lists={lists} value={target} currentId={task.list_id} onChange={setTarget} />
+      {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
+        <button type="button" disabled={!target || busy} onClick={go} className="btn-accent rounded-md px-3 py-1.5 text-sm font-semibold disabled:opacity-50">
+          {busy ? 'Adding…' : 'Add to List'}
+        </button>
+      </div>
+    </Dialog>
+  );
+};
+
 const QUICK = [
   { label: 'In 1 hour', at: () => new Date(Date.now() + 3600_000) },
   { label: 'Later today (5 pm)', at: () => { const d = new Date(); d.setHours(17, 0, 0, 0); return d; } },
@@ -231,7 +269,7 @@ export const TaskActions: React.FC<{
   task: TaskDetail; onChanged: () => void; onReload: () => void; onOpen: (id: string) => void; onDeleted: () => void;
 }> = ({ task, onChanged, onReload, onOpen, onDeleted }) => {
   const [watch, setWatch] = useState<{ watchers: { id: string; email: string; display_name: string | null }[]; watching: boolean } | null>(null);
-  const [dialog, setDialog] = useState<'move' | 'duplicate' | 'remind' | 'template' | 'merge' | 'share' | null>(null);
+  const [dialog, setDialog] = useState<'move' | 'duplicate' | 'remind' | 'template' | 'merge' | 'share' | 'add-list' | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const favorites = useFavorites();
   const me = useMe();
@@ -247,14 +285,18 @@ export const TaskActions: React.FC<{
   return (
     <>
       {note && <span className="mr-1 text-xs text-emerald-700">{note}</span>}
-      <button type="button" onClick={toggleWatch} title={watch?.watching ? 'Stop watching' : 'Watch this task'}
-        className={`flex items-center gap-1 rounded px-1.5 py-1 text-xs ${watch?.watching ? 'text-brand-600' : 'text-gray-400'} hover:bg-gray-100`}>
-        {watch?.watching ? <Eye size={15} /> : <EyeOff size={15} />} {watch?.watchers.length ?? ''}
-      </button>
-      {watch && watch.watchers.length > 0 && (
-        <span className="mr-1 hidden -space-x-1.5 sm:flex" title={watch.watchers.map((w) => w.display_name || w.email).join(', ')}>
-          {watch.watchers.slice(0, 3).map((w) => <Avatar key={w.id} user={w} size={20} />)}
-        </span>
+      {FEATURES.taskWatchers && (
+        <>
+          <button type="button" onClick={toggleWatch} title={watch?.watching ? 'Stop watching' : 'Watch this task'}
+            className={`flex items-center gap-1 rounded px-1.5 py-1 text-xs ${watch?.watching ? 'text-brand-600' : 'text-gray-400'} hover:bg-gray-100`}>
+            {watch?.watching ? <Eye size={15} /> : <EyeOff size={15} />} {watch?.watchers.length ?? ''}
+          </button>
+          {watch && watch.watchers.length > 0 && (
+            <span className="mr-1 hidden -space-x-1.5 sm:flex" title={watch.watchers.map((w) => w.display_name || w.email).join(', ')}>
+              {watch.watchers.slice(0, 3).map((w) => <Avatar key={w.id} user={w} size={20} />)}
+            </span>
+          )}
+        </>
       )}
       <button type="button" title="Set a reminder" onClick={() => setDialog('remind')} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Bell size={15} /></button>
       <Menu align="right" label="Task actions" items={[
@@ -263,11 +305,16 @@ export const TaskActions: React.FC<{
         // Beside Duplicate on purpose: the two are the choice between a copy each and one task
         // between them, and that is a choice best made with both in front of you.
         ...(full ? [{ label: 'Share with people…', icon: <Users size={14} />, onClick: () => setDialog('share') }] : []),
-        { label: 'Save as template', icon: <LayoutTemplate size={14} />, onClick: () => setDialog('template') },
+        // The Spaces menu gates its own "Save as template" the same way; this one was missed,
+        // which is why it was still on a task while the rest of templates was off.
+        ...(FEATURES.templates ? [{ label: 'Save as template', icon: <LayoutTemplate size={14} />, onClick: () => setDialog('template') }] : []),
         { label: favorites.isFavorite('task', task.id) ? 'Remove from Favourites' : 'Add to Favourites', icon: <Star size={14} />, onClick: () => favorites.toggle('task', task.id) },
         // 'Add to my LineUp' was here. The LineUp itself still works from My Tasks.
         ...[],
         ...(editable ? [{ label: 'Move to…', icon: <MoveRight size={14} />, onClick: () => setDialog('move') }] : []),
+        // A task can show in more than one List while keeping one home. Rare, so it lives here
+        // rather than as a control under every task.
+        ...(full && !task.parent_id ? [{ label: 'Also show in another List…', icon: <ListPlus size={14} />, onClick: () => setDialog('add-list') }] : []),
         ...(editable ? [{ label: 'Merge duplicates…', icon: <GitMerge size={14} />, onClick: () => setDialog('merge') }] : []),
         ...(editable ? [{
           label: task.archived ? 'Restore' : 'Archive', icon: task.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />,
@@ -287,8 +334,9 @@ export const TaskActions: React.FC<{
           onChanged={() => { onReload(); onChanged(); }}
         />
       )}
+      {dialog === 'add-list' && <AddToListDialog task={task} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); onChanged(); }} />}
       {dialog === 'merge' && <MergeDialog task={task} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); onChanged(); }} />}
-      {dialog === 'template' && <SaveTemplateDialog kind="task" id={task.id} name={task.name} onClose={() => setDialog(null)} />}
+      {FEATURES.templates && dialog === 'template' && <SaveTemplateDialog kind="task" id={task.id} name={task.name} onClose={() => setDialog(null)} />}
       {dialog === 'remind' && <ReminderDialog taskId={task.id} defaultTitle={task.name} onClose={() => setDialog(null)} onDone={() => { setDialog(null); flash('Reminder set'); }} />}
     </>
   );

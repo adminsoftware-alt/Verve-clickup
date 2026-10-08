@@ -24,6 +24,7 @@ LABELS = {
     "person.imported": "imported",
     "person.updated": "updated the profile of",
     "person.role_changed": "changed the role of",
+    "person.teams_changed": "moved the teams of",
     "person.removed": "removed",
     "person.deactivated": "turned off access for",
     "person.reactivated": "turned access back on for",
@@ -70,7 +71,7 @@ def person_label(db: Session, user_id: str) -> str:
 
 def events(
     db: Session, access: Access, limit: int = 100, before: Optional[datetime] = None,
-    action: Optional[str] = None, actor_id: Optional[str] = None,
+    action: Optional[str] = None, actor_id: Optional[str] = None, target_id: Optional[str] = None,
 ) -> List[s.AuditEventOut]:
     if not can_manage_workspace(access.role):
         raise Forbidden("Only owners and admins can see the audit log")
@@ -81,6 +82,10 @@ def events(
         query = query.where(AuditEvent.action.startswith(action))
     if actor_id:
         query = query.where(AuditEvent.actor_id == actor_id)
+    # Who it was done to, as against who did it. "What has happened to this person" could not be
+    # asked before, which is most of what anyone wants from a log about a colleague.
+    if target_id:
+        query = query.where(AuditEvent.target_id == target_id)
     rows = list(db.scalars(query.order_by(AuditEvent.created_at.desc()).limit(limit)))
     users = {u.id: u for u in db.scalars(select(User).where(User.id.in_({r.actor_id for r in rows if r.actor_id})))}
     return [

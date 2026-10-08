@@ -105,6 +105,24 @@ def test_missed_occurrences_are_skipped_and_limits_end_the_series():
     assert _next({"frequency": "daily", "count": 0}, long_ago, now) is None
 
 
+def test_a_repeat_can_count_from_the_day_it_was_finished():
+    long_ago = datetime(2026, 9, 1, 9, tzinfo=UTC)
+    now = datetime(2026, 9, 23, 12, tzinfo=UTC)
+    # "Three days after it is done" ignores the old due date entirely.
+    assert _next({"frequency": "days_after", "interval": 3}, long_ago, now)[1] == datetime(2026, 9, 26, 9, tzinfo=UTC)
+    # Weekly, synced to the due date: the series keeps its original rhythm (1, 8, 15, 29 Sept).
+    weekly = {"frequency": "daily", "interval": 7}
+    assert _next(weekly, long_ago, now)[1] == datetime(2026, 9, 29, 9, tzinfo=UTC)
+    # Unsynced: the week starts again from the day it was finished.
+    assert _next({**weekly, "sync_to_due": False}, long_ago, now)[1] == datetime(2026, 9, 30, 9, tzinfo=UTC)
+
+
+def test_days_after_cannot_run_on_a_schedule():
+    # There is no schedule to run on: the date is only known once the task is done.
+    with pytest.raises(ValueError):
+        Recurrence(frequency="days_after", interval=2, trigger="on_schedule")
+
+
 def test_dates_move_in_the_rules_timezone():
     # 1st of the month, local midnight in India (18:30 UTC the day before)
     due = datetime(2026, 9, 30, 18, 30, tzinfo=UTC)
@@ -151,6 +169,18 @@ def test_scheduled_repeats_are_created_when_due(api, org):
         assert recurrence.run_due(db) == 0
     names = [x["name"] for x in ok(api.get(f"/lists/{org['daily']['id']}/tasks", "owner"))["tasks"]]
     assert names == ["GST reminder", "GST reminder"]  # the original stays open; the next one is waiting
+
+
+def test_the_rule_can_name_the_status_the_next_one_opens_in(api, org):
+    statuses = ok(api.get(f"/lists/{org['daily']['id']}/statuses", "owner"))["statuses"]
+    waiting = next(st for st in statuses if st["group"] == "active")
+    due = datetime.now(UTC).replace(hour=9, minute=0, second=0, microsecond=0)
+    t = task(api, org["daily"], due_date=due.isoformat(),
+             recurrence={"frequency": "daily", "reset_status_id": waiting["id"]})
+    ok(api.patch(f"/tasks/{t['id']}", "owner", {"status_id": closed_status(api, org["daily"])["id"]}))
+    tasks = ok(api.get(f"/lists/{org['daily']['id']}/tasks", "owner", params={"include_closed": True}))["tasks"]
+    new = next(x for x in tasks if x["recurs_from_id"] == t["id"])
+    assert new["status"]["id"] == waiting["id"]  # not the List's first status
 
 
 def test_removing_the_rule(api, org):

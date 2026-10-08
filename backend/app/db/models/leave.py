@@ -5,8 +5,10 @@ from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import (
-    Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, false, func, true,
+    Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Index, Numeric, SmallInteger, String, Text, UniqueConstraint,
+    false, func, text, true,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -41,6 +43,57 @@ class Holiday(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
 
 
+class LeavePolicy(Base):
+    """One workspace's leave rules. Absent means the defaults below, which suit an Indian firm."""
+
+    __tablename__ = "leave_policies"
+    __table_args__ = (
+        CheckConstraint("year_start_month BETWEEN 1 AND 12", name="year_start_month_range"),
+        CheckConstraint("min_notice_days >= 0", name="min_notice_days_not_negative"),
+        CheckConstraint("carry_forward_days IS NULL OR carry_forward_days >= 0", name="carry_forward_not_negative"),
+        CheckConstraint("escalate_after_days IS NULL OR escalate_after_days > 0", name="escalate_after_days_positive"),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True)
+    #: 4 = April, the financial year most Indian firms run on. 1 is the calendar year.
+    year_start_month: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="4", default=4)
+    #: None: nothing carries over. 0 is a different answer, so they cannot share a value.
+    carry_forward_days: Mapped[Optional[float]] = mapped_column(Float)
+    prorate_joiners: Mapped[bool] = mapped_column(Boolean, server_default=true(), nullable=False, default=True)
+    min_notice_days: Mapped[int] = mapped_column(SmallInteger, server_default="0", nullable=False, default=0)
+    allow_backdated: Mapped[bool] = mapped_column(Boolean, server_default=true(), nullable=False, default=True)
+    #: The sandwich rule: whether weekends and holidays inside a span are counted as leave.
+    count_days_off_inside: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False, default=False)
+    #: None: a request waits for its approver for as long as that takes.
+    escalate_after_days: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    #: HR: they see every request, and they decide when the manager cannot.
+    hr_team_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"))
+    #: [{"from": "09-15", "to": "09-30", "reason": "Audit season"}] -- days nobody may book.
+    blackout: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class LeaveAdjustment(Base):
+    """Days added to or taken off a balance: carried forward, granted, or corrected by hand."""
+
+    __tablename__ = "leave_adjustments"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "user_id", "type_id", "year", name="uq_leave_adjustments_person_year"),
+        Index("ix_leave_adjustments_lookup", "workspace_id", "user_id", "year"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    type_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("leave_types.id", ondelete="CASCADE"), nullable=False)
+    #: The leave year, named by the calendar year it starts in.
+    year: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    days: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(String(200))
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class LeaveRequest(Base):
     """Someone's time off, from request to decision. `days` counts working days only (weekends and holidays excluded)."""
 
@@ -68,6 +121,10 @@ class LeaveRequest(Base):
     decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     decision_note: Mapped[Optional[str]] = mapped_column(String(500))
     source_id: Mapped[Optional[str]] = mapped_column(String(128))  # e.g. the old system's id, for imports
+    #: When HR was told this had been waiting too long. Set once, so nobody is told twice.
+    escalated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    #: Who covers the work while they are away. Named by the approver, not the person asking.
+    cover_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

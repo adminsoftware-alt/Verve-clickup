@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { workApi, type FolderNode, type SpaceNode, type Task, type UserRef } from './api';
 import { Avatar, Portal, StatusDot } from './ui';
-import { useWork } from './WorkContext';
+import { useIsManager, useWork } from './WorkContext';
 import { recentItems } from './recent';
 
 export const OPEN_SEARCH = 'timetriq:search';
@@ -20,14 +20,15 @@ interface Hit {
   go: () => void;
 }
 
-const PAGES: { label: string; path: string; icon: React.ReactNode; words: string }[] = [
+/** `managers` marks a page only admins and Team leads can open, so it is not offered to anyone else. */
+const PAGES: { label: string; path: string; icon: React.ReactNode; words: string; managers?: boolean }[] = [
   { label: 'Inbox', path: '/inbox', icon: <Inbox size={15} />, words: 'inbox notifications' },
   { label: 'My Tasks', path: '/my-tasks', icon: <UserCheck size={15} />, words: 'my tasks home assigned' },
   { label: 'Replies', path: '/replies', icon: <MessageSquare size={15} />, words: 'replies comments threads' },
   { label: 'Reminders', path: '/reminders', icon: <Bell size={15} />, words: 'reminders' },
   { label: 'Dashboards', path: '/dashboards', icon: <BarChart3 size={15} />, words: 'dashboards reports charts' },
   { label: 'Timesheets', path: '/timesheets', icon: <Clock size={15} />, words: 'timesheets time tracking hours' },
-  { label: 'People & Teams', path: '/people', icon: <Users size={15} />, words: 'people teams members' },
+  { label: 'People & Teams', path: '/people', icon: <Users size={15} />, words: 'people teams members', managers: true },
 ];
 
 const matches = (text: string, q: string) => text.toLowerCase().includes(q);
@@ -35,6 +36,8 @@ const matches = (text: string, q: string) => text.toLowerCase().includes(q);
 /** ClickUp's Command Search (Ctrl+K / ⌘K): tasks, Lists, Folders, Spaces, people and pages. */
 export const GlobalSearch: React.FC = () => {
   const { workspace, hierarchy, members } = useWork();
+  const isManager = useIsManager();
+  const pages = useMemo(() => PAGES.filter((p) => !p.managers || isManager), [isManager]);
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -93,7 +96,7 @@ export const GlobalSearch: React.FC = () => {
           out.push({ key: `rl:${r.id}`, section: 'Recent', label: listPath.get(r.id)!.split(' / ').pop()!, sub: listPath.get(r.id), icon: <ListIcon size={15} />, go: go(`/l/${r.id}`) });
         }
       });
-      PAGES.forEach((p) => out.push({ key: `p:${p.path}`, section: 'Go to', label: p.label, icon: p.icon, go: go(p.path) }));
+      pages.forEach((p) => out.push({ key: `p:${p.path}`, section: 'Go to', label: p.label, icon: p.icon, go: go(p.path) }));
       return out;
     }
     tasks.forEach((t) => out.push({
@@ -127,7 +130,7 @@ export const GlobalSearch: React.FC = () => {
         key: `u:${m.user.id}`, section: 'People', label: m.user.display_name || m.user.email, sub: m.user.email,
         icon: <Avatar user={m.user as UserRef} size={18} />, go: go(`/timesheets/people/${m.user.id}`),
       }));
-    PAGES.filter((p) => matches(p.words, query)).forEach((p) => out.push({ key: `p:${p.path}`, section: 'Go to', label: p.label, icon: p.icon, go: go(p.path) }));
+    pages.filter((p) => matches(p.words, query)).forEach((p) => out.push({ key: `p:${p.path}`, section: 'Go to', label: p.label, icon: p.icon, go: go(p.path) }));
     return out;
   }, [query, tasks, hierarchy, members, listPath, navigate]);
 

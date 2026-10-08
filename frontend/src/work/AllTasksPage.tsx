@@ -63,9 +63,10 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
   const [settings, setSettings] = useState<ViewSettings>(() => {
     try { return readSettings(JSON.parse(localStorage.getItem(KEY) || 'null') ?? { groupBy: 'none' }); } catch { return readSettings({ groupBy: 'none' }); }
   });
-  const [scope] = useState<Scope>(() => {
-    try { return (localStorage.getItem(`${KEY}.scope`) as Scope) || initialScope; } catch { return initialScope; }
-  });
+  // Which page you opened is the answer to "whose tasks", so it comes from the route. It used
+  // to come from storage, which meant one visit to All Tasks quietly changed My Tasks for good.
+  const [scope, setScope] = useState<Scope>(initialScope);
+  useEffect(() => { setScope(initialScope); }, [initialScope]);
   const [meMode, setMeMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [fields] = useState<CustomField[]>([]);
@@ -73,7 +74,6 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
     try {
       localStorage.setItem(KEY, JSON.stringify(settings));
       localStorage.setItem(`${KEY}.layout`, layout);
-      localStorage.setItem(`${KEY}.scope`, scope);
     } catch { /* ignore */ }
   }, [settings, layout, scope]);
   const load = useCallback(() => {
@@ -98,10 +98,14 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
     const openOnly = (t: Task) => t.status.group !== 'closed' && t.status.group !== 'done';
     const found = (tasks ?? [])
       .filter((t) => (states.length ? states.includes(progressOf(t)) : layout === 'board' || openOnly(t)))
+      .filter((t) => (scope === 'mine' ? mine(t) : true))
       .filter((t) => (scope === 'now' ? mine(t) && soon(t) && t.status.group !== 'closed' && t.status.group !== 'done' : true))
       .filter((t) => !text || t.name.toLowerCase().includes(text) || (t.custom_id ?? '').toLowerCase() === text);
     return sortTasks(applyFilters(found, settings.filters, me, meMode), settings.sort);
   }, [tasks, q, settings.filters, settings.sort, me, meMode, scope, layout]);
+  // Whether an empty list means "nothing is yours" or "your filters hide it" -- a different
+  // sentence belongs on each, and only this page knows which.
+  const hasFilters = !!q.trim() || Object.values(settings.filters).some((v) => (Array.isArray(v) ? v.length > 0 : !!v));
   const makeGroups = useCallback((roots: Task[]) => buildGroups(settings.groupBy, roots, null, [], people), [settings.groupBy, people]);
   // The Board reads its own setting, so a List grouped by due date does not leave the Board
   // with Overdue and Upcoming columns and nowhere to put finished work.
@@ -137,14 +141,35 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
   const counts = useMemo(() => {
     const open = (tasks ?? []).filter((t) => t.status.group !== 'closed' && t.status.group !== 'done');
     const mine = open.filter((t) => t.assignees.some((a) => a.id === me));
-    return { mine: mine.length, now: mine.filter((t) => !!t.due_date && new Date(t.due_date) <= endOfToday()).length };
+    return {
+      mine: mine.length,
+      now: mine.filter((t) => !!t.due_date && new Date(t.due_date) <= endOfToday()).length,
+      all: open.length,
+    };
   }, [tasks, me]);
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
       <header className="border-b border-gray-200 px-6 pb-2 pt-4">
-        <h1 className="flex items-center gap-2 text-lg font-semibold text-gray-900"><Layers size={18} className="text-brand-600" /> My Tasks</h1>
+        <h1 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
+          <Layers size={18} className="text-brand-600" /> {scope === 'all' ? 'All Tasks' : 'My Tasks'}
+          {/* The page can honestly show either, so it says which, and switching is one click.
+              A heading that says "My" above everyone's work is the thing to avoid. */}
+          <span className="ml-2 flex items-center rounded-lg bg-gray-100 p-0.5 text-xs font-medium">
+            {([['mine', 'Mine'], ['all', 'Everyone']] as const).map(([value, label]) => (
+              <button
+                key={value} type="button" onClick={() => setScope(value)}
+                className={`rounded-md px-2.5 py-1 transition-colors ${
+                  scope === value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </span>
+        </h1>
         <p className="text-xs text-gray-500">
-          {counts.mine} assigned to you · {counts.now} due today or overdue · everything you can open is here.
+          {scope === 'all'
+            ? `${counts.all} open across every Space you can open · ${counts.mine} of them yours`
+            : `${counts.mine} open and assigned to you · ${counts.now} due today or overdue`}
         </p>
       </header>
       <ViewTabs value={layout} onChange={setLayout} only={OFFERED} />
@@ -226,7 +251,8 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
           <ListView tasks={filtered} statuses={null} listName={where} groupBy={settings.groupBy} makeGroups={makeGroups}
             canAddIn={() => false} onCreate={async () => undefined} onOpenTask={openTask}
             columns={COLUMNS.map((c) => c.key).filter((k) => !settings.hidden.includes(k))} fields={[]} people={people}
-            onSetField={() => undefined} selected={selected} onSelect={select} />
+            onSetField={() => undefined} selected={selected} onSelect={select}
+            emptyBecause={hasFilters ? 'filters' : scope === 'mine' ? 'none-assigned' : 'nothing-here'} />
         ) : (
           <TableView tasks={filtered} statuses={null} fields={[]} hidden={settings.hidden} people={people} listName={where}
             canCreate={false} onCreate={async () => undefined} onOpenTask={openTask} onChanged={load} selected={selected} onSelect={select}

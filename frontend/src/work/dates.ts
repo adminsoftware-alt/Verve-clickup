@@ -64,3 +64,17 @@ export function parseTypedDate(input: string, now: Date = new Date()): Date | nu
 
 export const shortDate = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
+/**
+ * "29 Sep", with the year only when it is not this one.
+ *
+ * For the places two dates share a row. The weekday and the year are worth the width when a date
+ * stands alone; side by side they push the second date off the end, which costs more than they
+ * are worth. It still reads back into the box, because "29 Sep" is one of the forms you can type.
+ */
+export const compactDate = (iso: string | null) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const thisYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(thisYear ? {} : { year: 'numeric' }) });
+};
