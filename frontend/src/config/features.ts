@@ -222,15 +222,44 @@ const DEFAULTS = {
   // are in and the ones shared with you, so there is only one place to look.
   allSpacesPage: false,
   compliance: false,
-  // Leave is on: the policy, the chain from a person to their manager to HR, balances that run on
-  // the firm's leave year, and the approver seeing what is due before they say yes.
-  leavePages: true,
+  // The leave request and approval workflow: the policy, the chain from a person to their manager
+  // to HR, the balances, and the approver seeing what is due before they say yes.
+  //
+  // Off. The firm asked for the approval feature to go, and this is the switch -- the pages, the
+  // sidebar row, and the warning shown when you assign work to somebody who is away.
+  //
+  // What is deliberately untouched is the holiday calendar and each person's working hours. They
+  // live in the same module but they are not leave: they are what Workload, the timesheets and the
+  // dashboard capacity cards divide by, and removing them would leave those without a denominator.
+  // The server has the matching switch, LEAVE_APPROVALS_ENABLED in backend/.env.
+  leavePages: false,
   billing: false,
   archived: false,
   templates: false,
   // The extra view types. Only Dashboard, Table, Team, Calendar and Workload are offered in "+ View";
   // every location keeps its built-in List (and a Folder or Space its Overview).
   extraViewTypes: false,
+
+  // Email that arrives on a timer: the daily summary, the week ahead, the month just gone, the
+  // Friday recap, the overdue chase, the manager's Monday heads-up and the team digest. Off on
+  // the server too (SCHEDULED_EMAIL_ENABLED in backend/.env), and this is the matching half --
+  // a settings page offering a daily summary that the server will not send is worse than one
+  // that does not offer it. The jobs and this UI both still exist; turn the pair back on
+  // together. Email triggered by something a person did -- an invitation, "each update, right
+  // away" -- is unaffected.
+  emailDigests: false,
+
+  // Any email that is not an invitation.
+  //
+  // Off, and this is the one that takes the whole "Email" control off the notification settings
+  // with it. While email was still doing updates there was something to choose between -- a daily
+  // summary, each update, never -- and the control was worth its space even with the summaries
+  // switched off. With email down to getting new people into the workspace there is nothing left
+  // for a person to decide, and a dropdown whose every option does the same thing is worse than no
+  // dropdown. Notifications still arrive in the app and on the device; those controls stay.
+  //
+  // The server has the matching switch: UPDATE_EMAIL_ENABLED in backend/.env.
+  emailUpdates: false,
 };
 
 export type FeatureName = keyof typeof DEFAULTS;

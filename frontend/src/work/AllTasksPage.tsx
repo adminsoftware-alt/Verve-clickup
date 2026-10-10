@@ -152,19 +152,9 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
       <header className="border-b border-gray-200 px-6 pb-2 pt-4">
         <h1 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
           <Layers size={18} className="text-brand-600" /> {scope === 'all' ? 'All Tasks' : 'My Tasks'}
-          {/* The page can honestly show either, so it says which, and switching is one click.
-              A heading that says "My" above everyone's work is the thing to avoid. */}
-          <span className="ml-2 flex items-center rounded-lg bg-gray-100 p-0.5 text-xs font-medium">
-            {([['mine', 'Mine'], ['all', 'Everyone']] as const).map(([value, label]) => (
-              <button
-                key={value} type="button" onClick={() => setScope(value)}
-                className={`rounded-md px-2.5 py-1 transition-colors ${
-                  scope === value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
-              >
-                {label}
-              </button>
-            ))}
-          </span>
+          {/* The Mine / Everyone switch used to sit here. Two controls were saying the same thing:
+              the line underneath already gives both numbers, and narrowing to your own work is
+              what Filter -> Assignee is for. One list, and the subtitle says what is in it. */}
         </h1>
         <p className="text-xs text-gray-500">
           {scope === 'all'

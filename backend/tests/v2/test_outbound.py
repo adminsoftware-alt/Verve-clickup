@@ -48,7 +48,14 @@ def test_delivery_settings(api, world):
     assert outbound.normalise_phone("98765 43210") == "919876543210" and outbound.normalise_phone("123") is None
 
 
-def test_new_notifications_go_out_once_by_push_whatsapp_and_email(api, world):
+def test_new_notifications_go_out_once_by_push_and_whatsapp_but_not_email(api, world):
+    """A new notification reaches the device and the phone. It does not reach the inbox.
+
+    Email is for invitations and nothing else now, and this is the job that decides it: it is also
+    what pushes a notification to a browser and what marks it delivered, so the whole job could not
+    simply be switched off without taking the bell with it. Only the mail is held back, which is
+    what the last two assertions are here to hold in place.
+    """
     ws, sent = world["ws"], world["sent"]
     ok(api.patch(f"/workspaces/{ws}/people/member", "member", {"phone": "+91 98765 43210"}))
     ok(api.put(f"/workspaces/{ws}/delivery", "member", {"whatsapp_opt_in": True, "email_notifications": "instant"}))
@@ -57,8 +64,20 @@ def test_new_notifications_go_out_once_by_push_whatsapp_and_email(api, world):
     assert run(outbound.run_instant) == 1
     assert sent["push"][0][1]["title"] == "Run payroll" and "assigned you" in sent["push"][0][1]["body"]
     assert sent["whatsapp"] == [("919876543210", "Run payroll: Owner assigned you to this task")]
-    assert sent["email"][0][0] == ["member@example.com"] and "1 update" in sent["email"][0][1]
+    assert sent["email"] == [], "an update should not arrive as email"
     assert run(outbound.run_instant) == 0  # nothing twice
+
+
+def test_update_email_still_works_when_it_is_switched_back_on(api, world, monkeypatch):
+    """The code is held back by a switch, not removed, so it has to still work when flipped."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "UPDATE_EMAIL_ENABLED", True)
+    ws, sent = world["ws"], world["sent"]
+    ok(api.put(f"/workspaces/{ws}/delivery", "member", {"email_notifications": "instant"}))
+    ok(api.post(f"/lists/{world['list']['id']}/tasks", "owner", {"name": "Run payroll", "assignees": ["member"]}), 201)
+    assert run(outbound.run_instant) == 1
+    assert sent["email"][0][0] == ["member@example.com"] and "1 update" in sent["email"][0][1]
 
 
 def test_gone_devices_are_forgotten(api, world, monkeypatch):
@@ -101,6 +120,20 @@ def _next(weekday: int, now: datetime) -> datetime:
     return at_nine
 
 
+def _last(weekday: int, now: datetime) -> datetime:
+    """The most recent date whose Indian weekday is this one, at 09:00 India time.
+
+    Needed where a test dates tasks relative to the day the job runs. The overdue chase asks two
+    questions of a task -- is it overdue at all, and has it been overdue for more than three days
+    by the time the job looks -- so the simulated Wednesday has to be in the real past, or a task
+    dated a day before it is in the real future and is not overdue at all.
+    """
+    at_nine = now.replace(hour=3, minute=30, second=0, microsecond=0)
+    while at_nine.weekday() != weekday:
+        at_nine -= timedelta(days=1)
+    return at_nine
+
+
 def test_a_weekly_digest_is_the_week_ahead_and_arrives_once(api, world):
     ws, sent = world["ws"], world["sent"]
     now = datetime.now(timezone.utc)
@@ -129,15 +162,18 @@ def test_overdue_is_chased_separately_and_the_manager_is_copied(api, world):
     ws, sent = world["ws"], world["sent"]
     now = datetime.now(timezone.utc)
     ok(api.patch(f"/workspaces/{ws}/people/member", "owner", {"manager_id": "admin"}))
-    # One that is properly late, and one that is late but only since yesterday.
+    # Dated from the Wednesday the chase runs on, not from today. Dating them from today made the
+    # test pass or fail by the day of the week it was run: on a Thursday the next Wednesday is six
+    # days out, so "late since yesterday" was a week late by the time the job looked, and was
+    # chased exactly as it should have been.
+    wednesday = _last(2, now)
     ok(api.post(f"/lists/{world['list']['id']}/tasks", "owner",
-                {"name": "Long overdue", "assignees": ["member"], "due_date": (now - timedelta(days=10)).isoformat()}), 201)
+                {"name": "Long overdue", "assignees": ["member"], "due_date": (wednesday - timedelta(days=10)).isoformat()}), 201)
     ok(api.post(f"/lists/{world['list']['id']}/tasks", "owner",
-                {"name": "Only just late", "assignees": ["member"], "due_date": (now - timedelta(days=1)).isoformat()}), 201)
+                {"name": "Only just late", "assignees": ["member"], "due_date": (wednesday - timedelta(days=1)).isoformat()}), 201)
     for who in ("member", "admin"):
         ok(api.put(f"/workspaces/{ws}/delivery", who, {"timezone": "Asia/Kolkata"}))
 
-    wednesday = _next(2, now)
     run(outbound.run_overdue_nudges, wednesday)
     theirs = [e for e in sent["email"] if e[0] == ["member@example.com"]]
     assert len(theirs) == 1 and "Long overdue" in theirs[0][2]

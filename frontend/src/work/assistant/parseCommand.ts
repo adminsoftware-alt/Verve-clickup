@@ -12,6 +12,8 @@
 
 import { parseTypedDate } from '../dates';
 import { parseDuration } from '../ui';
+import { close } from './fuzzy';
+import { isHindi, romanise } from './hindi';
 
 export interface Person {
   id: string;
@@ -48,8 +50,14 @@ const LEAD_IN = /^(?:please\s+)?(?:can you\s+)?(?:\b(?:add|create|make|new)\b\s*
 
 const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
 
-/** Someone's first name, their full name, or their email -- whichever was said. */
-function matchPerson(word: string, people: Person[]): Person | 'me' | null {
+/**
+ * Someone's first name, their full name, or their email -- whichever was said.
+ *
+ * Exported because editing a task needs exactly the same answer as creating one: "reassign it to
+ * aarti" and "assign to aarti" must find the same Aarti, or the two halves of the assistant
+ * disagree about who works here.
+ */
+export function matchPerson(word: string, people: Person[]): Person | 'me' | null {
   const needle = word.trim().toLowerCase();
   if (!needle) return null;
   if (needle === 'me' || needle === 'myself' || needle === 'my') return 'me';
@@ -61,7 +69,13 @@ function matchPerson(word: string, people: Person[]): Person | 'me' | null {
   const byFirst = people.filter((p) => named(p).split(/\s+/)[0] === needle);
   if (byFirst.length === 1) return byFirst[0];
   const contains = people.filter((p) => named(p).includes(needle));
-  return contains.length === 1 ? contains[0] : null;
+  if (contains.length === 1) return contains[0];
+  // Said in Devanagari, or misheard. "आरती" spells out as "aartee" and the person is saved as
+  // "Aarti Yadav", so the last resort is a first name that is a letter or two away -- and only when
+  // exactly one person is that close, because two near-misses is a guess.
+  const spelled = isHindi(needle) ? romanise(needle).toLowerCase() : needle;
+  const nearly = people.filter((p) => close(spelled, named(p).split(/\s+/)[0]));
+  return nearly.length === 1 ? nearly[0] : null;
 }
 
 const iso = (d: Date) => {
@@ -142,6 +156,44 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
   let start: Date | null = null;
   let due: Date | null = null;
 
+  const vague = /^(?:this\s+)?(?:weekend|week|month|end of (?:week|month))$/i;
+  const dateClause = (label: string, pattern: RegExp): Date | null => {
+    const m = rest.match(pattern);
+    if (!m) return null;
+    let whole = m[0];
+    let value = m[1];
+    // "end date as this weekend, Friday" is one answer given twice. The clause has to stop at the
+    // comma -- otherwise "due friday, call the auditor" swallows the task's name -- so instead it
+    // reaches past one only when what follows is itself a date.
+    const after = rest.slice((m.index ?? 0) + m[0].length);
+    const more = after.match(/^\s*,\s*([a-z0-9][a-z0-9/–\- ]{0,20}?)(?=\s*(?:,|\.|$)|\s+\b(?:and|with|assign|priority|estimate)\b)/i);
+    if (more && parseTypedDate(more[1].trim(), now)) {
+      whole += more[0];
+      value += `, ${more[1]}`;
+    }
+    let picked: Date | null = null;
+    let pickedFrom = '';
+    let pickedVague = true;
+    for (const piece of value.split(/\s*,\s*|\s+or\s+/i)) {
+      const words_ = piece.trim().split(/\s+/);
+      // Longest first: "next friday" before "friday", "25 dec" before "25".
+      for (let take_ = Math.min(3, words_.length); take_ >= 1; take_ -= 1) {
+        const candidate = words_.slice(0, take_).join(' ');
+        const d = parseTypedDate(candidate, now);
+        if (!d) continue;
+        const isVague = vague.test(candidate);
+        if (picked && isVague) break;          // already have something; a vaguer word adds nothing
+        if (picked && !pickedVague) break;     // already have something specific
+        picked = d; pickedFrom = candidate; pickedVague = isVague;
+        break;
+      }
+    }
+    if (!picked) return null;
+    found.push({ field: label, from: pickedFrom });
+    rest = squash(rest.replace(whole, ' '));
+    return picked;
+  };
+
   // A span: "today to tomorrow", "from monday to friday", "25 dec until 2 jan".
   //
   // Found by candidate rather than by pattern. A single regex over the whole sentence matches the
@@ -157,7 +209,11 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
       if (!a) continue;
       for (let fwd = 1; fwd <= 3 && !due; fwd += 1) {
         const right = words.slice(i + 1, Math.min(words.length, i + 1 + fwd)).join(' ');
-        const b = parseTypedDate(right, now);
+        let b = parseTypedDate(right, now);
+        // "From monday to friday", said on a Thursday, is Monday the 12th to Friday the 16th --
+        // not back to the 9th. A weekday on the far side of a span means the next one after the
+        // near side, so when it lands earlier it is read again from there.
+        if (b && a && b < a) b = parseTypedDate(right, a);
         if (!b || b < a) continue;
         start = a;
         due = b;
@@ -167,6 +223,18 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
         rest = squash(rest.replace(new RegExp(`(?:\\b(?:for|from|starting|start)\\s+)?${whole.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i'), ' '));
       }
     }
+  }
+
+  // Said outright: "start date as today", "end date is this weekend", "deadline 25 dec".
+  //
+  // After the span, not before it. "From monday to friday" is a span, and a start-date pattern
+  // that matches "from" would take "monday" out of it and leave "to friday" stranded with nothing
+  // on its left -- two dates said, one date kept.
+  if (!start) {
+    start = dateClause('Starts', /\b(?:start(?:s|ing)?|begin(?:s|ning)?)\s*(?:date|day)?\s*(?:as|is|of|on|from|:|=)?\s*([a-z0-9][a-z0-9/–\- ]*?)(?=\s*(?:,\s*)?\b(?:and|with|assign|priority|estimate|end|due|deadline|finish|till|until|to)\b|[,.]|$)/i);
+  }
+  if (!due) {
+    due = dateClause('Due', /\b(?:end|due|deadline|finish(?:es|ing)?|target)\s*(?:date|day)?\s*(?:as|is|of|on|by|:|=)?\s*([a-z0-9][a-z0-9/–\- ]*?)(?=\s*(?:,\s*)?\b(?:and|with|assign|priority|estimate|start|begin|from)\b|[,.]|$)/i);
   }
 
   if (!due) {
@@ -195,6 +263,9 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
     priority = value;
     found.push({ field: 'Priority', from: squash(m[0]) });
     rest = squash(rest.replace(m[0], ' '));
+    // "With normal priority" matches on "with normal" and leaves the word "priority" behind, which
+    // then reads as the first word of the task's name. Take it with the rest of the clause.
+    rest = squash(rest.replace(/^\s*priority\b/i, ' ').replace(/\bpriority\s*(?=[,.]|$)/i, ' '));
     break;
   }
 
@@ -203,11 +274,25 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
   // taken; the conjunction joined two clauses, and only one of them is still here.
   let name = squash(rest.replace(/^\s*(?:and|then)\s+/i, ''));
   name = squash(name.replace(LEAD_IN, ''));
-  // Punctuation stranded where a clause used to be: "the board pack, ," is what is left when the
-  // estimate between two commas is lifted out.
-  name = squash(name.replace(/\s*,\s*(?=,|$)/g, '').replace(/[,;]+\s*$/, ''));
-  // Trailing conjunctions and prepositions left behind by the clauses that were lifted out.
-  name = squash(name.replace(/\b(and|with|as|for|to|the|by|on|due)\s*$/i, ''));
+  // Punctuation and joining words stranded where a clause used to be.
+  //
+  // Stripped in a loop rather than once, because lifting several clauses out of one sentence
+  // leaves several layers of debris: "with , and ," is what remains of "with normal priority,
+  // start date as today, and end date as Friday", and peeling one layer still leaves a sentence
+  // made entirely of connectives. It settles in two or three passes; the cap is there so a
+  // pattern that rewrites to itself cannot spin.
+  for (let pass = 0; pass < 6; pass += 1) {
+    const before = name;
+    name = squash(name
+      .replace(/\s*,\s*(?=[,;]|$)/g, '')
+      .replace(/^[\s,;]+/, '')
+      .replace(/[,;]+\s*$/, '')
+      .replace(/^\s*(?:and|then|with|as|for|to|the|by|on|due|at|of)\b\s*/i, '')
+      .replace(/\s*\b(?:and|then|with|as|for|to|the|by|on|due|at|of)\s*$/i, ''));
+    if (name === before) break;
+  }
+  // Nothing but punctuation left is nothing left. A task called "," helps nobody.
+  if (!/[a-z0-9ऀ-ॿ]/i.test(name)) name = '';
   name = name.replace(/^["\u2018\u2019\u201c\u201d']|["\u2018\u2019\u201c\u201d']$/g, '').trim();
   if (name) name = name[0].toUpperCase() + name.slice(1);
 

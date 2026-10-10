@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { useWork } from '../WorkContext';
-import { Portal, StatusDot, formatDuration } from '../ui';
+import { Menu, Portal, StatusDot, formatDuration, type MenuItem } from '../ui';
 import { isoDay, parseDay, sheetApi, type PickTask } from './api';
 
 /** "0h", "54m", "2h 5m": ClickUp's timesheet style (zero shows as 0h). */
@@ -86,6 +86,19 @@ export const WeekNav: React.FC<{ start: string | null; end: string | null; onGo:
     d.setDate(d.getDate() + days);
     onGo(isoDay(d));
   };
+  const today = isoDay(new Date());
+  const thisWeek = !!start && !!end && today >= start && today <= end;
+  const away = (weeks: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + weeks * 7);
+    return isoDay(d);
+  };
+  const weeks: MenuItem[] = [
+    { label: 'Last week', onClick: () => onGo(away(-1)) },
+    { label: 'This week', onClick: () => onGo(today) },
+    { label: 'Next week', onClick: () => onGo(away(1)) },
+    { label: 'Pick a date…', onClick: () => picker.current?.showPicker?.() },
+  ];
   return (
     <div className="flex items-center gap-1 sm:gap-2">
       <button type="button" title="Previous week" onClick={() => shift(-7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
@@ -108,9 +121,21 @@ export const WeekNav: React.FC<{ start: string | null; end: string | null; onGo:
           className="pointer-events-none absolute left-0 top-full h-0 w-0 opacity-0"
         />
       </button>
-      <button type="button" onClick={() => onGo(isoDay(new Date()))} className="ml-auto shrink-0 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 sm:ml-2">
-        This week
-      </button>
+      {/* "This week" was a button that only ever did one thing, sitting next to two arrows that
+          did the other two. Last week and next week are a click away now instead of a click and a
+          count, and "Pick a date" opens the same picker the title does -- a timesheet is a week at
+          a time, so a date is really a choice of which week. */}
+      <Menu
+        align="right"
+        triggerClassName="ml-auto shrink-0 sm:ml-2"
+        trigger={
+          <span className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+            {thisWeek ? 'This week' : rangeLabel(start ?? '', end ?? '')}
+            <ChevronDown size={14} className="text-gray-500" />
+          </span>
+        }
+        items={weeks}
+      />
     </div>
   );
 };

@@ -195,7 +195,9 @@ export const FilterPanel: React.FC<{
         className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm ${
           count ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
       >
-        {count ? `${count} filter${count === 1 ? '' : 's'}` : 'Filter'}
+        {/* The same shape as every other filter in the app: the word, and a count beside it. */}
+        Filter
+        {count > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-semibold leading-none text-white">{count}</span>}
         <ChevronDown size={13} className={count ? 'text-teal-500' : 'text-gray-400'} />
       </button>
 

@@ -76,6 +76,10 @@ def test_bulk_respects_each_tasks_permissions(api, org):
     # Payroll becomes private; the member may only view it.
     ok(api.patch(f"/lists/{org['payroll']['id']}", "owner", {"is_private": True}))
     ok(api.post(f"/lists/{org['payroll']['id']}/shares", "owner", {"user_id": "member", "level": "view"}), 201)
+    # And Audit is shared with them at edit, so the half of this that is meant to succeed can.
+    # Without it the member is read-and-comment on both -- an employee's standing on work that is
+    # not theirs -- and the test would pass for the wrong reason, with nothing updated at all.
+    ok(api.post(f"/lists/{org['audit']['id']}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
     out = ok(api.post("/tasks/bulk", "member", {"task_ids": [org["a"]["id"], org["c"]["id"]], "priority": 2}))
     assert out["updated"] == [org["c"]["id"]]
     assert out["skipped"][0]["reason"] == "You need edit access to change this task"

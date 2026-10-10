@@ -129,6 +129,17 @@ export interface Hierarchy {
 }
 
 export interface Status { id: string; name: string; color: string; group: StatusGroup; orderindex: number }
+
+/**
+ * Still to do.
+ *
+ * Both "done" and "closed" are finished: a Status in the done group has been completed whether or
+ * not anything archived it. Testing only for "closed" counts finished work as outstanding, which is
+ * how the assistant came to report more open tasks than My Tasks showed for the same person.
+ */
+export const isOpen = (t: { status: { group: StatusGroup } }) => t.status.group !== 'closed' && t.status.group !== 'done';
+/** Finished, either way round. */
+export const isDone = (t: { status: { group: StatusGroup } }) => !isOpen(t);
 export interface StatusSet { source: { kind: LocationKind; id: string }; inherited: boolean; statuses: Status[] }
 export interface Tag { id: string; name: string; fg_color: string; bg_color: string }
 

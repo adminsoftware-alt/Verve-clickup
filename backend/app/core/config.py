@@ -32,6 +32,32 @@ class Settings(BaseSettings):
     MAX_UPLOAD_MB: int = 25
     # Checks for due reports once a minute while the API runs.
     REPORTS_SCHEDULER_ENABLED: bool = True
+    # Email that goes out on a timer rather than because somebody did something: the daily,
+    # weekly and monthly digests, the Friday recap, the overdue chase, the manager's Monday
+    # heads-up, the team digest, and the weekly timesheet nudge.
+    #
+    # Off. Seventy-five people receiving a summary none of them asked for is how a firm learns
+    # to filter mail from its own tools, and then misses the one message that mattered. Nothing
+    # is deleted: every one of those jobs still works and is still covered by its tests. This is
+    # the switch that decides whether anything calls them.
+    SCHEDULED_EMAIL_ENABLED: bool = False
+    # The manager's "things waiting for your decision", each weekday morning. Its own switch
+    # because it is the only scheduled mail that unblocks somebody else's work instead of
+    # reporting on it -- and leave requests escalate to HR by themselves, so off stalls nothing.
+    APPROVAL_REMINDER_EMAIL: bool = False
+    # Email for anything other than an invitation.
+    #
+    # Off: the firm wants email used to get new people into the workspace and for nothing else.
+    # Notifications still reach people -- in the app, and as browser push -- they just do not also
+    # arrive as mail. Invitations, and chasing an invitation nobody accepted, are unaffected.
+    UPDATE_EMAIL_ENABLED: bool = False
+    # The leave request and approval workflow: asking for days off, the chain from a person to
+    # their manager to HR, the balances and the escalation when nobody decides.
+    #
+    # Off. What stays is everything the rest of the app measures with: the holiday calendar and
+    # each person's working hours, which are what Workload, the timesheets and the dashboard
+    # capacity cards divide by. Those are not leave, they just lived in the same module.
+    LEAVE_APPROVALS_ENABLED: bool = False
     # A task someone types in must carry an assignee, start and due dates, an estimate and a
     # priority. Tasks the system creates (templates, recurrences, imports, email) are exempt.
     REQUIRE_TASK_DETAILS: bool = True

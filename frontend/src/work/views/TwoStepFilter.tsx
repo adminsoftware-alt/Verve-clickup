@@ -108,7 +108,12 @@ export const TwoStepFilter: React.FC<{
             ? 'border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100'
             : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'}`}
       >
-        {count ? `${count} filter${count === 1 ? '' : 's'}` : 'Filter'}
+        {/* Always the word, never the tally in words. The control said "Filter", then "1 filter",
+            then "3 filters", so its width jumped and the one thing that never changed -- what the
+            button is for -- was the thing that kept being replaced. The number is a badge now, and
+            which filters they are is inside, where there is room to say. */}
+        Filter
+        {count > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-semibold leading-none text-white">{count}</span>}
         <ChevronDown size={13} className={count ? 'text-teal-500' : 'text-gray-400'} />
       </button>
 

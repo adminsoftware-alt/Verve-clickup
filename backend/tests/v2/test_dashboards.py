@@ -664,3 +664,30 @@ def test_dashboard_views_get_a_dashboard_scoped_to_their_location(api, seeded):
     # a view isn't a Dashboard view
     table = ok(api.post(f"/lists/{seeded['list']['id']}/views", "owner", {"type": "table"}), 201)
     assert api.post(f"/views/{table['id']}/dashboard", "owner").status_code == 400
+
+
+def test_the_top_row_is_the_same_on_every_standard_dashboard():
+    """Your own board, your Team's and the company's open with the same four tiles.
+
+    They had drifted apart in three ways at once -- four tiles of width 3 against three of width 4,
+    "Done this week" against "Done this month", and so a different layout depending on whose board
+    you were looking at. A manager comparing their own figures with their team's was reading two
+    rows that only looked alike.
+
+    Pinned here rather than left to the generator, because the drift was invisible: each board is
+    built once, when its owner first opens it, so a change to the template only ever showed up on
+    the boards made after it.
+    """
+    from app.services.work.dashboards.standard import _my_work_cards, _people_cards
+
+    def row(cards):
+        return [(title, config.get("filters"), width) for kind, title, config, width, height in cards
+                if kind == "calculation" and height == 1]
+
+    mine, team, company = row(_my_work_cards()), row(_people_cards(False)), row(_people_cards(True))
+    assert mine == team == company, "the standard Dashboards have drifted apart again"
+    assert [title for title, _f, _w in mine] == ["Open tasks", "Due today", "Overdue", "Done this week"]
+    # Four tiles of width 3 fill the twelve-column row exactly, so it is square on every board.
+    assert sum(width for _t, _f, width in mine) == 12
+    # The finished-work tile covers the same week as the hours cards underneath it.
+    assert mine[3][1] == {"done": "this_week"}

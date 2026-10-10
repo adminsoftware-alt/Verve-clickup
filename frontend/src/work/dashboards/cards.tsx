@@ -618,27 +618,41 @@ const DiscussionCard: React.FC<{ dashboardId: string; cardId: string }> = ({ das
 
 const TaskListCard: React.FC<{ tasks: Task[]; total: number; onOpenTask: (id: string) => void; onMore: () => void }> = ({ tasks, total, onOpenTask, onMore }) => {
   if (!tasks.length) return <Empty />;
+  // Rows, not a table.
+  //
+  // The table gave Assignee 7rem and Due 6rem whatever the card's width, and these cards sit three
+  // to a row -- a quarter of the screen each. Thirteen rem of fixed columns in a narrow card push
+  // the rest off the left edge, which is why the first heading read "me" instead of "Name" and why
+  // a date as short as "14 Sep" came out on two lines.
+  //
+  // A flex row cannot do that: the name takes what is left and truncates, the two on the right
+  // take exactly what they need and never wrap.
   return (
     <div className="h-full overflow-y-auto">
-      <table className="w-full text-sm">
-        <thead className="sticky top-0 bg-white text-left text-[11px] font-medium text-gray-400">
-          <tr><th className="py-1 pl-1 font-medium">Name</th><th className="w-28 font-medium">Assignee</th><th className="w-24 font-medium">Due</th></tr>
-        </thead>
-        <tbody>
-          {tasks.map((t) => (
-            <tr key={t.id} onClick={() => onOpenTask(t.id)} className="cursor-pointer border-t border-gray-100 hover:bg-gray-50">
-              <td className="py-1.5 pl-1">
-                <span className="flex min-w-0 items-center gap-2">
-                  <StatusDot status={t.status} size={11} />
-                  <span className={`truncate ${t.status.group === 'closed' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{t.name}</span>
-                </span>
-              </td>
-              <td><AvatarStack users={t.assignees} max={3} /></td>
-              <td className={`text-xs ${t.is_overdue ? 'text-red-600' : 'text-gray-500'}`}>{formatDue(t.due_date)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="sticky top-0 z-10 flex items-center gap-2 bg-white py-1 pl-1 text-[11px] font-medium text-gray-400">
+        <span className="min-w-0 flex-1">Name</span>
+        <span className="w-12 shrink-0 text-center">Who</span>
+        <span className="w-14 shrink-0 text-right">Due</span>
+      </div>
+      <ul>
+        {tasks.map((t) => (
+          <li key={t.id}>
+            <button
+              type="button" onClick={() => onOpenTask(t.id)}
+              className="flex w-full items-center gap-2 border-t border-gray-100 py-1.5 pl-1 text-left text-sm hover:bg-gray-50"
+            >
+              <StatusDot status={t.status} size={11} />
+              <span className={`min-w-0 flex-1 truncate ${t.status.group === 'closed' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+                {t.name}
+              </span>
+              <span className="flex w-12 shrink-0 justify-center"><AvatarStack users={t.assignees} max={2} /></span>
+              <span className={`w-14 shrink-0 whitespace-nowrap text-right text-xs ${t.is_overdue ? 'text-red-600' : 'text-gray-500'}`}>
+                {formatDue(t.due_date)}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
       {total > tasks.length && (
         <button type="button" onClick={onMore} className="mt-1 w-full py-1 text-center text-xs text-brand-600 hover:underline">
           Show all {total}

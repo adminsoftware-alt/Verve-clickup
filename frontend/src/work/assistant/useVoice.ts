@@ -28,6 +28,9 @@ const Engine: { new (): Recognition } | undefined =
     : ((window as unknown as Record<string, unknown>).SpeechRecognition
       ?? (window as unknown as Record<string, unknown>).webkitSpeechRecognition) as { new (): Recognition } | undefined;
 
+/** How long a silence has to last before the sentence counts as finished. */
+const QUIET_MS = 2500;
+
 export interface Voice {
   supported: boolean;
   listening: boolean;
@@ -48,32 +51,53 @@ export function useVoice(onFinal: (text: string) => void, lang = 'en-IN'): Voice
   const [heard, setHeard] = useState('');
   const [error, setError] = useState<string | null>(null);
   const engine = useRef<Recognition | null>(null);
+  // The last thing heard, and the timer that decides the speaker has stopped.
+  const said = useRef('');
+  const hush = useRef<number | undefined>(undefined);
   // Held in a ref so restarting recognition does not need the callback to be stable.
   const finished = useRef(onFinal);
   finished.current = onFinal;
 
   const stop = useCallback(() => {
+    window.clearTimeout(hush.current);
     engine.current?.stop();
     setListening(false);
+    if (said.current.trim()) finished.current(said.current.trim());
   }, []);
 
   const start = useCallback(() => {
     if (!Engine) return;
     setError(null);
     setHeard('');
+    said.current = '';
     const recognition = new Engine();
     recognition.lang = lang;
-    recognition.continuous = false;   // one sentence, then hand it over
+    // Keep listening. With `continuous` off the recogniser stops at the first pause, which cuts
+    // people off mid-sentence -- and a pause is exactly what somebody does while they think of
+    // the next word. It now runs until the speaker presses stop, or until a few seconds of
+    // silence say they have finished.
+    recognition.continuous = true;
     recognition.interimResults = true; // show the words arriving, so it does not look frozen
     recognition.onresult = (e) => {
-      let text = '';
-      let done = false;
+      let settled = '';
+      let pending = '';
       for (let i = 0; i < e.results.length; i += 1) {
-        text += e.results[i][0].transcript;
-        if (e.results[i].isFinal) done = true;
+        const piece = e.results[i][0].transcript;
+        if (e.results[i].isFinal) settled += piece;
+        else pending += piece;
       }
+      const text = (settled + pending).replace(/\s+/g, ' ').trim();
       setHeard(text);
-      if (done) finished.current(text.trim());
+      said.current = text;
+      // Quiet for a moment after a finished phrase means the sentence is over. Restarted on
+      // every result, so thinking mid-sentence does not count as finishing.
+      window.clearTimeout(hush.current);
+      if (settled.trim()) {
+        hush.current = window.setTimeout(() => {
+          recognition.stop();
+          finished.current(said.current);
+        }, QUIET_MS);
+      }
     };
     recognition.onerror = (e) => {
       // "aborted" is what stopping it looks like from in here, and is not worth reporting.
@@ -82,7 +106,7 @@ export function useVoice(onFinal: (text: string) => void, lang = 'en-IN'): Voice
         e.error === 'not-allowed'
           ? 'The microphone is blocked. Allow it for this site in your browser settings.'
           : e.error === 'no-speech'
-            ? 'Nothing was heard. Try again, a little closer to the microphone.'
+            ? 'Nothing was heard yet — keep talking, or press stop.'
             : `The microphone could not be used (${e.error}).`,
       );
       setListening(false);
@@ -98,7 +122,7 @@ export function useVoice(onFinal: (text: string) => void, lang = 'en-IN'): Voice
   }, [lang]);
 
   // A recogniser left running when the component goes is a microphone left on.
-  useEffect(() => () => engine.current?.abort(), []);
+  useEffect(() => () => { window.clearTimeout(hush.current); engine.current?.abort(); }, []);
 
   return { supported: Boolean(Engine), listening, heard, error, start, stop };
 }

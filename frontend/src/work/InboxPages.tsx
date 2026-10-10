@@ -1,16 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Archive, Bell, BellOff, Check, CheckCheck, Clock, Inbox as InboxIcon, MessageSquare, MoreHorizontal, Plus, Settings, SlidersHorizontal, Trash2, UserCheck, X } from 'lucide-react';
+import { Archive, Bell, BellOff, Check, CheckCheck, Clock, Flag, Inbox as InboxIcon, MessageSquare, MoreHorizontal, Plus, Settings, SlidersHorizontal, Trash2, UserCheck, X } from 'lucide-react';
 import { useWork } from './WorkContext';
 import { disablePush, enablePush, outboundApi, type Delivery } from './outboundApi';
 import {
   collabApi, inboxFilterCount, NO_INBOX_FILTERS,
   type CommentWithTask, type InboxDue, type InboxFilters, type InboxItem, type InboxTab, type NotificationSetting, type Reminder,
 } from './collabApi';
-import { Avatar, formatDue, Menu, Portal, PriorityFlag, PRIORITIES, StatusDot, useClickAway } from './ui';
+import { Avatar, formatDue, Menu, Portal, PriorityFlag, PRIORITIES, StatusDot } from './ui';
 import { usePhone } from './useBreakpoint';
 import { TaskPanel } from './TaskPanel';
 import { ReminderDialog } from './task/TaskActions';
+import { TwoStepFilter, type FilterField } from './views/TwoStepFilter';
+import { FEATURES } from '../config/features';
 
 export const INBOX_CHANGED = 'timetriq:inbox';
 export const inboxChanged = () => window.dispatchEvent(new Event(INBOX_CHANGED));
@@ -98,67 +100,59 @@ const DUE: { key: InboxDue; label: string }[] = [
   { key: 'none', label: 'No due date' },
 ];
 
-/** One dropdown of tick boxes. Closes on a click anywhere else, like every other menu here. */
-const FilterDrop: React.FC<{ label: string; active: number; children: React.ReactNode }> = ({ label, active, children }) => {
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-  useClickAway(box, () => setOpen(false), open);
-  return (
-    <div ref={box} className="relative">
-      <button type="button" onClick={() => setOpen(!open)}
-        className={`flex min-h-[2.25rem] items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors ${active ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}>
-        {label}{active > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] font-semibold text-white">{active}</span>}
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-56 rounded-xl border border-gray-200 bg-white p-1 shadow-lg" role="group" aria-label={label}>
-          {children}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const Tick: React.FC<{ on: boolean; onChange: () => void; children: React.ReactNode }> = ({ on, onChange, children }) => (
-  <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-    <input type="checkbox" checked={on} onChange={onChange} className="accent-brand-600" />
-    <span className="min-w-0 flex-1">{children}</span>
-  </label>
-);
-
 const InboxFilterBar: React.FC<{ value: InboxFilters; onChange: (f: InboxFilters) => void }> = ({ value, onChange }) => {
-  const count = inboxFilterCount(value);
   const toggle = <T,>(list: T[], item: T) => (list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
+
+  // The same control the timesheet, the workload and every task view use.
+  //
+  // This was three pills of its own design -- round where the others are square, brand blue where
+  // the others are teal, and three buttons where everywhere else has one. Nothing about the Inbox
+  // needs a filter of its own shape; it just grew one. Now there is a single "Filter" carrying a
+  // count, and opening it says which filters those are.
+  const fields: FilterField[] = [
+    {
+      key: 'groups',
+      label: 'Activity',
+      Icon: SlidersHorizontal,
+      options: GROUPS.map((g) => ({ value: g.key, label: g.label })),
+      selected: value.groups,
+    },
+    {
+      key: 'priority',
+      label: 'Priority',
+      Icon: Flag,
+      options: [1, 2, 3, 4].map((n) => ({ value: String(n), label: PRIORITIES[n].label, color: PRIORITIES[n].color })),
+      selected: value.priority.map(String),
+    },
+    {
+      key: 'due',
+      label: 'Due',
+      Icon: Clock,
+      single: true,
+      options: DUE.map((d) => ({ value: d.key, label: d.label })),
+      selected: value.due ? [value.due] : [],
+    },
+  ];
+
+  const pick = (field: FilterField, picked: string) => {
+    if (field.key === 'groups') onChange({ ...value, groups: toggle(value.groups, picked) });
+    else if (field.key === 'priority') onChange({ ...value, priority: toggle(value.priority, Number(picked)) });
+    // One at a time: "overdue and due today" is just "due in 7 days".
+    else onChange({ ...value, due: value.due === picked ? null : (picked as InboxDue) });
+  };
+
+  const clear = (field: FilterField) => {
+    if (field.key === 'groups') onChange({ ...value, groups: [] });
+    else if (field.key === 'priority') onChange({ ...value, priority: [] });
+    else onChange({ ...value, due: null });
+  };
+
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-4 py-2 sm:px-6">
-      <SlidersHorizontal size={14} className="text-gray-400" />
-      <FilterDrop label="What happened" active={value.groups.length}>
-        {GROUPS.map((g) => (
-          <Tick key={g.key} on={value.groups.includes(g.key)} onChange={() => onChange({ ...value, groups: toggle(value.groups, g.key) })}>{g.label}</Tick>
-        ))}
-      </FilterDrop>
-      <FilterDrop label="Priority" active={value.priority.length}>
-        {[1, 2, 3, 4].map((n) => (
-          <Tick key={n} on={value.priority.includes(n)} onChange={() => onChange({ ...value, priority: toggle(value.priority, n) })}>
-            <span className="flex items-center gap-1.5"><PriorityFlag priority={n} /></span>
-          </Tick>
-        ))}
-        <p className="px-2 pb-1 pt-0.5 text-[11px] text-gray-400">Only items about a task can have one.</p>
-      </FilterDrop>
-      <FilterDrop label="Due" active={value.due ? 1 : 0}>
-        {DUE.map((d) => (
-          // One at a time: "overdue and due today" is just "due in 7 days".
-          <Tick key={d.key} on={value.due === d.key} onChange={() => onChange({ ...value, due: value.due === d.key ? null : d.key })}>{d.label}</Tick>
-        ))}
-      </FilterDrop>
-      <button type="button" onClick={() => onChange({ ...value, unread: !value.unread })}
-        className={`min-h-[2.25rem] rounded-full border px-3 py-1.5 text-sm transition-colors ${value.unread ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}>
-        Unread only
-      </button>
-      {count > 0 && (
-        <button type="button" onClick={() => onChange(NO_INBOX_FILTERS)} className="ml-auto text-sm text-gray-500 underline-offset-2 hover:text-gray-800 hover:underline">
-          Clear {count === 1 ? 'filter' : `all ${count} filters`}
-        </button>
-      )}
+    // Right-aligned, like the period control on a Dashboard and the filter on a List. A control
+    // that narrows what is below it belongs at the end of the row, not in front of the first thing
+    // somebody reads.
+    <div className="flex flex-wrap items-center justify-end gap-2 border-b border-gray-200 bg-white px-4 py-2 sm:px-6">
+      <TwoStepFilter fields={fields} onToggle={pick} onClear={clear} onClearAll={() => onChange(NO_INBOX_FILTERS)} />
     </div>
   );
 };
@@ -373,21 +367,35 @@ const DeliverySettings: React.FC = () => {
   return (
     <section aria-label="Outside the app" className="space-y-2 rounded-lg bg-gray-50 p-3 text-sm">
       <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Outside the app</p>
-      <label className="flex items-center justify-between gap-2">Email
-        <select aria-label="Email notifications" value={d.email_notifications} onChange={(e) => save({ email_notifications: e.target.value as Delivery['email_notifications'] })} className={sel}>
-          <option value="daily">A daily summary</option><option value="instant">Each update, right away</option><option value="off">Never</option>
-        </select>
-      </label>
-      {d.email_notifications === 'daily' && (
-        <label className="flex items-center justify-between gap-2 text-gray-600">Summary at
-          <select aria-label="Summary time" value={d.digest_hour} onChange={(e) => save({ digest_hour: Number(e.target.value) })} className={sel}>
-            {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
-          </select>
-        </label>
+      {/* The Email control, while email still had something to decide. */}
+      {FEATURES.emailUpdates && (
+        <>
+          <label className="flex items-center justify-between gap-2">Email
+            <select aria-label="Email notifications" value={d.email_notifications} onChange={(e) => save({ email_notifications: e.target.value as Delivery['email_notifications'] })} className={sel}>
+              <option value="daily">{FEATURES.emailDigests ? 'A daily summary' : 'A daily summary — turned off'}</option>
+              <option value="instant">Each update, right away</option><option value="off">Never</option>
+            </select>
+          </label>
+          {FEATURES.emailDigests && d.email_notifications === 'daily' && (
+            <label className="flex items-center justify-between gap-2 text-gray-600">Summary at
+              <select aria-label="Summary time" value={d.digest_hour} onChange={(e) => save({ digest_hour: Number(e.target.value) })} className={sel}>
+                {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+              </select>
+            </label>
+          )}
+          {FEATURES.emailDigests && (
+            <label className="flex items-center justify-between gap-2">Weekly team digest (managers and leads)
+              <input type="checkbox" checked={d.weekly_team_digest} onChange={(e) => save({ weekly_team_digest: e.target.checked })} />
+            </label>
+          )}
+        </>
       )}
-      <label className="flex items-center justify-between gap-2">Weekly team digest (managers and leads)
-        <input type="checkbox" checked={d.weekly_team_digest} onChange={(e) => save({ weekly_team_digest: e.target.checked })} />
-      </label>
+      {!FEATURES.emailUpdates && (
+        <p className="text-xs text-gray-500">
+          Email is used to invite people to the workspace, and for nothing else. Notifications reach you
+          here and, if you turn them on below, on this device.
+        </p>
+      )}
       <label className="flex items-center justify-between gap-2">WhatsApp{d.phone ? ` (${d.phone})` : ' (add your mobile to your profile)'}
         <input type="checkbox" aria-label="WhatsApp" checked={d.whatsapp_opt_in} disabled={!d.phone} onChange={(e) => save({ whatsapp_opt_in: e.target.checked })} />
       </label>

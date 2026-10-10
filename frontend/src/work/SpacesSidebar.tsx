@@ -1,9 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Archive, EyeOff, Zap, Settings2, Star, Tag as TagIcon, ChevronDown, ChevronRight, CircleDot, Copy, Folder, FolderOpen, LayoutTemplate, List as ListIcon, Lock, MoreHorizontal, MoveRight, Pencil, Plus, Share2, Trash2, Users, Blocks, Compass, Mail, Timer, Rows3, UserRound } from 'lucide-react';
 import { ClickAppsDialog, DuplicateSpaceDialog, ListEmailDialog, SprintSettingsDialog } from './SpaceDialogs';
 import { spacesApi } from './spacesApi';
-import { SaveTemplateDialog, TemplateCenter } from './templates/Templates';
+// The sidebar is the shell, so anything it imports is in the first download. These two are
+// dialogs that open from a menu, so they wait until the menu is used.
+const SaveTemplateDialog = lazy(() => import('./templates/Templates').then((m) => ({ default: m.SaveTemplateDialog })));
+const TemplateCenter = lazy(() => import('./templates/Templates').then((m) => ({ default: m.TemplateCenter })));
 import { useFavorites } from './Favorites';
 import { LocationSettingsDialog, TagManagerDialog } from './LocationSettings';
 import { AutomationsDialog } from './AutomationsDialog';
@@ -484,8 +487,10 @@ export const SpacesSidebar: React.FC = () => {
       {dialog?.type === 'settings' && <LocationSettingsDialog kind={dialog.kind} id={dialog.id} onClose={() => setDialog(null)} />}
       {dialog?.type === 'tags' && <TagManagerDialog spaceId={dialog.id} spaceName={dialog.name} canEdit={dialog.canEdit} onClose={() => setDialog(null)} />}
       {dialog?.type === 'archived' && <ArchivedDialog onClose={() => setDialog(null)} onRestored={refresh} />}
-      {dialog?.type === 'save-template' && <SaveTemplateDialog kind={dialog.kind} id={dialog.id} name={dialog.name} onClose={() => setDialog(null)} />}
-      {dialog?.type === 'templates' && <TemplateCenter kind={dialog.kind} target={dialog.target} onClose={() => setDialog(null)} />}
+      <Suspense fallback={null}>
+        {dialog?.type === 'save-template' && <SaveTemplateDialog kind={dialog.kind} id={dialog.id} name={dialog.name} onClose={() => setDialog(null)} />}
+        {dialog?.type === 'templates' && <TemplateCenter kind={dialog.kind} target={dialog.target} onClose={() => setDialog(null)} />}
+      </Suspense>
       {dialog?.type === 'clickapps' && <ClickAppsDialog spaceId={dialog.id} name={dialog.name} canEdit={dialog.canManage} onClose={() => setDialog(null)} onSaved={refresh} />}
       {dialog?.type === 'duplicate-space' && (
         <DuplicateSpaceDialog spaceId={dialog.id} name={dialog.name} onClose={() => setDialog(null)}

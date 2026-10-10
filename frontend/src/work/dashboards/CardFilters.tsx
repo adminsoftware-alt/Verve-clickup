@@ -81,12 +81,15 @@ const DUE_OPTIONS: Option[] = [
   { value: 'none', label: 'No due date' },
 ];
 
+// "Done", not "Finished". The cards these filters build are called "Done this week", the field is
+// called "Date done", and the row control writes "Done <period>" when it re-scopes one -- so a menu
+// offering "Finished this week" was the only place in the Dashboard using a third word for it.
 const DONE_OPTIONS: Option[] = [
-  { value: 'today', label: 'Finished today' },
-  { value: 'this_week', label: 'Finished this week' },
-  { value: 'last_7_days', label: 'Finished in the last 7 days' },
-  { value: 'this_month', label: 'Finished this month' },
-  { value: 'last_30_days', label: 'Finished in the last 30 days' },
+  { value: 'today', label: 'Done today' },
+  { value: 'this_week', label: 'Done this week' },
+  { value: 'last_7_days', label: 'Done in the last 7 days' },
+  { value: 'this_month', label: 'Done this month' },
+  { value: 'last_30_days', label: 'Done in the last 30 days' },
 ];
 
 const ESTIMATE_OPTIONS: Option[] = [
@@ -392,7 +395,12 @@ export const CardFilterMenu: React.FC<{
           </>
         ) : (
           <>
-            {activeCount ? `${activeCount} filter${activeCount === 1 ? '' : 's'}` : triggerLabel}
+            {triggerLabel}
+            {activeCount > 0 && (
+              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-semibold leading-none text-white">
+                {activeCount}
+              </span>
+            )}
             <ChevronDown size={13} className={activeCount ? 'text-teal-500' : 'text-gray-400'} />
           </>
         )}

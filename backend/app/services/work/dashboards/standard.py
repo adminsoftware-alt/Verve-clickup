@@ -31,15 +31,28 @@ Card = Tuple[str, str, Dict[str, Any], int, int]
 WEEK = {"preset": "this_week"}
 MONTH = {"preset": "this_month"}
 
+# The top row, identical on every standard Dashboard: your own, a Team's, and the company's.
+#
+# One definition because three dashboards that answer the same question should ask it the same way.
+# They had drifted into three different rows -- a person saw four tiles a third of the width apart
+# while a Team saw three a quarter wider, and the finished-work tile covered a week on one and a
+# month on the other. Side by side they read as different products.
+#
+# Four tiles of width 3 fill the twelve-column row exactly, so the row is square on every board.
+_STAT_ROW: List["Card"] = [
+    ("calculation", "Open tasks", {}, 3, 1),
+    ("calculation", "Due today", {"filters": {"due": "today"}}, 3, 1),
+    ("calculation", "Overdue", {"filters": {"due": "overdue"}}, 3, 1),
+    # A week, not a month, and the same week the hours cards below already cover.
+    ("calculation", "Done this week", {"filters": {"done": "this_week"}, "include_closed": True}, 3, 1),
+]
+
 
 def _my_work_cards() -> List[Card]:
     """What a person needs from their own Dashboard: how much work, what it adds up to in hours,
     what is finished, what is still to do, and where the hours went against the estimates."""
     return [
-        ("calculation", "Open tasks", {}, 3, 1),
-        ("calculation", "Due today", {"filters": {"due": "today"}}, 3, 1),
-        ("calculation", "Overdue", {"filters": {"due": "overdue"}}, 3, 1),
-        ("calculation", "Done this week", {"filters": {"done": "this_week"}, "include_closed": True}, 3, 1),
+        *_STAT_ROW,
         # Across the full width: the hours, for whatever period is chosen on the card.
         ("capacity", "My hours: capacity, planned and logged", {"period": WEEK, "include_subtasks": True}, 12, 2),
         ("bar", "My work by priority", {"group_by": "priority"}, 6, 3),
@@ -60,15 +73,21 @@ def _people_cards(everyone: bool) -> List[Card]:
     """One Dashboard covering a group of people, broken down person by person."""
     whose = "the company" if everyone else "the team"
     return [
-        # Three figures, not four. "Unassigned" is taken off because an assignee is required on a
-        # new task, so the tile reads 0 for good -- a number that never moves is not worth a third
-        # of the top row. (Tasks made before that rule can still have nobody on them; they are a
-        # one-off clean-up, not a permanent card.)
+        # The same four tiles, in the same order, at the same width as a person's own Dashboard --
+        # see _STAT_ROW. A manager who looks at their own board and then at their team's should be
+        # reading the same row twice, not learning a second layout; and the two rows used to differ
+        # in all three ways at once: three tiles against four, width 4 against 3, and "Done this
+        # month" against "Done this week".
+        #
+        # "Unassigned" is still off: an assignee is required on a new task, so the tile reads 0 for
+        # good, and a number that never moves is not worth a quarter of the top row. (Tasks made
+        # before that rule can still have nobody on them; that is a one-off clean-up, not a card.)
         # ("calculation", "Unassigned", {"filters": {"assignees": ["none"]}}, 3, 1),
-        ("calculation", "Open tasks", {}, 4, 1),
-        ("calculation", "Overdue", {"filters": {"due": "overdue"}}, 4, 1),
-        ("calculation", "Done this month", {"filters": {"done": "this_month"}, "include_closed": True}, 4, 1),
-        ("capacity", f"Hours in {whose}: capacity, planned and logged", {"period": WEEK, "include_subtasks": True}, 12, 2),
+        *_STAT_ROW,
+        # Taller than the same card on a person's own board, and deliberately: this one lists a row
+        # per person, so on a Team of eleven -- or the company's seventy-five -- two rows of height
+        # is a scrollbar where the whole point is to see everyone at once.
+        ("capacity", f"Hours in {whose}: capacity, planned and logged", {"period": WEEK, "include_subtasks": True}, 12, 4),
         ("bar", "Work by priority", {"group_by": "priority"}, 12, 3),
         ("timesheet", "Hours per day this week", {"period": WEEK, "include_subtasks": True}, 12, 3),
         # What is late, what is today, and what is coming -- side by side, because a manager reads

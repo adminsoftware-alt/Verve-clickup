@@ -50,7 +50,10 @@ export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-gray-50/70">
-      <header className="flex items-center gap-6 border-b border-gray-200 bg-white px-6">
+      {/* Wraps, and with less air between things on a phone. As one unwrapped row with 24px gaps
+          it was 58px wider than a 390px screen, which put Settings off the right edge where
+          nothing could reach it. */}
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-gray-200 bg-white px-4 sm:gap-x-6 sm:px-6">
         <span className="flex items-center gap-2 py-3 text-[15px] text-gray-800"><Clock size={17} /> Timesheets</span>
         {/* One tab is not a choice, and next to the heading it reads as the same word twice. */}
         {shown.length > 1 && (
@@ -68,12 +71,15 @@ export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
         {/* Hours, the week's shape and approvals are company policy, not a personal
             preference, so the whole dialog belongs to owners and admins -- Team leads included. */}
         {isAdmin && (
-          <button type="button" onClick={() => setShowSettings(true)} className="ml-auto flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-            <Settings size={14} /> Settings
+          <button
+            type="button" onClick={() => setShowSettings(true)} aria-label="Timesheet settings"
+            className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <Settings size={14} /> <span className="hidden sm:inline">Settings</span>
           </button>
         )}
       </header>
-      <main className="min-h-0 flex-1 overflow-auto px-6 py-6">
+      <main className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
         {tab === 'all' ? <AllTimesheets /> : tab === 'approvals' ? <Approvals settings={settings} /> : isAdmin ? <AllTimesheets /> : <SheetPage />}
       </main>
       {showSettings && settings && isAdmin && <SettingsDialog settings={settings} onClose={() => setShowSettings(false)} onSaved={loadSettings} />}

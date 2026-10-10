@@ -123,11 +123,18 @@ export const PeriodBar: React.FC<{
       {preset === 'custom' && value?.start && value?.end && (
         <span className="text-xs text-gray-500">{value.start} to {value.end}</span>
       )}
-      {!value && <span className="mr-auto text-xs text-gray-400">Each card is on its own window — pick one to line them up.</span>}
+      {/* The normal state on a standard Dashboard, not a fault: the tiles are built with their own
+          windows on purpose -- "Due today" next to "Done this week" -- so this says what they
+          cover rather than reading as something waiting to be fixed. Choosing a period still puts
+          them all on one, which is what the control is for. */}
+      {!value && <span className="mr-auto text-xs text-gray-400">Each tile covers the window in its own name. Pick a period to put them all on one.</span>}
       <PeriodMenu
-        // With no shared window the button says what it is for rather than naming a state nobody
-        // can pick: "Mixed" read like a period you had chosen, and sat where "This week" would.
-        label={value ? (choices.find(([v]) => v === preset)?.[1] ?? periodLabel(value)) : 'Period'}
+        // "Filter" at rest, like every other filter control in the app, and the period's own name
+        // once one is chosen. It used to say "Period" here, which was the only control in the app
+        // that named its field rather than its job -- so a row of filters read as a row of
+        // different things. What it narrows is still obvious from the calendar on it, and the
+        // moment a period is picked the button says which.
+        label={value ? (choices.find(([v]) => v === preset)?.[1] ?? periodLabel(value)) : 'Filter'}
         preset={preset}
         choices={choices}
         disabled={!canEdit}

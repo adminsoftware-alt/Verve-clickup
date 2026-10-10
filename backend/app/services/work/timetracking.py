@@ -36,7 +36,21 @@ def _now() -> datetime:
 
 
 def _require_tracking(opened: Opened[Task]) -> None:
-    if not opened.level.at_least(PermissionLevel.edit):
+    # Edit, but measured before the employee cap.
+    #
+    # Employees are read-and-comment on tasks that are not theirs, and recording hours is one of
+    # the few things the firm wants every employee able to do: two people work the same audit while
+    # only one of them can be the assignee, and the second still has to put their time in.
+    #
+    # So the bar stays at edit and tracking_level answers it, which is their standing before the cap
+    # -- the cap is about changing a colleague's task, not about writing down your own time. An
+    # explicit share of comment or view still refuses, because somebody deliberately said
+    # read-and-comment, and billing against an area you were let into to read is not that.
+    from app.services.work.access import tracking_level
+
+    db = Session.object_session(opened.obj)
+    level = tracking_level(db, opened.access, opened.obj) if db is not None else opened.level
+    if level is None or not level.at_least(PermissionLevel.edit):
         raise Forbidden("You need edit access to a task to track time on it")
     from app.db.models import TaskList
     from app.services.work import space_admin
@@ -259,7 +273,10 @@ def update_entry(db: Session, user_id: str, entry_id: uuid.UUID, data: s.TimeEnt
     if timing:
         ensure_unlocked(db, access.workspace_id, entry.user_id, entry.started_at, access.role)
     if "task_id" in fields and data.task_id is not None and data.task_id != entry.task_id:
-        target = open_task(db, user_id, data.task_id, PermissionLevel.edit)
+        # Opened at view, then held to the tracking bar: moving an entry onto a task is recording
+        # your hours against it, which is the same question as logging them there in the first place.
+        target = open_task(db, user_id, data.task_id, PermissionLevel.view)
+        _require_tracking(target)
         if target.access.workspace_id != access.workspace_id:
             raise Invalid("Time can only move within the workspace")
         if entry.user_id != user_id:

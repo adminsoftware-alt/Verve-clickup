@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Briefcase, Building2, Cake, Calendar, Camera, ClipboardCheck, Copy, Crown, Hash, Heart, LogOut, Mail, MapPin, Phone, Power, Send, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Briefcase, Building2, Cake, Calendar, Camera, ClipboardCheck, Clock, Copy, Crown, Hash, Heart, LayoutDashboard, LogOut, Mail, MapPin, Phone, Power, Send, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { JoinerDialog, OffboardDialog } from './AdminDialogs';
 import type { Role, Task } from '../api';
+import { dashApi } from '../dashboards/api';
 import { Avatar, Portal, StatusDot, formatDue, useEscapeToClose } from '../ui';
 import { peopleApi, personName, type Person, type PersonInput, type TeamFull } from './peopleApi';
 import { ask } from '../../components/ask';
@@ -241,6 +242,30 @@ export const PersonPanel: React.FC<{
   ws: string; person: Person; people: Person[]; teams: TeamFull[]; me: string; isAdmin: boolean; roles: Role[];
   onClose: () => void; onChanged: () => void; onOpenPerson: (id: string) => void;
 }> = ({ ws, person, people, teams, me, isAdmin, roles, onClose, onChanged, onOpenPerson }) => {
+  const navigate = useNavigate();
+  // 'idle' until asked, then 'looking', then 'none' if they have not got one yet.
+  const [board, setBoard] = useState<'idle' | 'looking' | 'none'>('idle');
+
+  /** Open the Dashboard this person sees when they open the app.
+   *
+   *  Found by owner rather than by a route of its own: the server already shares every personal
+   *  Dashboard with admins at view, and the list it returns names who each one belongs to. There
+   *  was nothing to add on the server -- only a way in from the person.
+   */
+  const openDashboard = async (userId: string) => {
+    setBoard('looking');
+    try {
+      const all = await dashApi.list(ws);
+      const theirs = all.find((d) => d.standard === 'my_work' && d.owner?.id === userId);
+      if (!theirs) { setBoard('none'); return; }
+      setBoard('idle');
+      onClose();
+      navigate(`/dashboards/${theirs.id}`);
+    } catch {
+      setBoard('none');
+    }
+  };
+
   const ref = useRef<HTMLElement>(null);
   useEscapeToClose(ref, onClose);
   const [editing, setEditing] = useState(false);
@@ -343,6 +368,33 @@ export const PersonPanel: React.FC<{
           <div className="min-h-0 flex-1 overflow-auto p-5">
             {error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
             {note && <p className="mb-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{note}</p>}
+            {/* Their work, from here.
+                An admin could already open anybody's personal Dashboard -- the server shares every
+                one of them at view -- but only by finding it among ten rows in the Dashboards list
+                all called "My work". The way in was missing, not the permission. Opening it shows
+                exactly what that person sees on their own home page, read-only. */}
+            {!editing && isAdmin && person.user.id !== me && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                <button
+                  type="button" onClick={() => openDashboard(person.user.id)} disabled={board === 'looking'}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:border-brand-300 hover:bg-brand-50/50 disabled:opacity-50"
+                >
+                  <LayoutDashboard size={14} className="text-brand-600" />
+                  {board === 'looking' ? 'Opening…' : 'Their Dashboard'}
+                </button>
+                <Link
+                  to={`/timesheets/people/${encodeURIComponent(person.user.id)}`} onClick={onClose}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-700 no-underline hover:border-brand-300 hover:bg-brand-50/50"
+                >
+                  <Clock size={14} className="text-brand-600" /> Their timesheet
+                </Link>
+              </div>
+            )}
+            {board === 'none' && (
+              <p className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                They have no personal Dashboard yet. It is made the first time they open the app.
+              </p>
+            )}
             {editing ? (
               <>
                 <ProfileFields form={form} set={(p) => setForm((f) => ({ ...f, ...p }))} people={people} teams={teams} self={person.user.id}

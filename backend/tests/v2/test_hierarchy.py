@@ -236,19 +236,31 @@ def test_edit_access_cannot_archive_or_delete(api, space, folderless_list):
 
 
 def test_sharing_cannot_escalate_beyond_your_own_level(api, workspace, space, folderless_list):
-    """Nobody hands out more than they hold -- and only managers hand out a List at all."""
+    """Nobody hands out more than they hold -- and only admins hand out a List at all.
+
+    Leading a Team used to make you a manager for this purpose, and a manager could share a Folder
+    or a List. It does not any more: the firm has admins and employees, and leading a team is not
+    a rank. So the ceiling rule is shown where a non-admin can still share -- a task.
+    """
     ws = workspace["id"]
     # An ordinary member shares nothing above a task, whatever access they were given.
     ok(api.post(f"/lists/{folderless_list['id']}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
     refused = api.post(f"/lists/{folderless_list['id']}/shares", "member", {"user_id": "guest", "level": "view"})
-    assert refused.status_code == 403 and "managers" in refused.json()["detail"]
+    assert refused.status_code == 403 and "admins" in refused.json()["detail"]
 
-    # Leading a Team makes them a manager, and then their own level is the ceiling.
+    # Leading a Team changes none of that.
     team = ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Audit", "member_ids": ["member"]}), 201)
     ok(api.put(f"/teams/{team['id']}/members", "owner", {"user_ids": ["member"], "lead_ids": ["member"]}))
-    r = api.post(f"/lists/{folderless_list['id']}/shares", "member", {"user_id": "guest", "level": "full"})
-    assert r.status_code == 403
-    ok(api.post(f"/lists/{folderless_list['id']}/shares", "member", {"user_id": "guest", "level": "edit"}), 201)
+    still = api.post(f"/lists/{folderless_list['id']}/shares", "member", {"user_id": "guest", "level": "edit"})
+    assert still.status_code == 403 and "admins" in still.json()["detail"]
+
+    # On a task they may share, and there their own level is the ceiling. The List was shared with
+    # them at edit above, and a share overrides the standing a member would otherwise have -- which
+    # is also why the owner raises this task: creating one needs full access to the List, and edit
+    # is now all they hold.
+    task = ok(api.post(f"/lists/{folderless_list['id']}/tasks", "owner", {"name": "Reconcile"}), 201)
+    assert api.post(f"/tasks/{task['id']}/shares", "member", {"user_id": "guest", "level": "full"}).status_code == 403
+    ok(api.post(f"/tasks/{task['id']}/shares", "member", {"user_id": "guest", "level": "edit"}), 201)
 
 
 def test_only_admins_share_a_space(api, space):

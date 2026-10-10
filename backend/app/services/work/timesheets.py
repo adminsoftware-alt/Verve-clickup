@@ -38,7 +38,7 @@ from app.db.models import (
 )
 from app.schemas import timesheets as t
 from app.schemas import work as s
-from app.services.work.access import Access, chain_for_task, open_task
+from app.services.work.access import Access, chain_for_task, open_task, tracking_level
 from app.services.work.errors import Forbidden, Invalid, NotFound
 from app.services.work.permissions import can_manage_workspace
 from app.services.work.timelocks import LOCKED, ensure_unlocked
@@ -384,6 +384,20 @@ def timesheet(
     )
 
 
+def _may_track(db: Session, access: Access, task: Task) -> bool:
+    """May they record hours against this task?
+
+    One answer for all three places below -- the grid, adding a row, and the picker that offers the
+    tasks you can track against. They were three copies of the same literal, and when employees
+    became read-and-comment on work that is not theirs, fixing the rule in timetracking.py left the
+    whole timesheet refusing with a 403 because these three were never looked at.
+
+    Edit, read from their standing before the employee cap: see access.tracking_level.
+    """
+    level = tracking_level(db, access, task)
+    return level is not None and level.at_least(PermissionLevel.edit)
+
+
 def set_cell(db: Session, access: Access, data: t.CellIn) -> None:
     """Make one task's tracked time on one day equal `seconds`."""
     user_id = data.user_id or access.user_id
@@ -392,7 +406,7 @@ def set_cell(db: Session, access: Access, data: t.CellIn) -> None:
     opened = open_task(db, access.user_id, data.task_id, PermissionLevel.view)
     if opened.access.workspace_id != access.workspace_id:
         raise NotFound("Task not found")
-    if not opened.level.at_least(PermissionLevel.edit):
+    if not _may_track(db, access, opened.obj):
         raise Forbidden("You need edit access to a task to track time on it")
     day_start, day_end = _at(data.day, tz), _at(data.day + DAY, tz)
     ensure_unlocked(db, access.workspace_id, user_id, day_start, access.role)
@@ -457,7 +471,7 @@ def add_row(db: Session, access: Access, data: t.RowIn) -> None:
     opened = open_task(db, access.user_id, data.task_id, PermissionLevel.view)
     if opened.access.workspace_id != access.workspace_id:
         raise NotFound("Task not found")
-    if not opened.level.at_least(PermissionLevel.edit):
+    if not _may_track(db, access, opened.obj):
         raise Forbidden("You need edit access to a task to track time on it")
     first, _ = period_of(db, access.workspace_id, data.start)
     if db.get(TimesheetRow, (user_id, data.task_id, first)) is None:
@@ -507,8 +521,7 @@ def pickable_tasks(db: Session, access: Access, query: str, limit: int = 20) -> 
     locate = _Locator(db)
     out = []
     for task in candidates:
-        level = access.level(chain_for_task(db, task))
-        if level is None or not level.at_least(PermissionLevel.edit):
+        if not _may_track(db, access, task):
             continue
         out.append(t.PickTask(id=task.id, name=task.name, status=s.StatusOut.model_validate(statuses[task.status_id]), location=locate.of(task.list_id)))
         if len(out) >= limit:

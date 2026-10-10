@@ -254,8 +254,87 @@ def open_list(db: Session, user_id: str, list_id: uuid.UUID, minimum: Permission
     return Opened(lst, access, level)
 
 
+def _is_mine(db: Session, access: Access, task: Task) -> bool:
+    """Did they raise this task, or is it assigned to them? Either makes it their work."""
+    from app.db.models import TaskAssignee
+
+    if task.created_by is not None and task.created_by == access.user_id:
+        return True
+    return db.get(TaskAssignee, (task.id, access.user_id)) is not None
+
+
+def _granted_level(db: Session, access: Access, chain: List[Node]) -> Optional[PermissionLevel]:
+    """What they would have from shares and authorship alone, with their role set aside.
+
+    Resolved as though they held a role that is only ever given what is shared with it, so the
+    "and otherwise, members get everything public" fallback at the end never fires. Anything that
+    comes back is therefore a deliberate grant -- a share to them, a share to one of their Teams,
+    or a node they created -- and a deliberate grant is not something to quietly cap.
+    """
+    return resolve_level(chain, access.user_id, WorkspaceRole.limited,
+                         access.shares, access.team_shares, access.my_teams)
+
+
 def best_task_level(db: Session, access: Access, task: Task) -> Optional[PermissionLevel]:
-    """The caller's level on a task through its home List or any other List it was added to."""
+    """The caller's level on a task through its home List or any other List it was added to.
+
+    Employees are read-only on work that is not theirs. Everyone who can see a public Space used to
+    resolve to full access on everything in it, which meant any of the seventy-five could edit --
+    and, because deleting needs full, permanently delete -- a colleague's task. Verified against the
+    running server, not inferred: an employee could delete an admin's task and get a 204.
+
+    So a plain member's level is capped at `comment` on a task they neither raised nor are assigned.
+    That lands exactly where the task service already draws its lines: editing needs `edit`, so it
+    is refused; deleting needs `full`, so it is refused; commenting still works, which is how you
+    say something about a colleague's task without changing it; and an assignee with `comment` may
+    still move their own task's status, a rule that was already here.
+
+    Capped, not blocked. They keep seeing the work -- a firm where nobody can see the audit they are
+    not on is a firm that cannot cover for anybody -- and an admin can still share a List at `edit`
+    with whoever genuinely needs to work in it. Owners and admins are untouched; guests and limited
+    members never had the fallback in the first place.
+    """
+    from app.db.models import TaskListLink
+
+    ancestry = task_ancestry(db, task)
+    home = ancestry + chain_for_list(db, db.get(TaskList, task.list_id))
+    best = access.level(home)
+    granted = _granted_level(db, access, home)
+    root_id = task.top_level_parent_id or task.id
+    for list_id in db.scalars(select(TaskListLink.list_id).where(TaskListLink.task_id == root_id)):
+        extra = db.get(TaskList, list_id)
+        if extra is None or extra.archived_at is not None:
+            continue
+        chain = ancestry + chain_for_list(db, extra)
+        level = access.level(chain)
+        if level is not None and (best is None or level.rank > best.rank):
+            best = level
+        shared = _granted_level(db, access, chain)
+        if shared is not None and (granted is None or shared.rank > granted.rank):
+            granted = shared
+
+    if best is None or access.role != WorkspaceRole.member:
+        return best
+    if _is_mine(db, access, task):
+        return best
+    # Whichever is higher: what they were actually given, or read-and-comment.
+    if granted is not None and granted.rank >= PermissionLevel.comment.rank:
+        return granted
+    return PermissionLevel.comment if best.rank > PermissionLevel.comment.rank else best
+
+
+def tracking_level(db: Session, access: Access, task: Task) -> Optional[PermissionLevel]:
+    """Their standing on a task for the purpose of recording hours against it.
+
+    The employee cap is about changing a colleague's task, not about writing down your own time, so
+    this reads the level before that cap is applied. Everything else still decides: an explicit
+    share of comment or view means what it says -- somebody deliberately said read-and-comment, and
+    tracking time in an area you were let into to read would not be what they agreed to -- and a
+    guest, who only ever has what was shared, is unaffected either way.
+
+    Lowering the bar to comment everywhere instead was the first attempt, and it quietly undid that
+    distinction: a List shared at comment became a List you could bill against.
+    """
     from app.db.models import TaskListLink
 
     ancestry = task_ancestry(db, task)

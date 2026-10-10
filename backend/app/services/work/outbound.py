@@ -397,7 +397,11 @@ def run_instant(db: Session, now: Optional[datetime] = None) -> int:
         if member is not None and n.kind in WHATSAPP_KINDS:
             whatsapp(member, f"{title}: {line}" if title != "Verve Workflow" else line)
         n.pushed_at = now
-        if member is not None and member.email_notifications == "instant" and n.emailed_at is None:
+        # Email is for invitations now, and nothing else. The push above and the WhatsApp beside it
+        # are untouched -- this job is what delivers a notification at all, so switching the whole
+        # job off would take the bell with it. Only the mail is held back.
+        if (settings.UPDATE_EMAIL_ENABLED and member is not None
+                and member.email_notifications == "instant" and n.emailed_at is None):
             emails.setdefault((n.workspace_id, n.user_id), []).append(n)
     for (ws_id, uid), items in emails.items():
         user = db.get(User, uid)

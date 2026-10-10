@@ -314,7 +314,10 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                     onChange={(ids) => save({ assignees: ids })}
                     onShared={() => workApi.assignable('list', task.list_id).then(setAssignable).catch(() => undefined)}
                   />
-                  <LeaveWarning dueDate={task.due_date} assignees={task.assignees} />
+                  {/* "They are on leave that day" -- which there is no longer a way to be, now
+                      that the approval workflow is off. The component and its endpoint are both
+                      still here behind the flag. */}
+                  {FEATURES.leavePages && <LeaveWarning dueDate={task.due_date} assignees={task.assignees} />}
                 </Field>
                 <Field label="Dates" icon={<CalendarDays size={14} />}>
                   <DateRange

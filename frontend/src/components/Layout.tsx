@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { Suspense, useState, useRef, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { useTimer } from '../context/TimerContext';
@@ -7,22 +7,33 @@ import {
   LayoutDashboard, CheckSquare, Calendar, Clock, 
   BarChart2, Settings as SettingsIcon,
   Bell, ChevronDown, MessageSquare,
-  Activity, Briefcase, Plus, X, Users, Menu, Sparkles
+  Activity, Briefcase, Plus, X, Users, Menu
 } from 'lucide-react';
 import { SpacesSidebar } from '../work/SpacesSidebar';
 import { MyTasksNav } from '../work/MyTasksNav';
 import { FavoritesNav } from '../work/Favorites';
 import { GlobalSearch, SearchButton } from '../work/GlobalSearch';
-import { QuickAdd } from '../work/assistant/QuickAdd';
+import { AssistantButton } from '../work/assistant/AssistantButton';
 import { RunningTimerChip } from '../work/RunningTimer';
 import { StatusSelector } from './StatusSelector';
 import { FEATURES } from '../config/features';
 import { HeaderInboxBell } from '../work/InboxPages';
 import { HelpMenu, ProfileChip, RecentMenu } from './HeaderBits';
 import { useIsAdmin, useWork } from '../work/WorkContext';
-import { presenceService, type UserPresence } from '../services/presenceService';
+import type { UserPresence } from '../services/presenceService';
 import { BottomNav } from './BottomNav';
 import { usePhone } from '../work/useBreakpoint';
+
+/** What the content pane shows while a page's own chunk is still on the way. */
+const PageWaiting: React.FC = () => (
+  <div className="animate-pulse space-y-4" aria-busy="true" aria-label="Loading">
+    <div className="h-7 w-48 rounded-md bg-gray-200" />
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {[0, 1, 2, 3].map((i) => <div key={i} className="h-20 rounded-xl bg-gray-100" />)}
+    </div>
+    <div className="h-64 rounded-xl bg-gray-100" />
+  </div>
+);
 
 export const Layout: React.FC = () => {
   const { hasRole, user } = useAuth();  // signing out moved into the profile menu
@@ -44,25 +55,31 @@ export const Layout: React.FC = () => {
   // On a phone the sidebar is a drawer. On anything wider it is always there and this is ignored.
   const phone = usePhone();
   const [drawer, setDrawer] = useState(false);
-  // Say-a-task. Ctrl/Cmd+K is already the search; this takes the next key along.
-  const [quickAdd, setQuickAdd] = useState(false);
 
   useEffect(() => {
-    // Start presence tracking for the current user
-    presenceService.updatePresence({ timerRunning: Object.keys(timers).length > 0 });
-    
-    const unsub = presenceService.subscribeToPresence((users) => {
-      // Filter out offline users or users inactive for > 5 mins
-      const now = Date.now();
-      const activeUsers = users.filter(u => {
-        if (u.currentStatus === 'Offline') return false;
-        if (u.userId === user?.uid) return false;  // you're the chip on the right, not a teammate
-        const lastSeen = new Date(u.lastSeen).getTime();
-        return now - lastSeen < 5 * 60 * 1000;
+    // Presence runs on Firestore, and Firestore is 114 KB gzipped. This was the only door it came
+    // through on the way to first paint -- every other user of it is on a page that now loads on
+    // demand -- so it is fetched once the shell is up rather than before anything is drawn. Who
+    // else is online is worth knowing a moment late; it is not worth waiting for.
+    let unsub: (() => void) | undefined;
+    let dropped = false;
+    import('../services/presenceService').then(({ presenceService }) => {
+      if (dropped) return;
+      presenceService.updatePresence({ timerRunning: Object.keys(timers).length > 0 });
+      unsub = presenceService.subscribeToPresence((users) => {
+        // Filter out offline users or users inactive for > 5 mins
+        const now = Date.now();
+        const activeUsers = users.filter((u) => {
+          if (u.currentStatus === 'Offline') return false;
+          if (u.userId === user?.uid) return false;  // you're the chip on the right, not a teammate
+          const lastSeen = new Date(u.lastSeen).getTime();
+          return now - lastSeen < 5 * 60 * 1000;
+        });
+        setOnlineUsers(activeUsers);
       });
-      setOnlineUsers(activeUsers);
-    });
+    }).catch(() => undefined);
     return () => {
+      dropped = true;
       if (typeof unsub === 'function') unsub();
     };
   }, [timers]);
@@ -89,13 +106,6 @@ export const Layout: React.FC = () => {
     return () => document.removeEventListener('keydown', onKey);
   }, [drawer]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') { e.preventDefault(); setQuickAdd(true); }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, []);
 
   const runningTimers = Object.entries(timers).filter(([_, t]) => t.startTime !== null);
 
@@ -474,13 +484,6 @@ export const Layout: React.FC = () => {
               </Link>
             )}
 
-            <button
-              type="button" onClick={() => setQuickAdd(true)}
-              title="Add a task by saying it (Ctrl+J)" aria-label="Add a task by saying it"
-              className="tap rounded-lg text-gray-500 hover:bg-black/5 hover:text-brand-700"
-            >
-              <Sparkles size={18} />
-            </button>
             <SearchButton />
             <RunningTimerChip />
 
@@ -586,13 +589,19 @@ export const Layout: React.FC = () => {
         <div
           className={`min-h-0 flex-1 ${isLocationPage ? 'flex flex-col' : 'overflow-y-auto p-4 sm:p-8'} ${phone ? 'pb-nav' : ''}`}
         >
-          <Outlet />
+          {/* The page arrives as its own chunk now, so there is a moment on a first visit where
+              it is still downloading. The shell stays put and only this pane waits: a skeleton
+              in the right shape, which reads as the page arriving rather than the app hanging.
+              Navigating back to a page already fetched is instant -- the chunk is cached. */}
+          <Suspense fallback={<PageWaiting />}>
+            <Outlet />
+          </Suspense>
           <GlobalSearch />
-          {quickAdd && <QuickAdd onClose={() => setQuickAdd(false)} />}
         </div>
       </main>
 
       <BottomNav onMore={() => setDrawer(true)} moreOpen={drawer} />
+      <AssistantButton />
     </div>
   );
 };
