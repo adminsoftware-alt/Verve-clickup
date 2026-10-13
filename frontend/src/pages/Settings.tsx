@@ -62,7 +62,6 @@ const ProfileTab: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: '', phone: '', location: '', address: '' });
-  const [schedule, setSchedule] = useState<string[] | null>(null);
   const file = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -107,13 +106,6 @@ const ProfileTab: React.FC = () => {
     await refresh();
     setEditing(false);
   }, 'Your details are saved.');
-
-  const saveSchedule = () => ws && me && schedule && act(async () => {
-    const seconds = schedule.map((h) => Math.round((Number(h) || 0) * 3600));
-    if (seconds.some((s) => s < 0 || s > 24 * 3600)) throw new Error('Each day is between 0 and 24 hours.');
-    await sheetApi.setCapacity(ws, me, seconds);
-    setSchedule(null);
-  }, 'Working hours saved.');
 
   if (error && !person) return <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>;
   if (!person || !capacity) {
@@ -232,18 +224,13 @@ const ProfileTab: React.FC = () => {
         </div>
       </section>
 
-      {/* The week they are measured against. Read-only unless they run the workspace. */}
+      {/* The week they are measured against. */}
       <section className={card}>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <h3 className="flex items-center gap-2 text-base font-semibold text-gray-900"><Clock size={17} className="text-blue-600" /> Working hours</h3>
-          {isAdmin ? (
-            schedule === null && (
-              <button type="button" onClick={() => setSchedule(week.map((s) => String(s / 3600)))}
-                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50">
-                <Pencil size={14} /> Edit
-              </button>
-            )
-          ) : <SetByAdmin />}
+          {/* Read-only here for everyone, admins included: hours are set for people, in Admin ->
+              Working hours, where an admin sees the whole company and its Teams at once. */}
+          <SetByAdmin />
         </div>
 
         <div className="grid grid-cols-3 gap-3">
@@ -265,29 +252,14 @@ const ProfileTab: React.FC = () => {
           {DAYS.map((d, i) => (
             <div key={d} className={`rounded-lg border px-1 py-2 text-center ${week[i] > 0 ? 'border-blue-100 bg-white' : 'border-gray-100 bg-gray-50'}`}>
               <p className="text-[11px] font-medium text-gray-500">{d.slice(0, 3)}</p>
-              {schedule ? (
-                <input
-                  aria-label={`${d} hours`} type="number" min={0} max={24} step={0.5} value={schedule[i]}
-                  onChange={(e) => setSchedule(schedule.map((v, j) => (j === i ? e.target.value : v)))}
-                  className="mt-1 w-full rounded border border-gray-300 px-1 py-0.5 text-center text-sm"
-                />
-              ) : (
-                <p className={`mt-0.5 text-sm font-semibold ${week[i] > 0 ? 'text-gray-900' : 'text-gray-400'}`}>{week[i] > 0 ? hours(week[i]) : 'Off'}</p>
-              )}
+              <p className={`mt-0.5 text-sm font-semibold ${week[i] > 0 ? 'text-gray-900' : 'text-gray-400'}`}>{week[i] > 0 ? hours(week[i]) : 'Off'}</p>
             </div>
           ))}
         </div>
         <p className="mt-3 text-xs text-gray-500">
-          {capacity.is_custom ? 'Your own schedule.' : "The workspace's standard week."}{' '}
-          {isAdmin ? 'Other people’s hours are set from Timesheets settings or their People profile.' : 'Ask an admin if this is not right.'}
+          {capacity.is_custom ? 'Your own schedule.' : 'Your Team’s or the company’s standard week.'}{' '}
+          {isAdmin ? 'Change anyone’s hours, or a whole Team’s, in Admin → Working hours.' : 'Ask an admin if this is not right.'}
         </p>
-        {schedule && (
-          <div className="mt-3 flex justify-end gap-2">
-            <button type="button" onClick={() => setSchedule(null)} className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-            <button type="button" onClick={saveSchedule} disabled={busy}
-              className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">Save hours</button>
-          </div>
-        )}
       </section>
     </div>
   );

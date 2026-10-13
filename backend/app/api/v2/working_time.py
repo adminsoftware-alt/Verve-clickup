@@ -45,3 +45,35 @@ def remove_holiday(workspace_id: uuid.UUID, holiday_id: uuid.UUID,
                    user: User = Depends(current_user), db: Session = Depends(get_db)):
     working_time.remove_holiday(db, _access(db, user, workspace_id), holiday_id)
     db.commit()
+
+
+# --- working hours: the company's week, each Team's, and each person's (admins) -------------------------
+
+
+@router.get("/workspaces/{workspace_id}/working-hours", response_model=wt.WorkingHoursOut)
+def working_hours(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return working_time.overview(db, _access(db, user, workspace_id))
+
+
+@router.put("/workspaces/{workspace_id}/working-hours/company", response_model=wt.WorkingHoursOut)
+def set_company_hours(workspace_id: uuid.UUID, data: wt.CompanyHoursIn,
+                      user: User = Depends(current_user), db: Session = Depends(get_db)):
+    out = working_time.set_company_hours(db, _access(db, user, workspace_id), data)
+    db.commit()
+    return out
+
+
+@router.put("/workspaces/{workspace_id}/working-hours/teams/{team_id}", response_model=wt.WorkingHoursOut)
+def set_team_hours(workspace_id: uuid.UUID, team_id: uuid.UUID, data: wt.HoursIn,
+                   user: User = Depends(current_user), db: Session = Depends(get_db)):
+    out = working_time.set_team_hours(db, _access(db, user, workspace_id), team_id, data)
+    db.commit()
+    return out
+
+
+@router.put("/workspaces/{workspace_id}/working-hours/people", response_model=wt.WorkingHoursOut)
+def set_people_hours(workspace_id: uuid.UUID, data: wt.PeopleHoursIn,
+                     user: User = Depends(current_user), db: Session = Depends(get_db)):
+    out = working_time.set_people_hours(db, _access(db, user, workspace_id), data)
+    db.commit()
+    return out

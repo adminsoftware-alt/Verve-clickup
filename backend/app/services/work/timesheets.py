@@ -105,11 +105,14 @@ def update_settings(db: Session, access: Access, data: t.SettingsIn) -> t.Settin
 
 
 def capacity_of(db: Session, workspace_id: uuid.UUID, user_id: str) -> Tuple[List[int], bool]:
-    """Seconds of capacity per weekday (Monday first), and whether it is the person's own."""
-    own = db.get(MemberCapacity, (workspace_id, user_id))
-    if own is not None:
-        return list(own.capacity_seconds), True
-    return list(settings_row(db, workspace_id).capacity_seconds), False
+    """Seconds of capacity per weekday (Monday first), and whether it is the person's own.
+
+    Not their own means their Team's week or the company's -- working_time.weekly_hours decides.
+    """
+    from app.services.work.working_time import weekly_hours
+
+    seconds, source, _ = weekly_hours(db, workspace_id, [user_id])[user_id]
+    return seconds, source == "person"
 
 
 def set_capacity(db: Session, access: Access, user_id: str, data: t.CapacityIn) -> t.CapacityOut:

@@ -800,6 +800,9 @@ class Engine:
         planned = 0
         scheduled = 0
         people: Set[str] = {entry.user_id for entry, _ in entries}
+        from app.services.work.working_time import working_weekdays
+
+        weekdays = working_weekdays(self.db, self.access.workspace_id, {uid for f in matched for uid in f.assignees})
         for f in matched:
             people.update(f.assignees)
             estimate = f.task.time_estimate_seconds or 0
@@ -808,7 +811,9 @@ class Engine:
                 continue  # unscheduled work, or work nobody sized: it can't be planned into days
             end = self._local_day(due)
             start = self._local_day(f.task.start_date) if f.task.start_date else end
-            share = sum(seconds for day, seconds in spread(estimate, start, end).items() if day in window)
+            # The assignees' working days together; nobody assigned falls back to Monday to Friday.
+            days_on = set().union(*(weekdays.get(uid, set()) for uid in f.assignees)) or None
+            share = sum(seconds for day, seconds in spread(estimate, start, end, days_on).items() if day in window)
             if share:
                 planned += share
                 scheduled += 1

@@ -74,6 +74,9 @@ def people_load(
         ):
             by_task.setdefault(task_id, []).append(user_id)
 
+        from app.services.work.working_time import working_weekdays
+
+        weekdays = working_weekdays(db, access.workspace_id, wanted)
         inside = set(window)
         for task in open_now:
             who = by_task.get(task.id)
@@ -82,9 +85,9 @@ def people_load(
                 continue  # work nobody sized or dated cannot be placed in a day
             end = task.due_date.date()
             begin = task.start_date.date() if task.start_date else end
-            by_day = spread(estimate, begin, end)
             share = len(who)
             for uid in who:
+                by_day = spread(estimate, begin, end, weekdays.get(uid))
                 row = planned[uid]
                 for i, day in enumerate(window):
                     if day in inside:

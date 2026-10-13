@@ -160,8 +160,6 @@ export const sheetApi = {
   updateSettings: (ws: string, body: Partial<Pick<SheetSettings, 'week_start' | 'approvals_enabled' | 'capacity_seconds' | 'reminders_enabled' | 'reminder_weekday' | 'reminder_hour' | 'reminder_timezone'>>) =>
     request<SheetSettings>('PATCH', `/workspaces/${ws}/timesheet-settings`, body),
   capacity: (ws: string, userId: string) => request<{ capacity_seconds: number[]; is_custom: boolean }>('GET', `/workspaces/${ws}/members/${encodeURIComponent(userId)}/capacity`),
-  setCapacity: (ws: string, userId: string, seconds: number[] | null) =>
-    request<{ capacity_seconds: number[]; is_custom: boolean }>('PUT', `/workspaces/${ws}/members/${encodeURIComponent(userId)}/capacity`, { capacity_seconds: seconds }),
 
   tags: (ws: string) => request<TimeTag[]>('GET', `/workspaces/${ws}/time-tags`),
   createTag: (ws: string, name: string) => request<TimeTag>('POST', `/workspaces/${ws}/time-tags`, { name }),

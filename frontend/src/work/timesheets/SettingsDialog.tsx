@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import React, { useState } from 'react';
+import { Clock, X } from 'lucide-react';
 import { useAuth } from '../../components/AuthContext';
 import { useWork } from '../WorkContext';
 import { Portal } from '../ui';
@@ -7,57 +7,20 @@ import { sheetApi, type SheetSettings } from './api';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-const HoursRow: React.FC<{ value: number[]; onChange: (v: number[]) => void; label: string }> = ({ value, onChange, label }) => (
-  <div className="grid grid-cols-7 gap-1.5" role="group" aria-label={label}>
-    {DAYS.map((d, i) => (
-      <label key={d} className="text-center text-[11px] text-gray-500">
-        {d.slice(0, 3)}
-        <input
-          type="number" min={0} max={24} step={0.5}
-          aria-label={`${label}: ${d}`}
-          value={value[i] / 3600}
-          onChange={(e) => { const next = [...value]; next[i] = Math.round(Math.max(0, Math.min(24, Number(e.target.value) || 0)) * 3600); onChange(next); }}
-          className="mt-0.5 w-full rounded border border-gray-300 px-1 py-1 text-center text-sm text-gray-800"
-        />
-      </label>
-    ))}
-  </div>
-);
-
 export const SettingsDialog: React.FC<{ settings: SheetSettings; onClose: () => void; onSaved: () => void }> = ({ settings, onClose, onSaved }) => {
-  const { workspace, members } = useWork();
+  const { workspace } = useWork();
   const { user } = useAuth();
-  // Whose hours are being set. Everyone starts on the workspace schedule; an admin gives a
-  // person their own only when their week genuinely differs -- part time, a different site.
-  const [whose, setWhose] = useState('');
-  const [mine, setMine] = useState<number[] | null>(null);
-  const [custom, setCustom] = useState(false);
-  const [savedFor, setSavedFor] = useState<string | null>(null);
   const [weekStart, setWeekStart] = useState(settings.week_start);
   const [approvals, setApprovals] = useState(settings.approvals_enabled);
-  const [schedule, setSchedule] = useState(settings.capacity_seconds);
   const [reminders, setReminders] = useState({ enabled: settings.reminders_enabled, weekday: settings.reminder_weekday, hour: settings.reminder_hour });
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!workspace || !whose) { setMine(null); return; }
-    setMine(null);
-    sheetApi.capacity(workspace.id, whose)
-      .then((c) => { setMine(c.capacity_seconds); setCustom(c.is_custom); })
-      .catch((e) => setError(e.message));
-  }, [workspace, whose]);
 
   const save = async () => {
     if (!workspace || !user) return;
     try {
-      // A person's hours only save when one is picked; the workspace settings save either way.
-      if (whose && mine) {
-        await sheetApi.setCapacity(workspace.id, whose, custom ? mine : null);
-        setSavedFor(whose);
-      }
       if (settings.can_manage) {
         await sheetApi.updateSettings(workspace.id, {
-          week_start: weekStart, approvals_enabled: approvals, capacity_seconds: schedule,
+          week_start: weekStart, approvals_enabled: approvals,
           reminders_enabled: reminders.enabled, reminder_weekday: reminders.weekday, reminder_hour: reminders.hour,
         });
       }
@@ -68,7 +31,6 @@ export const SettingsDialog: React.FC<{ settings: SheetSettings; onClose: () => 
     }
   };
 
-  const weekly = (v: number[]) => `${v.reduce((a, b) => a + b, 0) / 3600}h a week`;
   return (
     <Portal>
       <div className="fixed inset-0 z-[115] flex items-center justify-center bg-black/30" onMouseDown={onClose}>
@@ -78,54 +40,20 @@ export const SettingsDialog: React.FC<{ settings: SheetSettings; onClose: () => 
             <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
           </header>
           <div className="space-y-5 overflow-y-auto px-5 py-4">
-            <section>
-              <h4 className="text-sm font-semibold text-gray-800">Working hours for one person</h4>
-              <p className="mb-2 text-xs text-gray-500">
-                What their days are measured against — the bars in their timesheet, their capacity
-                on the Workload, and every figure that says whether they are over.
-              </p>
-              <label className="block text-xs font-medium text-gray-600">
-                Person
-                <select
-                  value={whose}
-                  onChange={(e) => { setWhose(e.target.value); setSavedFor(null); }}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal"
-                >
-                  <option value="">Pick someone…</option>
-                  {members.map((m) => (
-                    <option key={m.user.id} value={m.user.id}>{m.user.display_name || m.user.email}</option>
-                  ))}
-                </select>
-              </label>
-              {whose && !mine && <p className="mt-2 text-xs text-gray-400">Loading their hours…</p>}
-              {whose && mine && (
-                <>
-                  <label className="mb-2 mt-3 flex items-center gap-2 text-sm text-gray-700">
-                    <input type="checkbox" checked={custom} onChange={(e) => { setCustom(e.target.checked); if (!e.target.checked) setMine(schedule); }} />
-                    Give this person their own hours instead of the workspace schedule
-                  </label>
-                  <HoursRow label="Their hours" value={custom ? mine : schedule} onChange={(v) => { setCustom(true); setMine(v); }} />
-                  <p className="mt-1 text-xs text-gray-400">
-                    {weekly(custom ? mine : schedule)}
-                    {!custom && ' — the workspace schedule below'}
-                  </p>
-                  {savedFor === whose && <p className="mt-1 text-xs text-teal-700">Saved.</p>}
-                </>
-              )}
-            </section>
+            {/* Working hours -- the company's week, a Team's, one person's -- moved to Admin, where
+                an admin sees everybody at once instead of picking one person at a time. */}
+            <p className="flex items-start gap-2 rounded-lg bg-gray-50 px-3 py-2.5 text-sm text-gray-600">
+              <Clock size={15} className="mt-0.5 shrink-0 text-gray-400" />
+              <span>Working hours and work days, for the company, a Team or one person, are set in <b className="font-semibold text-gray-800">Admin → Working hours</b>.</span>
+            </p>
             {settings.can_manage && (
-              <section className="space-y-3 border-t border-gray-100 pt-4">
+              <section className="space-y-3">
                 <h4 className="text-sm font-semibold text-gray-800">Workspace <span className="font-normal text-gray-400">(owners and admins)</span></h4>
                 <label className="block text-xs font-medium text-gray-600">Week starts on
                   <select value={weekStart} onChange={(e) => setWeekStart(Number(e.target.value))} className="mt-1 block w-48 rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal">
                     {DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
                   </select>
                 </label>
-                <div>
-                  <span className="text-xs font-medium text-gray-600">Work schedule (default hours for everyone)</span>
-                  <HoursRow label="Work schedule" value={schedule} onChange={setSchedule} />
-                  <p className="mt-1 text-xs text-gray-400">{weekly(schedule)}</p>
-                </div>
                 <label className="flex items-start gap-2 text-sm text-gray-700">
                   <input type="checkbox" checked={approvals} onChange={(e) => setApprovals(e.target.checked)} className="mt-0.5" />
                   <span>Timesheet approvals<span className="block text-xs text-gray-500">People submit each week; their Team leads (or the approvers you set) approve. Submitted and approved weeks are locked.</span></span>

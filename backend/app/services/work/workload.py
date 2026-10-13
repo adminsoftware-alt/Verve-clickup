@@ -13,7 +13,7 @@ Follows ClickUp's Workload view:
 
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Dict, List, Optional, Set, Tuple
+from typing import AbstractSet, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,16 +46,18 @@ def capacity_for(day: date) -> int:
     return WORKDAY_SECONDS if day.weekday() in WORKING_WEEKDAYS else 0
 
 
-def spread(estimate: int, first: date, last: date) -> Dict[date, int]:
+def spread(estimate: int, first: date, last: date, workdays: Optional[AbstractSet[int]] = None) -> Dict[date, int]:
     """Divide an estimate evenly over the working days in [first, last].
 
-    If the span has no working days at all, it is divided over every day in it, so the
-    effort still shows up (on zero-capacity days) instead of vanishing.
+    `workdays` are the weekdays (0 = Monday) the person works -- six for a six-day Team -- and
+    default to Monday to Friday. If the span has no working days at all, it is divided over every
+    day in it, so the effort still shows up (on zero-capacity days) instead of vanishing.
     """
     if last < first:
         first, last = last, first
+    working = WORKING_WEEKDAYS if workdays is None else workdays
     span = [first + timedelta(days=i) for i in range((last - first).days + 1)]
-    days = [d for d in span if d.weekday() in WORKING_WEEKDAYS] or span
+    days = [d for d in span if d.weekday() in working] or span
     share, remainder = divmod(estimate, len(days))
     # Hand leftover seconds to the earliest days so the total is exact.
     return {d: share + (1 if i < remainder else 0) for i, d in enumerate(days)}
@@ -137,6 +139,9 @@ def my_workload(
             )
         ))
 
+    from app.services.work.working_time import working_weekdays
+
+    my_days = working_weekdays(db, access.workspace_id, [access.user_id])[access.user_id]
     scheduled = [0] * days
     row_tasks: List[s.WorkloadTask] = []
     unscheduled: List[Task] = []
@@ -154,7 +159,7 @@ def my_workload(
         if task.time_estimate_seconds is None:
             no_estimate.append(task)
             continue
-        per_day = spread(task.time_estimate_seconds, _local_date(begins, tz), _local_date(ends, tz))
+        per_day = spread(task.time_estimate_seconds, _local_date(begins, tz), _local_date(ends, tz), my_days)
         seconds = [per_day.get(d, 0) for d in window]
         if not any(seconds):
             continue
@@ -233,6 +238,9 @@ def workload(
         p.id: (p, [0] * days, []) for p in people
     }
 
+    from app.services.work.working_time import working_weekdays
+
+    weekdays = working_weekdays(db, opened.access.workspace_id, {uid for ids in assignees.values() for uid in ids})
     unscheduled: List[Task] = []
     no_estimate: List[Task] = []
     for task in open_tasks:
@@ -252,24 +260,22 @@ def workload(
         if task.time_estimate_seconds is None:
             no_estimate.append(task)
             continue
-        per_day = spread(task.time_estimate_seconds, first, last)
-        seconds = [per_day.get(d, 0) for d in window]
-        if not any(seconds):
-            continue
-        entry = s.WorkloadTask(
-            id=task.id,
-            name=task.name,
-            list_id=task.list_id,
-            priority=task.priority,
-            status=s.StatusOut.model_validate(statuses[task.status_id]),
-            seconds_per_day=seconds,
-        )
+        status_out = s.StatusOut.model_validate(statuses[task.status_id])
         for uid in who:
             if uid not in rows:
                 if uid is None:
                     rows[None] = (None, [0] * days, [])
                 else:
                     continue  # assignee who cannot see this location
+            # Spread over this person's own working days: a six-day week takes Saturday's share.
+            per_day = spread(task.time_estimate_seconds, first, last, weekdays.get(uid) if uid else None)
+            seconds = [per_day.get(d, 0) for d in window]
+            if not any(seconds):
+                continue
+            entry = s.WorkloadTask(
+                id=task.id, name=task.name, list_id=task.list_id, priority=task.priority,
+                status=status_out, seconds_per_day=seconds,
+            )
             _, scheduled, row_tasks = rows[uid]
             for i, value in enumerate(seconds):
                 scheduled[i] += value

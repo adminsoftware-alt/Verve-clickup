@@ -48,6 +48,10 @@ LABELS = {
     "team.members_changed": "changed the members of",
     "automation.created": "added an Automation on",
     "automation.deleted": "deleted an Automation on",
+    # Working hours: the label carries whose and the new week, e.g. "Accounts: 6 days, 48h a week".
+    "hours.company": "set working hours for",
+    "hours.team": "set working hours for",
+    "hours.people": "set working hours for",
     # Blocking an address is gone from Admin -- offboarding already covers it -- but the events it
     # wrote are still in the log, and without these two they printed as "email.blocked" to the
     # reader. History does not get rewritten just because the feature went away.

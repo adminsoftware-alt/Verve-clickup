@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ChevronLeft, ChevronRight, FileSpreadsheet, History, KeyRound, ListChecks, Mail, RotateCcw, Save, Send, ShieldBan, ShieldCheck, Trash2,
+  ChevronLeft, ChevronRight, Clock, FileSpreadsheet, History, KeyRound, ListChecks, Mail, RotateCcw, Save, Send, ShieldBan, ShieldCheck, Trash2,
   UserMinus, UserPlus, Wallet, X,
 } from 'lucide-react';
 import { Avatar, Portal } from '../ui';
@@ -14,6 +14,7 @@ import { AddPersonDialog, InviteDialog } from './PersonDialogs';
 import { ImportPeopleDialog } from './AdminDialogs';
 import { RemovePersonSection } from './RemovePerson';
 import { RunningCosts } from './RunningCosts';
+import { WorkingHoursSection } from './WorkingHours';
 import { ask } from '../../components/ask';
 import { FEATURES } from '../../config/features';
 
@@ -87,7 +88,7 @@ export const AdminStandalone: React.FC = () => {
 // --- the options ---------------------------------------------------------------------------------------------
 
 /** Everything an admin can do, one option each. Each opens on its own, when it is wanted. */
-type Action = 'add' | 'invite' | 'import' | 'remove' | 'costs' | 'audit' | 'signin' | 'email' | 'blocked' | 'joiner';
+type Action = 'add' | 'invite' | 'import' | 'remove' | 'hours' | 'costs' | 'audit' | 'signin' | 'email' | 'blocked' | 'joiner';
 
 interface Option {
   key: Action; title: string; line: string; Icon: React.ElementType;
@@ -110,13 +111,14 @@ const OPTIONS: Option[] = [
   { key: 'remove', title: 'Remove a person', line: 'Offboard someone and hand over their work', Icon: UserMinus, tone: 'red', group: 'People' },
   { key: 'invite', title: 'Invite people', line: 'Send sign-in invitations by email', Icon: Send, tone: 'sky', group: 'People' },
   { key: 'import', title: 'Import from a spreadsheet', line: 'Add or update many people at once', Icon: FileSpreadsheet, tone: 'emerald', group: 'People' },
+  { key: 'hours', title: 'Working hours', line: 'Days and hours for the company, Teams and people', Icon: Clock, tone: 'amber', group: 'People' },
   { key: 'audit', title: 'Audit logs', line: 'Who changed what, and when', Icon: History, tone: 'slate', group: 'Workspace' },
   { key: 'costs', title: 'Running costs', line: 'What the application costs to run', Icon: Wallet, tone: 'violet', group: 'Workspace' },
   { key: 'signin', title: 'Sign-in rules', line: 'Allowed domains, Google sign-in, two-step', Icon: KeyRound, tone: 'amber', group: 'Workspace' },
   { key: 'email', title: 'Email', line: 'Whether the app can send invitations', Icon: Mail, tone: 'sky', group: 'Workspace' },
 ];
 
-/** The options this workspace offers: the eight, plus two that come back with their flags. */
+/** The options this workspace offers: the nine, plus two that come back with their flags. */
 const options = (): Option[] => [
   ...OPTIONS,
   ...(FEATURES.blockedAddresses ? [{ key: 'blocked', title: 'Blocked addresses', line: 'Emails that may not be added back', Icon: ShieldBan, tone: 'red', group: 'Workspace' } as Option] : []),
@@ -164,6 +166,7 @@ const AdminWindow: React.FC<{ action: Action; onBack: () => void; onClose: () =>
                 {action === 'invite' && <InviteDialog ws={ws} teams={teams} roles={roles} onClose={onBack} onDone={() => { reload(); }} />}
                 {action === 'import' && <ImportPeopleDialog ws={ws} onClose={onBack} onDone={() => { reload(); }} />}
                 {action === 'remove' && <RemovePersonSection ws={ws} people={people} teams={teams} me={me} onChanged={reload} />}
+                {action === 'hours' && <WorkingHoursSection ws={ws} />}
                 {action === 'costs' && <RunningCosts ws={ws} />}
                 {action === 'audit' && <AuditSection ws={ws} />}
                 {action === 'signin' && <SignInSection ws={ws} />}
