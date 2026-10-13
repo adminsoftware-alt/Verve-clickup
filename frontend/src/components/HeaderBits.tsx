@@ -7,6 +7,7 @@ import { useAuth } from './AuthContext';
 import { useIsManager, useWork } from '../work/WorkContext';
 import { Avatar, Portal } from '../work/ui';
 import { recentItems, type RecentItem } from '../work/recent';
+import { accessOf } from '../work/teams/access';
 import type { FolderNode, SpaceNode } from '../work/api';
 
 const item = 'flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50';
@@ -171,12 +172,14 @@ export const HelpMenu: React.FC = () => (
 
 export const ProfileChip: React.FC = () => {
   const { logout } = useAuth();
-  const { me, workspace, allMembers } = useWork();
+  const { me, workspace, allMembers, teams } = useWork();
   const isManager = useIsManager();
 
   const mine = allMembers.find((m) => m.user.id === me);
   const user = mine?.user ?? { id: me || 'me', email: '', display_name: null };
-  const role = mine?.role ?? workspace?.role;
+  const stored = mine?.role ?? workspace?.role;
+  // Admin, Manager or Employee -- not the stored role's own name ("member").
+  const role = stored ? accessOf(stored, me ?? '', teams) : undefined;
 
   return (
     <Dropdown

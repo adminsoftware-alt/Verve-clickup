@@ -12,7 +12,7 @@ import { Link } from 'react-router-dom';
 import { workApi, type Task } from '../api';
 import { Avatar, Portal, StatusDot, formatDue } from '../ui';
 import { peopleApi, personName, type OffboardPreview, type Person, type TeamFull } from './peopleApi';
-import { ROLE_LABEL } from './PersonDialogs';
+import { accessOf } from './PersonDialogs';
 
 // Offboarding, and nothing else.
 //
@@ -433,7 +433,7 @@ export const RemovePersonSection: React.FC<{
         <PersonPicker people={people.filter((p) => p.user.id !== me)} chosen={chosen} onPick={setChosen} />
         {chosen && (
           <div className="mt-3 space-y-1.5 rounded-xl border border-gray-200 bg-gray-50/70 p-3.5">
-            <Fact label="Role">{ROLE_LABEL[chosen.role]}{chosen.designation ? ` · ${chosen.designation}` : ''}</Fact>
+            <Fact label="Role">{accessOf(chosen.role, chosen.user.id, teams)}{chosen.designation ? ` · ${chosen.designation}` : ''}</Fact>
             {chosen.department && <Fact label="Department">{chosen.department}</Fact>}
             <Fact label="Reporting manager">{manager ? personName(manager) : <span className="text-gray-400">None</span>}</Fact>
             {/* Changing their team is the thing an admin often came here to do, having reached

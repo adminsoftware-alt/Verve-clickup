@@ -14,7 +14,8 @@ import { PersonHistory, PersonHistoryHeading } from './PersonHistory';
  *  carrying a 4 is an error rather than a quietly invented fourth level. */
 export const LEVELS = [1, 2, 3];
 
-export const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member', limited: 'Limited member', guest: 'Guest' };
+export { ROLE_LABEL, accessOf, type Access } from './access';
+import { ROLE_LABEL, accessOf } from './access';
 
 const Modal: React.FC<{ title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }> = ({ title, onClose, wide, children }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -357,7 +358,7 @@ export const PersonPanel: React.FC<{
               <h2 className="truncate text-lg font-semibold text-gray-900">{personName(person)}</h2>
               <p className="text-sm text-gray-500">{person.designation || 'No designation'}{person.department ? ` · ${person.department}` : ''}</p>
               <div className="mt-1 flex flex-wrap gap-1.5 text-[11px]">
-                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-700">{ROLE_LABEL[person.role]}</span>
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-700">{accessOf(person.role, person.user.id, teams)}</span>
                 {person.pending && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">Pending — hasn't signed in yet</span>}
                 {left && <span className="rounded-full bg-red-100 px-2 py-0.5 text-red-800">Access turned off</span>}
               </div>

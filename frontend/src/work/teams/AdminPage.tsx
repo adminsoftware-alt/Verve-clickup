@@ -65,7 +65,7 @@ function useAdminHub(): { hub: Hub; error: string | null; ready: boolean } {
   const hub: Hub = useMemo(() => ({
     ws, people, teams, me: me ?? '', isAdmin,
     // Only the owner makes admins; nobody makes a second owner.
-    roles: (role === 'owner' ? ['admin', 'member', 'limited', 'guest'] : ['member', 'limited', 'guest']) as Role[],
+    roles: (role === 'owner' ? ['member', 'admin'] : ['member']) as Role[],
     reload: async () => { await reload(); refresh(); },
     openPerson: () => undefined,
   }), [ws, people, teams, me, isAdmin, role, reload, refresh]);

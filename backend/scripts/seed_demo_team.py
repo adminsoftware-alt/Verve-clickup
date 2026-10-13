@@ -139,7 +139,10 @@ TEAMS = {
     "Accounts": "PMS - Accounts",
     "Krutanjali": "PMS - Krutanjali",
 }
-# Designations that manage others get the Manager workspace role; partners are admins.
+# One admin for the firm (2026-10-13): Devendra. Everyone else is an employee; a Team's lead is
+# its Manager, which comes from leading the Team, not from a role.
+ADMIN_NAMES = {"Devendra Mandhana"}
+# Partners and Managers lead their Teams.
 ADMIN_TITLES = {"Partner"}
 MANAGER_TITLES = {"Manager"}
 DESIGNATION_COLORS = {
@@ -193,8 +196,7 @@ def main() -> None:
             else:
                 person.display_name = name
             db.flush()
-            role = (WorkspaceRole.admin if designation in ADMIN_TITLES
-                    else WorkspaceRole.member)
+            role = WorkspaceRole.admin if name in ADMIN_NAMES else WorkspaceRole.member
             member = db.get(WorkspaceMember, (workspace.id, uid))
             if member is None:
                 member = WorkspaceMember(workspace_id=workspace.id, user_id=uid, role=role, added_by=owner.id)

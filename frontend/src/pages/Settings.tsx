@@ -17,7 +17,7 @@ import { ask } from '../components/ask';
 import { useIsAdmin, useWork } from '../work/WorkContext';
 import { Avatar } from '../work/ui';
 import { peopleApi, personName, type Person } from '../work/teams/peopleApi';
-import { ROLE_LABEL } from '../work/teams/PersonDialogs';
+import { accessOf } from '../work/teams/PersonDialogs';
 import { sheetApi } from '../work/timesheets/api';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -150,7 +150,7 @@ const ProfileTab: React.FC = () => {
             {[person.designation, person.level ? `Level ${person.level}` : null].filter(Boolean).join(' · ') || 'No designation yet'}
           </p>
           <div className="mt-2 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
-            <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">{ROLE_LABEL[person.role]}</span>
+            <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">{accessOf(person.role, person.user.id, teams)}</span>
             <span className="truncate text-xs text-gray-500">{person.user.email}</span>
           </div>
         </div>

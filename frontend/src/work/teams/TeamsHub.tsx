@@ -6,7 +6,7 @@ import { useIsManager, useMe, useWork } from '../WorkContext';
 import type { Role } from '../api';
 import { Avatar, AvatarStack, Portal } from '../ui';
 import { peopleApi, personName, type Person, type TeamFull } from './peopleApi';
-import { AddPersonDialog, InviteDialog, PersonPanel, ROLE_LABEL } from './PersonDialogs';
+import { AddPersonDialog, InviteDialog, PersonPanel, accessOf } from './PersonDialogs';
 import { FEATURES } from '../../config/features';
 
 export interface Hub {
@@ -51,7 +51,8 @@ export const TeamsHub: React.FC = () => {
   const isAdmin = role === 'owner' || role === 'admin';
   const isManager = useIsManager();
   // Only the owner makes admins; nobody makes a second owner.
-  const roles: Role[] = role === 'owner' ? ['admin', 'member', 'limited', 'guest'] : ['member', 'limited', 'guest'];
+  // Admin or Employee is all anyone is given; a Manager is an employee made a Team's lead.
+  const roles: Role[] = role === 'owner' ? ['member', 'admin'] : ['member'];
   const hub: Hub = useMemo(() => ({
     ws, people, teams, me: myId, isAdmin, roles,
     reload: async () => { await reload(); refresh(); },
@@ -132,7 +133,7 @@ export const PeopleDirectory: React.FC = () => {
     const text = `${personName(p)} ${p.user.email} ${p.designation ?? ''} ${p.department ?? ''} ${p.employee_code ?? ''}`.toLowerCase();
     return (!q || text.includes(q.trim().toLowerCase()))
       && (!team || p.team_ids.includes(team))
-      && (!role || p.role === role)
+      && (!role || accessOf(p.role, p.user.id, teams) === role)
       && (!manager || p.manager_id === manager)
       && (status === 'left' ? !!p.deactivated_at : !p.deactivated_at && (status === 'all' || (status === 'pending') === p.pending));
   });
@@ -162,7 +163,7 @@ export const PeopleDirectory: React.FC = () => {
           <option value="">All teams</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
         <select aria-label="Filter by role" value={role} onChange={(e) => setRole(e.target.value)} className={sel}>
-          <option value="">All roles</option>{(['owner', 'admin', 'member', 'limited', 'guest'] as Role[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+          <option value="">All access</option>{['Admin', 'Manager', 'Employee'].map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
         <select aria-label="Filter by manager" value={manager} onChange={(e) => setManager(e.target.value)} className={sel}>
           <option value="">Any manager</option>{managers.map((m) => <option key={m.user.id} value={m.user.id}>Reports to {personName(m)}</option>)}
@@ -204,7 +205,7 @@ export const PeopleDirectory: React.FC = () => {
                     <td className="px-3 py-2">
                       <span className="flex flex-wrap gap-1">{p.team_ids.map((id) => { const t = teams.find((x) => x.id === id); return t ? <span key={id} className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] text-brand-700">{t.name}</span> : null; })}</span>
                     </td>
-                    <td className="px-3 py-2 text-gray-700">{ROLE_LABEL[p.role]}</td>
+                    <td className="px-3 py-2 text-gray-700">{accessOf(p.role, p.user.id, teams)}</td>
                     <td className="px-3 py-2">{p.deactivated_at ? <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] text-red-800">Access off</span> : p.pending ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800">Pending</span> : <span className="text-xs text-emerald-700">Active</span>}</td>
                   </tr>
                 );
@@ -220,7 +221,7 @@ export const PeopleDirectory: React.FC = () => {
               <button type="button" onClick={() => openPerson(p.user.id)} className="flex w-full flex-col items-center rounded-xl border border-gray-200 bg-white p-4 text-center hover:border-brand-300">
                 <Avatar user={p.user} size={48} />
                 <span className="mt-2 w-full truncate text-sm font-semibold text-gray-900">{personName(p)}</span>
-                <span className="w-full truncate text-xs text-gray-500">{p.designation ?? ROLE_LABEL[p.role]}</span>
+                <span className="w-full truncate text-xs text-gray-500">{p.designation ?? accessOf(p.role, p.user.id, teams)}</span>
                 {p.pending && <span className="mt-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800">Pending</span>}
               </button>
             </li>
