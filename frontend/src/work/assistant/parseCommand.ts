@@ -46,7 +46,7 @@ const PRIORITY_WORDS: [RegExp, number][] = [
 /** Words that introduce a clause rather than belong to the task's name. Each one keeps its
  *  word boundaries: without them the optional "to" matches the first two letters of
  *  "tomorrow", and a date becomes a task called "morrow". */
-const LEAD_IN = /^(?:please\s+)?(?:can you\s+)?(?:\b(?:add|create|make|new)\b\s*)?(?:\ba\b\s*)?(?:\b(?:task|todo|to-do|reminder)\b\s*)?(?:\b(?:called|named|for|to)\b\s*)?/i;
+const LEAD_IN = /^(?:please\s+)?(?:can you\s+)?(?:\b(?:add|create|make|new|remind me to|i need to)\b\s*)?(?:\ba\b\s*)?(?:\b(?:task|todo|to-do|reminder)\b\s*)?(?:\b(?:called|named|for|to)\b\s*)?/i;
 
 const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
 
@@ -145,7 +145,8 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
 
   // --- how long -------------------------------------------------------------------------------
   let estimate: number | null = null;
-  take(/\b(?:estimate|should take|takes|about|roughly)\s+(\d+(?:[.:]\d+)?\s*(?:h|hr|hrs|hour|hours|m|min|mins|minute|minutes)?)\b/i, (m) => {
+  // "estimate 2h", and just as often "estimate is 1 hour" or "estimate: 90m".
+  take(/\b(?:(?:time\s+)?estimate[ds]?(?:\s+(?:is|as|of|at)\b)?\s*[:=]?|should take|takes|about|roughly)\s*(\d+(?:[.:]\d+)?\s*(?:h|hr|hrs|hour|hours|m|min|mins|minute|minutes)?)\b/i, (m) => {
     const seconds = parseDuration(m[1]);
     if (seconds === null) return false;
     estimate = seconds;
@@ -231,10 +232,13 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
   // that matches "from" would take "monday" out of it and leave "to friday" stranded with nothing
   // on its left -- two dates said, one date kept.
   if (!start) {
-    start = dateClause('Starts', /\b(?:start(?:s|ing)?|begin(?:s|ning)?)\s*(?:date|day)?\s*(?:as|is|of|on|from|:|=)?\s*([a-z0-9][a-z0-9/–\- ]*?)(?=\s*(?:,\s*)?\b(?:and|with|assign|priority|estimate|end|due|deadline|finish|till|until|to)\b|[,.]|$)/i);
+    // "started" as well as "start": without the ending, "started is today" matched "start" and
+    // read the date as "ed is today".
+    start = dateClause('Starts', /\b(?:start(?:s|ed|ing)?|begin(?:s|ning)?)\b\s*(?:date|day)?\s*(?:as|is|of|on|from|:|=)?\s*([a-z0-9][a-z0-9/–\- ]*?)(?=\s*(?:,\s*)?\b(?:and|with|assign|priorit(?:y|ies)|estimate|end|due|deadline|finish|till|until|to|when)\b|[,.]|$)/i);
   }
   if (!due) {
-    due = dateClause('Due', /\b(?:end|due|deadline|finish(?:es|ing)?|target)\s*(?:date|day)?\s*(?:as|is|of|on|by|:|=)?\s*([a-z0-9][a-z0-9/–\- ]*?)(?=\s*(?:,\s*)?\b(?:and|with|assign|priority|estimate|start|begin|from)\b|[,.]|$)/i);
+    // "When it is tomorrow" is how a due date gets said aloud, once the start has been given.
+    due = dateClause('Due', /\b(?:end|due|deadline|finish(?:es|ing)?|target|when\s+it(?:'s|\s+is)|when)\b\s*(?:date|day)?\s*(?:as|is|of|on|by|:|=)?\s*([a-z0-9][a-z0-9/–\- ]*?)(?=\s*(?:,\s*)?\b(?:and|with|assign|priorit(?:y|ies)|estimate|start|begin|from)\b|[,.]|$)/i);
   }
 
   if (!due) {
@@ -256,17 +260,31 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
   }
 
   // --- how urgent -----------------------------------------------------------------------------
+  // Every mention, not the first word on a fixed list: "priority normal ... make it priority high"
+  // is somebody changing their mind, and what they said last is what they meant. Each mention
+  // goes out of the name with its scaffolding -- "and make it as an", "priority is", "actually".
   let priority: number | null = null;
-  for (const [pattern, value] of PRIORITY_WORDS) {
-    const m = rest.match(new RegExp(`\\b(?:as|at|with|priority)?\\s*${pattern.source}\\b`, 'i'));
-    if (!m) continue;
-    priority = value;
-    found.push({ field: 'Priority', from: squash(m[0]) });
-    rest = squash(rest.replace(m[0], ' '));
-    // "With normal priority" matches on "with normal" and leaves the word "priority" behind, which
-    // then reads as the first word of the task's name. Take it with the rest of the clause.
+  const level = PRIORITY_WORDS.map(([p]) => p.source.replace(/^\\b\(|\)\\b$/g, '')).join('|');
+  const mention = new RegExp(
+    '(?:\\b(?:and\\s+)?(?:actually\\s+)?(?:make|set|mark)\\s+it\\s+(?:to\\s+|as\\s+)?(?:an?\\s+)?)?'
+    + '(?:\\b(?:as|at|with)\\s+)?'
+    + '(?:\\bpriorit(?:y|ies)\\s*(?:is|as|of|to|:|=)?\\s*)?'
+    + `\\b(${level})\\b(?:\\s+priority\\b)?`, 'gi');
+  // A bare level word with nothing around it ("high", "low") is only a priority where a clause
+  // ends -- "Payroll run urgent", "..., high, and ...". In the middle of words it is the work
+  // itself: "High court filing", "Low value invoices".
+  const said = [...rest.matchAll(mention)].filter((m) => {
+    if (squash(m[0]).toLowerCase() !== m[1].toLowerCase()) return true;
+    const after = rest.slice((m.index ?? 0) + m[0].length);
+    return /^\s*(?:$|[,.;]|and\b|with\b|due\b|by\b|start)/i.test(after);
+  });
+  if (said.length) {
+    const word = said[said.length - 1][1];
+    priority = PRIORITY_WORDS.find(([p]) => p.test(word))?.[1] ?? null;
+    found.push({ field: 'Priority', from: squash(said[said.length - 1][0]) });
+    for (const m of said) rest = squash(rest.replace(m[0], ' '));
+    // "With normal priority" can still leave a lone "priority" where a clause used to be.
     rest = squash(rest.replace(/^\s*priority\b/i, ' ').replace(/\bpriority\s*(?=[,.]|$)/i, ' '));
-    break;
   }
 
   // --- what is left is the name ---------------------------------------------------------------
@@ -287,8 +305,10 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
       .replace(/\s*,\s*(?=[,;]|$)/g, '')
       .replace(/^[\s,;]+/, '')
       .replace(/[,;]+\s*$/, '')
-      .replace(/^\s*(?:and|then|with|as|for|to|the|by|on|due|at|of)\b\s*/i, '')
-      .replace(/\s*\b(?:and|then|with|as|for|to|the|by|on|due|at|of)\s*$/i, ''));
+      // Not "due" at the front: a due clause has already gone by now, and what is left is
+      // "Due diligence", which is real work.
+      .replace(/^\s*(?:and|then|with|as|for|to|the|by|on|at|of|actually|also)\b\s*/i, '')
+      .replace(/\s*\b(?:and|then|with|as|for|to|the|by|on|due|at|of|actually|also)\s*$/i, ''));
     if (name === before) break;
   }
   // Nothing but punctuation left is nothing left. A task called "," helps nobody.
@@ -297,6 +317,11 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
   if (name) name = name[0].toUpperCase() + name.slice(1);
 
   if (!name) unknown.push('no task name was left once everything else was understood');
+  // A name that still carries instruction words means a clause was missed, and the person should
+  // see that before a task called "Payroll run priority is" is made. ("Due" is not on this list:
+  // "due diligence" is real work here.)
+  const leftover = name.match(/\b(?:priorit(?:y|ies)|estimate[ds]?|assign(?:ed)?|start(?:s|ed|ing)?|deadline|today|tomorrow)\b/gi);
+  if (leftover) unknown.push(`these words were not understood: ${[...new Set(leftover.map((w) => w.toLowerCase()))].join(', ')}`);
 
   return {
     name,

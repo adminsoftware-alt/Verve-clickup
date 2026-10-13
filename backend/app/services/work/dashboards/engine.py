@@ -102,11 +102,16 @@ class Engine:
         tz: ZoneInfo,
         dashboard_filters: Optional[d.Filters] = None,
         now: Optional[datetime] = None,
+        scope: Optional[List[str]] = None,
     ):
         self.db = db
         self.access = access
         self.tz = tz
         self.dashboard_filters = dashboard_filters or d.Filters()
+        # Whose work the Dashboard is about -- its owner on a personal board, its Team on a Team
+        # one. Not a filter: it is never shown as one and can't be cleared, so the filter bar
+        # starts empty and only holds what somebody chose. See scope_of().
+        self.scope = d.Filters(assignees=scope) if scope else d.Filters()
         self.now = now or datetime.now(timezone.utc)
         self.today = self.now.astimezone(tz).date()
         self._loaded: Dict[Tuple, Loaded] = {}
@@ -367,7 +372,8 @@ class Engine:
         for f in loaded.facts:
             if not wants_closed and f.group == StatusGroup.closed:
                 continue
-            if self._matches(f, flt, card.period) and self._matches(f, self.dashboard_filters, card.period):
+            if (self._matches(f, flt, card.period) and self._matches(f, self.dashboard_filters, card.period)
+                    and self._matches(f, self.scope, card.period)):
                 result.append(f)
         return result
 
@@ -781,7 +787,7 @@ class Engine:
         Planned effort is an estimate spread over the task's own start..due days, the way the
         Workload view spreads it, and only the part that lands inside the period counts.
         """
-        from app.services.work.leave import daily_capacity
+        from app.services.work.working_time import daily_capacity
         from app.services.work.workload import spread
 
         entries, first, last = self._entries(config, loaded)
@@ -844,7 +850,7 @@ class Engine:
         the person reading it -- a manager looking at someone else's Dashboard sees their own
         LineUp, because you cannot plan another person's day for them.
         """
-        from app.services.work.leave import daily_capacity
+        from app.services.work.working_time import daily_capacity
         from app.db.models import LineupItem
 
         today = self.today
@@ -989,7 +995,7 @@ class Engine:
         lo, hi = self._at(first), self._at(last + timedelta(days=1))
         facts = {f.task.id: f for f in self.matching(config, loaded, force_closed=True)}
         wanted: Optional[Set[str]] = None
-        for tokens in (config.filters.assignees, self.dashboard_filters.assignees):
+        for tokens in (config.filters.assignees, self.dashboard_filters.assignees, self.scope.assignees):
             if tokens is not None:
                 people, _ = self._people(tokens)
                 wanted = people if wanted is None else wanted & people
@@ -1092,7 +1098,7 @@ class Engine:
         allowed = self.time_people()
         if allowed is not None:
             query = query.where(TimeEntry.user_id.in_(allowed))
-        for tokens in (config.filters.assignees, self.dashboard_filters.assignees):
+        for tokens in (config.filters.assignees, self.dashboard_filters.assignees, self.scope.assignees):
             if tokens is not None:
                 people, _ = self._people(tokens)
                 query = query.where(TimeEntry.user_id.in_(people))
@@ -1145,7 +1151,7 @@ class Engine:
         # and approved leave -- so "12h" reads as comfortable or as a problem rather than as a
         # number. Grouped by task or List there is no such thing, and the bars stay relative.
         if config.time_group_by == "user" and out:
-            from app.services.work.leave import daily_capacity
+            from app.services.work.working_time import daily_capacity
 
             days = [first + timedelta(days=i) for i in range((last - first).days + 1)]
             per_person = daily_capacity(self.db, self.access.workspace_id, [r["key"] for r in out], days)
@@ -1199,7 +1205,7 @@ class Engine:
                     "seconds": seconds,
                     "billable": bool(entry.billable),
                 })
-        from app.services.work.leave import daily_capacity
+        from app.services.work.working_time import daily_capacity
 
         # Everyone this card is about, not only those who logged something. A week where seven of
         # twelve people recorded nothing should read "29h of 480h", not "29h of 200h" -- the second

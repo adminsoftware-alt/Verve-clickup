@@ -379,14 +379,14 @@ export const LocationPage: React.FC = () => {
     <div className="flex h-full min-h-0 flex-col bg-white">
       {/* Breadcrumb */}
       <header className="border-b border-gray-200 px-6 pt-4">
-        <nav className="flex items-center gap-1.5 text-sm">
+        <nav className="flex flex-wrap items-center gap-1.5 text-sm">
           {located.path.map((crumb, i) => (
             <React.Fragment key={crumb.id}>
               {i > 0 && <ChevronRight size={14} className="text-gray-300" />}
-              <span className={`flex items-center gap-1.5 ${i === located.path.length - 1 ? 'text-lg font-semibold text-gray-900' : 'text-gray-500'}`}>
-                {crumb.kind === 'folder' && <Folder size={14} />}
-                {crumb.kind === 'list' && i === located.path.length - 1 && <ListIcon size={16} />}
-                {crumb.name}
+              <span className={`flex min-w-0 items-center gap-1.5 ${i === located.path.length - 1 ? 'text-lg font-semibold text-gray-900' : 'text-gray-500'}`}>
+                {crumb.kind === 'folder' && <Folder size={14} className="shrink-0" />}
+                {crumb.kind === 'list' && i === located.path.length - 1 && <ListIcon size={16} className="shrink-0" />}
+                <span className="truncate">{crumb.name}</span>
               </span>
             </React.Fragment>
           ))}
@@ -411,7 +411,7 @@ export const LocationPage: React.FC = () => {
                 disabled={!canAssign}
                 onClick={() => setAssigning(true)}
                 title={canAssign ? 'Assign this List to one or more people' : undefined}
-                className="ml-auto flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-default disabled:hover:bg-transparent"
+                className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-default disabled:hover:bg-transparent"
               >
                 {people.length === 0 ? <><UserPlus size={14} /> Assign</>
                   : people.length === 1 ? <><Avatar user={people[0]} size={18} /> {people[0].display_name || people[0].email}</>
@@ -425,7 +425,7 @@ export const LocationPage: React.FC = () => {
             <button
               type="button"
               onClick={() => setSharing(true)}
-              className={`${kind === 'list' ? '' : 'ml-auto '}flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50`}
+              className={`${kind === 'list' ? '' : 'ml-auto '}flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50`}
             >
               <Share2 size={14} /> Share
             </button>

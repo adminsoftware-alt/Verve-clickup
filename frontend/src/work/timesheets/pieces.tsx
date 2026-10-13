@@ -15,6 +15,11 @@ export function rangeLabel(start: string, end: string): string {
     : `${month(a)} ${a.getDate()} - ${month(b)} ${b.getDate()}`;
 }
 
+/** Saturday or Sunday, read from the date itself so a weekend looks like one whoever's sheet it is. */
+export const isWeekend = (iso: string) => { const d = new Date(`${iso}T00:00:00`).getDay(); return d === 0 || d === 6; };
+/** The weekend shade, used on the header, the cells and the entry rows alike. */
+export const WEEKEND = 'bg-gray-100/80';
+
 export const dayLabel = (iso: string) => parseDay(iso).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
 // --- a popover anchored under its trigger -------------------------------------------------
@@ -130,7 +135,9 @@ export const WeekNav: React.FC<{ start: string | null; end: string | null; onGo:
         triggerClassName="ml-auto shrink-0 sm:ml-2"
         trigger={
           <span className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-            {thisWeek ? 'This week' : rangeLabel(start ?? '', end ?? '')}
+            {/* Until the week has loaded there are no dates to name, and parsing nothing printed
+                "Invalid Date NaN". */}
+            {thisWeek ? 'This week' : start && end ? rangeLabel(start, end) : '…'}
             <ChevronDown size={14} className="text-gray-500" />
           </span>
         }

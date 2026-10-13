@@ -93,6 +93,17 @@ class CardConfig(BaseModel):
     include_subtasks: bool = False
     include_closed: bool = False
     filters: Filters = Field(default_factory=Filters)
+    # The filters the card was built with -- "Overdue" is due: overdue, "Unassigned" is nobody on
+    # it. Whatever somebody narrows it by from the card's header goes in `filters` on top, and
+    # "Clear all filters" puts `filters` back to these rather than to nothing, which would turn
+    # every Overdue card into a count of all work. Set from `filters` when a card is made.
+    base_filters: Optional[Filters] = None
+
+    @model_validator(mode="after")
+    def _remember_base(self):
+        if self.base_filters is None:
+            self.base_filters = self.filters.model_copy(deep=True)
+        return self
 
     # calculation / pie / bar.
     # Either a built-in, or "custom:<field id>" for one of the Space's own fields -- the whole

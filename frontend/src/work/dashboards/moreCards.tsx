@@ -177,7 +177,7 @@ export const VarianceCard: React.FC<{
   sees_everyone: boolean;
   onDrill: (segment: string | undefined, label: string) => void;
   onOpenTask?: (id: string) => void;
-}> = ({ tasks = [], more_tasks = 0, expected_seconds, logged_seconds, sees_everyone, onDrill, onOpenTask }) => {
+}> = ({ tasks = [], more_tasks = 0, expected_seconds, logged_seconds, onDrill, onOpenTask }) => {
   const [shape, setShape] = useState<Shape>('all');
   const [who, setWho] = useState<string>('all');
   const [sort, setSort] = useState<string>('gap');
@@ -321,7 +321,7 @@ export const VarianceCard: React.FC<{
           aria-label="Sort"
           value={sort}
           onChange={(e) => setSort(e.target.value)}
-          className="rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[11px] text-gray-600"
+          className="no-print rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[11px] text-gray-600"
         >
           {SORTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
@@ -387,12 +387,7 @@ export const VarianceCard: React.FC<{
         )}
       </div>
 
-      {(more_tasks > 0 || !sees_everyone) && (
-        <p className="mt-1 shrink-0 text-[11px] text-gray-400">
-          {more_tasks > 0 && `${more_tasks} more not shown. `}
-          {!sees_everyone && 'Only the people whose time you may see.'}
-        </p>
-      )}
+      {more_tasks > 0 && <p className="mt-1 shrink-0 text-[11px] text-gray-400">{more_tasks} more not shown.</p>}
     </div>
   );
 };

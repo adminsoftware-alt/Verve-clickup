@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { teamService } from '../services/teamService';
 import type { Team } from '../services/teamService';
 import { useAuth } from '../components/AuthContext';
 import { Users, UserPlus, Shield, Crown, User, Plus, X, Search } from 'lucide-react';
-import { LeaveManagement } from './LeaveManagement';
 
 export const Teams: React.FC = () => {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -13,9 +12,7 @@ export const Teams: React.FC = () => {
   const { hasRole } = useAuth();
   const isAdmin = hasRole(['Admin']);
   const isManager = hasRole(['Manager']);
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const isLeaveTab = searchParams.get('tab') === 'leave';
 
   // Create Team dialog state
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -109,10 +106,6 @@ export const Teams: React.FC = () => {
         </div>
       </div>
     );
-  }
-
-  if (isLeaveTab) {
-    return <LeaveManagement />;
   }
 
   return (

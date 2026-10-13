@@ -3,11 +3,11 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { useTimer } from '../context/TimerContext';
 import { useNotifications } from '../context/NotificationContext';
-import { 
-  LayoutDashboard, CheckSquare, Calendar, Clock, 
+import {
+  LayoutDashboard, Calendar, Clock,
   BarChart2, Settings as SettingsIcon,
-  Bell, ChevronDown, MessageSquare,
-  Activity, Briefcase, Plus, X, Users, Menu
+  Bell, ChevronDown,
+  Activity, Briefcase, X, Users
 } from 'lucide-react';
 import { SpacesSidebar } from '../work/SpacesSidebar';
 import { MyTasksNav } from '../work/MyTasksNav';
@@ -18,15 +18,16 @@ import { RunningTimerChip } from '../work/RunningTimer';
 import { StatusSelector } from './StatusSelector';
 import { FEATURES } from '../config/features';
 import { HeaderInboxBell } from '../work/InboxPages';
-import { HelpMenu, ProfileChip, RecentMenu } from './HeaderBits';
+import { ProfileChip } from './HeaderBits';
 import { useIsAdmin, useWork } from '../work/WorkContext';
 import type { UserPresence } from '../services/presenceService';
 import { BottomNav } from './BottomNav';
 import { usePhone } from '../work/useBreakpoint';
 
 /** What the content pane shows while a page's own chunk is still on the way. */
-const PageWaiting: React.FC = () => (
-  <div className="animate-pulse space-y-4" aria-busy="true" aria-label="Loading">
+/** `padded` for the pages that fill the pane and so bring no padding of their own. */
+const PageWaiting: React.FC<{ padded?: boolean }> = ({ padded }) => (
+  <div className={`animate-pulse space-y-4 ${padded ? 'p-4 sm:p-8' : ''}`} aria-busy="true" aria-label="Loading">
     <div className="h-7 w-48 rounded-md bg-gray-200" />
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {[0, 1, 2, 3].map((i) => <div key={i} className="h-20 rounded-xl bg-gray-100" />)}
@@ -38,7 +39,7 @@ const PageWaiting: React.FC = () => (
 export const Layout: React.FC = () => {
   const { hasRole, user } = useAuth();  // signing out moved into the profile menu
   const location = useLocation();
-  const isLocationPage = /^\/((s|f|l)\/|my-tasks|dashboards|timesheets|inbox|replies|assigned-comments|reminders|people|all-tasks|forms|planner|leave|billing|team-week|compliance|all-spaces|goals)/.test(location.pathname);
+  const isLocationPage = /^\/($|(s|f|l)\/|my-tasks|dashboards|timesheets|inbox|replies|assigned-comments|reminders|people|all-tasks|forms|planner|leave|billing|team-week|compliance|all-spaces|goals)/.test(location.pathname);
   const { timers, stopTimer, getLiveElapsedSeconds, focusSession, stopFocus } = useTimer();
   const { notifications, unreadCount, markAsRead, markAllAsRead, clearAll } = useNotifications();
   
@@ -120,8 +121,6 @@ export const Layout: React.FC = () => {
     // An admin has no personal board -- the Company one is theirs, and it is the first row of
     // Dashboards -- so the rail would otherwise carry two routes to the same place.
     ...(isWorkspaceAdmin ? [] : [{ name: 'Dashboard', path: '/', icon: <LayoutDashboard size={16} /> }]),
-    ...(FEATURES.legacyTasks ? [{ name: 'My Tasks', path: '/tasks', icon: <CheckSquare size={16} /> }] : []),
-    ...(FEATURES.chat ? [{ name: 'Chat', path: '/chat', icon: <MessageSquare size={16} /> }] : []),
     ...(FEATURES.legacyTimeTracking ? [{ name: 'Time Tracking', path: '/time-entries', icon: <Clock size={16} /> }] : []),
     ...(FEATURES.legacyCalendar ? [{ name: 'Calendar', path: '/calendar', icon: <Calendar size={16} /> }] : []),
     ...(FEATURES.legacyTeams ? [{ name: hasRole(['Admin']) ? 'Teams' : 'My Team', path: '/teams', icon: <Users size={16} /> }] : []),
@@ -239,24 +238,26 @@ export const Layout: React.FC = () => {
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
 
         {/* Top Header */}
+        {/* Three columns -- who you work for, search, and you -- so the search sits in the middle
+            of the bar whatever the two sides hold. The menu button, "Recent" and the help menu
+            came off: the drawer opens from "More" in the bottom bar on a phone, the sidebar
+            already lists where you've been, and the shortcuts are in the search box itself. */}
         <header
-          className="glass-panel no-print z-[5] flex h-14 shrink-0 items-center justify-between gap-2 px-3 sm:h-16 sm:px-6"
+          className="glass-panel no-print z-[5] grid h-14 shrink-0 grid-cols-[minmax(7rem,1fr)_minmax(0,36rem)_minmax(max-content,1fr)] items-center gap-2 px-3 sm:h-16 sm:gap-4 sm:px-6"
           style={{ borderBottom: '1px solid rgba(255,255,255,0.5)' }}
         >
-          {/* Left: the way into the drawer, where you are, and where you've just been */}
-          <div className="flex min-w-0 items-center gap-1 sm:gap-2">
-            <button
-              type="button" onClick={() => setDrawer(true)} aria-label="Open the menu" aria-expanded={drawer}
-              className="tap -ml-1 rounded-lg text-gray-600 hover:bg-black/5 md:hidden"
-            >
-              <Menu size={20} />
-            </button>
-            <span className="max-w-[9rem] truncate text-[0.95rem] font-semibold text-gray-800 sm:max-w-[220px]">{workspaceName}</span>
-            <span className="hidden sm:inline"><RecentMenu /></span>
+          <div className="flex min-w-0 items-center">
+            <span className="truncate text-base font-bold tracking-tight text-blue-700 sm:text-lg">{workspaceName}</span>
+          </div>
+
+          {/* The search takes up to 36rem and gives way first when the bar is narrow: the right-hand
+              column never shrinks below the bell and your name, so nothing runs over them. */}
+          <div className="flex min-w-0 justify-center">
+            <SearchButton />
           </div>
 
           {/* Right: Actions */}
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-4">
+          <div className="flex min-w-0 items-center justify-end gap-1.5 sm:gap-4">
             
             {/* Multiplayer Avatar Stack -- desktop only: a phone header is 390px wide. */}
             {onlineUsers.length > 0 && !phone && (
@@ -464,47 +465,7 @@ export const Layout: React.FC = () => {
               </div>
             )}
 
-            {FEATURES.legacyTasks && (
-              <Link to="/tasks?new=true" style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                backgroundColor: 'var(--color-primary)',
-                color: 'white',
-                border: 'none',
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '0.8125rem',
-                fontWeight: 500,
-                cursor: 'pointer',
-                textDecoration: 'none',
-                boxShadow: 'var(--shadow-sm)'
-              }}>
-                <Plus size={14} /> New Task
-              </Link>
-            )}
-
-            <SearchButton />
             <RunningTimerChip />
-
-{FEATURES.leave && (
-            <Link to="/teams?tab=leave" style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              backgroundColor: '#F3F4F6',
-              color: '#374151',
-              border: '1px solid var(--color-border)',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              fontSize: '0.8125rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              textDecoration: 'none'
-            }}>
-              <Plus size={14} /> Request Leave
-            </Link>
-            )}
 
             <div style={{ width: '1px', height: '24px', backgroundColor: 'var(--color-border)', margin: '0 8px' }}></div>
 
@@ -579,7 +540,6 @@ export const Layout: React.FC = () => {
 
             {FEATURES.availabilityStatus && <StatusSelector />}
 
-            <HelpMenu />
             <ProfileChip />
           </div>
         </header>
@@ -593,7 +553,7 @@ export const Layout: React.FC = () => {
               it is still downloading. The shell stays put and only this pane waits: a skeleton
               in the right shape, which reads as the page arriving rather than the app hanging.
               Navigating back to a page already fetched is instant -- the chunk is cached. */}
-          <Suspense fallback={<PageWaiting />}>
+          <Suspense fallback={<PageWaiting padded={isLocationPage} />}>
             <Outlet />
           </Suspense>
           <GlobalSearch />

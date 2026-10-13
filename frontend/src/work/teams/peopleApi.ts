@@ -4,14 +4,14 @@ import { request, upload, type Role, type Status, type Task, type Team, type Use
 export interface Person {
   user: UserRef; role: Role; joined_at: string; pending: boolean;
   designation: string | null; level: number | null; department: string | null; manager_id: string | null; phone: string | null;
-  employee_code: string | null; date_of_joining: string | null; location: string | null;
+  employee_code: string | null; date_of_joining: string | null; location: string | null; address: string | null;
   date_of_birth: string | null; marriage_anniversary: string | null; takes_interviews: boolean;
   team_ids: string[]; direct_reports: number; invite_sent_at: string | null; deactivated_at: string | null; joiner_tasks: number;
 }
 export interface PersonInput {
   email?: string; name?: string; role?: Role; designation?: string | null; level?: number | null; department?: string | null;
   manager_id?: string | null; phone?: string | null; employee_code?: string | null; date_of_joining?: string | null;
-  location?: string | null; team_ids?: string[]; send_invite?: boolean;
+  location?: string | null; address?: string | null; team_ids?: string[]; send_invite?: boolean;
   date_of_birth?: string | null; marriage_anniversary?: string | null; takes_interviews?: boolean; start_joiner_checklist?: boolean;
 }
 export interface ImportRow {

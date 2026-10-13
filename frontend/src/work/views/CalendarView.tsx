@@ -8,7 +8,7 @@
 // Rows are a fixed height and the page scrolls. They used to stretch to fill their container,
 // which made one week fill the screen and pushed the rest of the month out of sight.
 import React, { useMemo, useState } from 'react';
-import { CalendarClock, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 
 import type { Task, TaskInput } from '../api';
 import { Avatar, formatDuration, startOfDay } from '../ui';
@@ -79,18 +79,7 @@ export const CalendarView: React.FC<{
     return map;
   }, [tasks]);
 
-  const unscheduled = tasks.filter((t) => !t.due_date && !t.start_date).length;
   const todayKey = dayKey(new Date());
-
-  // What this month holds, said once at the top rather than left to be counted off the grid.
-  const summary = useMemo(() => {
-    const inView = days.filter((d) => d.getMonth() === month.getMonth()).flatMap((d) => byDay.get(dayKey(d)) ?? []);
-    return {
-      total: inView.length,
-      overdue: inView.filter((t) => t.is_overdue).length,
-      done: inView.filter(isDone).length,
-    };
-  }, [days, byDay, month]);
 
   /** The busiest day in view, so the load bars have something to be a share of. */
   const busiest = useMemo(
@@ -131,17 +120,8 @@ export const CalendarView: React.FC<{
         <button type="button" aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
         <button type="button" aria-label="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
         <h3 className="ml-1 text-lg font-semibold text-gray-900">{month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h3>
-
-        <span className="ml-auto flex flex-wrap items-center gap-2 text-xs">
-          <span className="rounded-full bg-gray-100 px-2.5 py-1 font-medium text-gray-600">{summary.total} scheduled</span>
-          {summary.overdue > 0 && <span className="rounded-full bg-red-50 px-2.5 py-1 font-medium text-red-700">{summary.overdue} overdue</span>}
-          {summary.done > 0 && <span className="rounded-full bg-teal-50 px-2.5 py-1 font-medium text-teal-700">{summary.done} done</span>}
-          {unscheduled > 0 && (
-            <span className="flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700" title="Tasks with no start or due date cannot be placed on a calendar">
-              <CalendarClock size={12} /> {unscheduled} undated
-            </span>
-          )}
-        </span>
+        {/* The counts that sat here -- "0 scheduled", overdue, done, undated -- came off: the
+            month itself shows what is scheduled, and the Dashboard's Highlights say what is late. */}
       </div>
 
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -173,12 +153,12 @@ export const CalendarView: React.FC<{
                 style={{ minHeight: open ? undefined : ROW_PX }}
                 className={`group/day relative flex flex-col border-b border-r border-gray-100 p-1.5 ${
                   index % 7 === 6 ? 'border-r-0' : ''} ${
-                  !inMonth ? 'bg-gray-50/70' : weekend ? 'bg-gray-50/40' : 'bg-white'} ${
+                  !inMonth ? 'bg-gray-50/70' : weekend ? 'bg-gray-100/60' : 'bg-white'} ${
                   dragOver === key ? 'ring-2 ring-inset ring-teal-400' : ''}`}
               >
                 <div className="mb-1 flex items-center gap-1.5">
                   <span className={`flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs ${
-                    isToday ? 'bg-sky-600 font-semibold text-white'
+                    isToday ? 'bg-brand-600 font-semibold text-white shadow-sm'
                       : inMonth ? 'font-medium text-gray-700' : 'text-gray-400'}`}>
                     {day.getDate()}
                   </span>

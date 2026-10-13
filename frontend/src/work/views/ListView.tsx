@@ -110,10 +110,10 @@ export const ListView: React.FC<{
     const needed = NEEDS.includes(key) && missing(task).includes(key);
     const Wanted = () => (
       <span
-        className="inline-flex items-center gap-1 rounded border border-dashed border-red-300 bg-red-50/60 px-1.5 py-0.5 text-[11px] font-medium text-red-600"
+        className="inline-flex items-center gap-0.5 rounded-md border border-dashed border-amber-300 bg-amber-50/70 px-1.5 py-0.5 text-[11px] font-medium text-amber-700"
         title="Open the task to fill this in"
       >
-        Add
+        <Plus size={11} /> Add
       </span>
     );
     switch (key) {

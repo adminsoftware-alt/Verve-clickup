@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
+import { DrawInPlace } from './inlineDialog';
 import * as XLSX from 'xlsx';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Download, FileSpreadsheet, LogOut, MinusCircle, X } from 'lucide-react';
 import { Portal, useEscapeToClose } from '../ui';
@@ -7,6 +8,8 @@ import { peopleApi, personName, type ImportResult, type ImportRow, type JoinerSt
 const Dialog: React.FC<{ title: string; onClose: () => void; width?: string; children: React.ReactNode }> = ({ title, onClose, width = 'w-[36rem]', children }) => {
   const ref = useRef<HTMLDivElement>(null);
   useEscapeToClose(ref, onClose);
+  // Inside the Admin window, which carries the title and the close button itself.
+  if (useContext(DrawInPlace)) return <div ref={ref} role="region" aria-label={title} className="mx-auto w-full max-w-3xl">{children}</div>;
   return (
     <Portal>
       <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/30" onMouseDown={onClose}>

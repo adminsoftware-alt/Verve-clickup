@@ -46,7 +46,7 @@ export const BottomNav: React.FC<{ onMore: () => void; moreOpen: boolean }> = ({
   return (
     <nav
       aria-label="Main"
-      className="fixed inset-x-0 bottom-0 z-[60] flex border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+      className="no-print fixed inset-x-0 bottom-0 z-[60] flex border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
     >
       {tabs.map((t) => {
         const on = t.match(pathname);

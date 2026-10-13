@@ -37,6 +37,8 @@ export interface CardConfig {
   include_subtasks: boolean;
   include_closed: boolean;
   filters: Filters;
+  /** What the card was built to filter by; "Clear all filters" puts `filters` back to this. */
+  base_filters?: Filters | null;
   measure: Measure;
   fn: 'count' | 'sum' | 'avg' | 'min' | 'max';
   unit: string | null;
@@ -67,6 +69,27 @@ export interface DashboardSummary {
   standard?: 'my_work' | 'team' | 'company' | null;
 }
 export interface Dashboard extends DashboardSummary { filters: Filters; auto_refresh: boolean; cards: Card[] }
+
+/** A person whose own Dashboard the viewer may open, with the figures that say whom to look at. */
+export interface PersonBoard {
+  user: UserRef; designation: string | null; department: string | null; teams: string[]; pending: boolean;
+  open: number; overdue: number; due_today: number; dashboard_id: string | null;
+}
+
+/** One task named in a highlight. */
+export interface InsightTask {
+  id: string; name: string; list_id: string; priority: number | null; due_date: string | null; assignees: UserRef[];
+  days_late?: number; days_idle?: number;
+}
+export interface InsightSection { count: number; tasks: InsightTask[] }
+/** What needs attention on a board, worked out from the same tasks as its cards. */
+export interface Insights {
+  open: number;
+  overdue: InsightSection; due_today: InsightSection; stuck: InsightSection; urgent_soon: InsightSection;
+  no_due_date: number; no_estimate: number; unassigned: number;
+  people_behind: { user: UserRef; overdue: number }[];
+  done_this_week: number;
+}
 
 export interface Segment { key: string; label: string; color: string; value: number }
 export interface CardData {
@@ -121,6 +144,14 @@ export const dashApi = {
   layout: (id: string, cards: { id: string; width: number; height: number }[]) =>
     request<Dashboard>('PUT', `/dashboards/${id}/layout`, { cards }),
   data: (id: string) => request<CardData[]>('GET', `/dashboards/${id}/data`, undefined, tz()),
+  /** Whose own Dashboards the viewer may open -- admins: everyone; Team leads: their people. */
+  people: (workspaceId: string) => request<PersonBoard[]>('GET', `/workspaces/${workspaceId}/dashboards/people`, undefined, tz()),
+  /** Someone's own Dashboard, read-only, exactly as they see it; made now if they have never opened it. */
+  personBoard: (workspaceId: string, userId: string) =>
+    request<Dashboard>('GET', `/workspaces/${workspaceId}/people/${encodeURIComponent(userId)}/dashboard`),
+  /** Clear the board's filters and put every card back to the filters it was built with. */
+  resetFilters: (id: string) => request<Dashboard>('POST', `/dashboards/${id}/reset-filters`),
+  insights: (id: string) => request<Insights>('GET', `/dashboards/${id}/insights`, undefined, tz()),
 
   addCard: (id: string, body: { type: CardType; title?: string; config: Partial<CardConfig>; width?: number; height?: number }) =>
     request<Card>('POST', `/dashboards/${id}/cards`, body),

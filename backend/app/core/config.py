@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     SCHEDULED_EMAIL_ENABLED: bool = False
     # The manager's "things waiting for your decision", each weekday morning. Its own switch
     # because it is the only scheduled mail that unblocks somebody else's work instead of
-    # reporting on it -- and leave requests escalate to HR by themselves, so off stalls nothing.
+    # reporting on it.
     APPROVAL_REMINDER_EMAIL: bool = False
     # Email for anything other than an invitation.
     #
@@ -51,13 +51,6 @@ class Settings(BaseSettings):
     # Notifications still reach people -- in the app, and as browser push -- they just do not also
     # arrive as mail. Invitations, and chasing an invitation nobody accepted, are unaffected.
     UPDATE_EMAIL_ENABLED: bool = False
-    # The leave request and approval workflow: asking for days off, the chain from a person to
-    # their manager to HR, the balances and the escalation when nobody decides.
-    #
-    # Off. What stays is everything the rest of the app measures with: the holiday calendar and
-    # each person's working hours, which are what Workload, the timesheets and the dashboard
-    # capacity cards divide by. Those are not leave, they just lived in the same module.
-    LEAVE_APPROVALS_ENABLED: bool = False
     # A task someone types in must carry an assignee, start and due dates, an estimate and a
     # priority. Tasks the system creates (templates, recurrences, imports, email) are exempt.
     REQUIRE_TASK_DETAILS: bool = True

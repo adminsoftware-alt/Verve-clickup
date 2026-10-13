@@ -111,7 +111,7 @@ export const DaySheet: React.FC<{
             const menu = [
               ...(row.task.can_open ? [{ label: 'Open task', icon: <ExternalLink size={14} />, onClick: () => onOpenTask(row.task.id) }] : []),
               ...(onStartTimer && row.task.can_open ? [{ label: 'Start timer', icon: <Play size={14} />, onClick: () => onStartTimer(row.task.id) }] : []),
-              ...(editable ? [{ label: 'Delete row', icon: <Trash2 size={14} />, danger: true, onClick: () => onDeleteRow(row) }] : []),
+              ...(editable ? [{ label: 'Delete task', icon: <Trash2 size={14} />, danger: true, onClick: () => onDeleteRow(row) }] : []),
             ];
             return (
               <li key={row.task.id}>

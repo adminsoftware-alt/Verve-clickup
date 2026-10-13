@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { DrawInPlace } from './inlineDialog';
 import { Link, useNavigate } from 'react-router-dom';
 import { Briefcase, Building2, Cake, Calendar, Camera, ClipboardCheck, Clock, Copy, Crown, Hash, Heart, LayoutDashboard, LogOut, Mail, MapPin, Phone, Power, Send, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { JoinerDialog, OffboardDialog } from './AdminDialogs';
 import type { Role, Task } from '../api';
-import { dashApi } from '../dashboards/api';
 import { Avatar, Portal, StatusDot, formatDue, useEscapeToClose } from '../ui';
 import { peopleApi, personName, type Person, type PersonInput, type TeamFull } from './peopleApi';
 import { ask } from '../../components/ask';
@@ -19,6 +19,8 @@ export const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin'
 const Modal: React.FC<{ title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }> = ({ title, onClose, wide, children }) => {
   const ref = useRef<HTMLDivElement>(null);
   useEscapeToClose(ref, onClose);
+  // Inside the Admin window, which carries the title and the close button itself.
+  if (useContext(DrawInPlace)) return <div ref={ref} role="region" aria-label={title} className="mx-auto w-full max-w-2xl">{children}</div>;
   return (
     <Portal>
       <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30" onMouseDown={onClose}>
@@ -98,6 +100,9 @@ const ProfileFields: React.FC<{
     )}
     <Field label="Phone"><input aria-label="Phone" value={form.phone ?? ''} onChange={(e) => set({ phone: e.target.value })} className={inputCls} /></Field>
     <Field label="Location"><input aria-label="Location" value={form.location ?? ''} onChange={(e) => set({ location: e.target.value })} placeholder="e.g. Bengaluru" className={inputCls} /></Field>
+    <div className="col-span-2">
+      <Field label="Address"><textarea aria-label="Address" rows={2} value={form.address ?? ''} onChange={(e) => set({ address: e.target.value })} className={inputCls} /></Field>
+    </div>
     {adminFields && (
       <div className="col-span-2 text-xs font-medium text-gray-600" role="group" aria-label="Teams">Teams
         <TeamPicker teams={teams} value={form.team_ids ?? []} onChange={(team_ids) => set({ team_ids })} />
@@ -253,17 +258,11 @@ export const PersonPanel: React.FC<{
    *  was nothing to add on the server -- only a way in from the person.
    */
   const openDashboard = async (userId: string) => {
-    setBoard('looking');
-    try {
-      const all = await dashApi.list(ws);
-      const theirs = all.find((d) => d.standard === 'my_work' && d.owner?.id === userId);
-      if (!theirs) { setBoard('none'); return; }
-      setBoard('idle');
-      onClose();
-      navigate(`/dashboards/${theirs.id}`);
-    } catch {
-      setBoard('none');
-    }
+    // Their board as they see it, under the "Viewing" bar -- made there if they never opened it,
+    // so there is no longer a "they have not got one yet" to say.
+    setBoard('idle');
+    onClose();
+    navigate(`/dashboards/people/${encodeURIComponent(userId)}`);
   };
 
   const ref = useRef<HTMLElement>(null);
@@ -292,14 +291,14 @@ export const PersonPanel: React.FC<{
     setForm({
       name: person.user.display_name ?? '', designation: person.designation ?? '', level: person.level, department: person.department ?? '',
       manager_id: person.manager_id, phone: person.phone ?? '', employee_code: person.employee_code ?? '',
-      date_of_joining: person.date_of_joining, location: person.location ?? '', team_ids: person.team_ids, role: person.role,
+      date_of_joining: person.date_of_joining, location: person.location ?? '', address: person.address ?? '', team_ids: person.team_ids, role: person.role,
       date_of_birth: person.date_of_birth, marriage_anniversary: person.marriage_anniversary, takes_interviews: person.takes_interviews,
     });
     setEditing(true);
   };
   const save = async () => {
     setError(null);
-    const body: PersonInput = isAdmin ? { ...form } : { name: form.name, phone: form.phone, location: form.location };
+    const body: PersonInput = isAdmin ? { ...form } : { name: form.name, phone: form.phone, location: form.location, address: form.address };
     if (!isAdmin || person.role === 'owner' || body.role === person.role) delete body.role;
     try { await peopleApi.update(ws, person.user.id, body); setEditing(false); setHistoryKey((k) => k + 1); onChanged(); } catch (e) { setError((e as Error).message); }
   };
@@ -412,6 +411,7 @@ export const PersonPanel: React.FC<{
                 {info(<Calendar size={14} />, 'Joining date', person.date_of_joining ? new Date(`${person.date_of_joining}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : null)}
                 {info(<Phone size={14} />, 'Phone', person.phone)}
                 {info(<MapPin size={14} />, 'Location', person.location)}
+                {info(<MapPin size={14} />, 'Address', person.address ? <span className="whitespace-pre-line">{person.address}</span> : null)}
                 {info(<Building2 size={14} />, 'Department', person.department)}
                 {info(<Cake size={14} />, 'Birthday', person.date_of_birth ? new Date(`${person.date_of_birth}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : null)}
                 {info(<Heart size={14} />, 'Anniversary', person.marriage_anniversary ? new Date(`${person.marriage_anniversary}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : null)}

@@ -38,7 +38,6 @@ KIND_GROUPS: Dict[str, List[str]] = {
     "dates": ["due_date"],
     "shared": ["shared", "space_join_request", "space_join_decision"],
     "reminders": ["reminder", "timesheet_reminder", "escalation", "automation"],
-    "leave": ["leave_request", "leave_decision"],
     "task_detail": ["attachment", "checklist_item", "custom_field"],
 }
 
@@ -193,14 +192,8 @@ def bulk(db: Session, access: Access, tab: str, action: str) -> int:
 def settings(db: Session, access: Access) -> List[c.SettingRow]:
     row = db.get(NotificationSetting, (access.workspace_id, access.user_id))
     muted = row.muted if row else {}
-    # A switch for something that cannot happen is a switch nobody can use. With the leave approval
-    # workflow off, nothing creates a leave notification, so four of these rows offered to mute a
-    # message that will never arrive. The labels stay in events.py; they are just not offered here.
-    hidden = set() if config.LEAVE_APPROVALS_ENABLED else {
-        "leave_request", "leave_decision", "leave_cover", "leave_escalated",
-    }
     return [c.SettingRow(kind=k, label=label, enabled=not muted.get(k))
-            for k, label in events.KIND_LABELS.items() if k not in hidden]
+            for k, label in events.KIND_LABELS.items()]
 
 
 def save_settings(db: Session, access: Access, data: c.SettingsIn) -> List[c.SettingRow]:

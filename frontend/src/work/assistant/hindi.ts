@@ -27,6 +27,7 @@
 // romanised word earns its place only when it is unambiguous: "aaj", "parso", "shukravar".
 
 import { parseTypedDate } from '../dates';
+import { tidySpoken } from './spoken';
 import { TRAILING_VERB } from './verbs';
 
 const BLOCK = '\\u0900-\\u097F';
@@ -192,6 +193,11 @@ const WORDS: [RegExp, string][] = [
 
 /** Romanised Hindi, only where the word cannot be mistaken for English or a client's name. */
 const ROMAN: [RegExp, string][] = [
+  // "Ek task create karo" -- "create a task". First, before "banao" becomes "add" below.
+  [/\b(?:ek|ik)\s+(?:nay[aie]\s+)?(?:task|kaam)\s+(?:create|add|bana(?:o|ao|na)?|jodo)\b/gi, 'create a task'],
+  // "vah task ke liye" -- "for that task": it points at the task being made and names nothing.
+  [/\b(?:vah|woh?|wo|us|is|iss|ye|yeh)\s+(?:task|kaam)\s+ke\s+liye\b/gi, ' '],
+  [/\bke\s+liye\b/gi, 'for'],
   // The postposition, which has to move here too.
   [/\b([a-z]+)\s+tak\b/gi, 'by $1'],
   [/\baaj\b/gi, 'today'],
@@ -292,10 +298,13 @@ export function toEnglish(input: string, now = new Date()): Translated {
   // and running these over its output invites collisions with whatever English it contained.
   if (!DEVANAGARI.test(input)) for (const [pattern, into] of ROMAN) text = text.replace(pattern, into);
   text = text.replace(/\s+/g, ' ').trim();
+  // Decided before the tidy-up below: only a sentence that was translated has Hindi word order to
+  // undo. Tidied English is still in English order.
+  const translated = DEVANAGARI.test(input) || text !== input.replace(/\s+/g, ' ').trim();
+  // Spoken filler and mishearings, in either language, once everything is in English words.
+  text = tidySpoken(text);
   // Word order, last: both of these read the translated sentence, not the original.
-  if (DEVANAGARI.test(input) || text !== input.replace(/\s+/g, ' ').trim()) {
-    text = dateToBack(verbToFront(text), now);
-  }
+  if (translated) text = dateToBack(verbToFront(text), now);
   const same = text.toLowerCase() === input.replace(/\s+/g, ' ').trim().toLowerCase();
   return { text, changed: !same };
 }

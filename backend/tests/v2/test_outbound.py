@@ -263,65 +263,41 @@ def test_a_manager_is_reminded_only_when_something_is_waiting(api, world):
     run(outbound.run_approval_reminders, monday)
     assert not [e for e in sent["email"] if e[0] == ["admin@example.com"]]
 
-    kinds = {t["name"]: t for t in ok(api.get(f"/workspaces/{ws}/leave/types", "owner"))}
-    start = (monday + timedelta(days=30)).date()
-    ok(api.post(f"/workspaces/{ws}/leave", "member", {
-        "type_id": kinds["Casual"]["id"], "start_date": start.isoformat(),
-        "end_date": start.isoformat(), "reason": "A wedding"}), 201)
+    # Something a manager actually decides: a submitted timesheet. The admin leads the Team the
+    # member is in, which is what the approvals screen reads.
+    team = ok(api.post(f"/workspaces/{ws}/teams", "owner",
+                       {"name": "Ops", "lead_ids": ["admin"], "member_ids": ["member"]}), 201)
+    assert team["id"]
+    ok(api.patch(f"/workspaces/{ws}/timesheet-settings", "owner", {"approvals_enabled": True}))
+    week = (monday - timedelta(days=7)).date()
+    ok(api.post(f"/workspaces/{ws}/timesheet/submit", "member", {"start": week.isoformat(), "tz": "UTC"}))
 
     run(outbound.run_approval_reminders, monday + timedelta(days=1))  # Tuesday: a new day, a new look
     theirs = [e for e in sent["email"] if e[0] == ["admin@example.com"]]
     assert len(theirs) == 1 and "waiting for your decision" in theirs[0][1]
-    assert "Member" in theirs[0][2] and "leave" in theirs[0][2]
-    # The reason is between the person and whoever decides it; the subject must not leak it.
-    assert "A wedding" not in theirs[0][1]
+    assert "Member" in theirs[0][2] and "timesheet" in theirs[0][2]
 
 
-def test_the_manager_hears_who_is_away_and_whose_week_was_empty(api, world):
+def test_the_manager_hears_whose_week_was_empty(api, world):
+    """This email used to open with who was away, read from their leave requests.
+
+    With leave gone there is no record of who is off, so what is left is the half the app can
+    still answer for: whoever logged nothing at all last week.
+    """
     ws, sent = world["ws"], world["sent"]
     now = datetime.now(timezone.utc)
     ok(api.patch(f"/workspaces/{ws}/people/member", "owner", {"manager_id": "admin"}))
     ok(api.put(f"/workspaces/{ws}/delivery", "admin", {"timezone": "Asia/Kolkata"}))
     monday = _next(0, now)
-    kinds = {t["name"]: t for t in ok(api.get(f"/workspaces/{ws}/leave/types", "owner"))}
-    away = (monday + timedelta(days=2)).date()
-    ok(api.post(f"/workspaces/{ws}/leave", "owner", {
-        "type_id": kinds["Casual"]["id"], "start_date": away.isoformat(),
-        "end_date": away.isoformat(), "user_id": "member"}), 201)  # an admin booking it approves it
 
     run(outbound.run_manager_heads_up, monday)
     theirs = [e for e in sent["email"] if e[0] == ["admin@example.com"]]
     assert len(theirs) == 1
-    assert "is away" in theirs[0][2] and "Member" in theirs[0][2]
-    # Nobody logged anything last week either, so that half shows up as well.
-    assert "logged nothing" in theirs[0][2]
+    assert "logged nothing" in theirs[0][2] and "Member" in theirs[0][2]
+    assert "is away" not in theirs[0][2]
 
 
 # --- the rules that decide whether to send at all -------------------------------------------------
-
-
-def test_nobody_is_emailed_on_their_own_holiday(api, world):
-    """A digest that lands on somebody's leave is how an app gets muted for good."""
-    ws, sent = world["ws"], world["sent"]
-    now = datetime.now(timezone.utc)
-    ok(api.post(f"/lists/{world['list']['id']}/tasks", "owner",
-                {"name": "Waiting for them", "assignees": ["member"],
-                 "due_date": (now + timedelta(days=2)).isoformat()}), 201)
-    ok(api.put(f"/workspaces/{ws}/delivery", "member", {"email_notifications": "weekly", "timezone": "Asia/Kolkata"}))
-    monday = _next(0, now)
-    kinds = {t["name"]: t for t in ok(api.get(f"/workspaces/{ws}/leave/types", "owner"))}
-    ok(api.post(f"/workspaces/{ws}/leave", "owner", {
-        "type_id": kinds["Casual"]["id"], "start_date": monday.date().isoformat(),
-        "end_date": monday.date().isoformat(), "user_id": "member"}), 201)
-
-    run(outbound.run_weekly_digests, monday)
-    assert not [e for e in sent["email"] if e[0] == ["member@example.com"]]
-    # It is recorded as held rather than forgotten, so it does not fire the moment they are back.
-    with db_session.new_session() as db:
-        from app.db.models import EmailLog
-        from sqlalchemy import select as _select
-        row = db.scalars(_select(EmailLog).where(EmailLog.kind == "weekly", EmailLog.to_email == "member@example.com")).first()
-        assert row is not None and row.sent is False and row.problem == "on leave"
 
 
 def test_an_address_that_refuses_everything_is_left_alone(api, world):

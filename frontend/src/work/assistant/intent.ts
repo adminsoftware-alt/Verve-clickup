@@ -14,6 +14,8 @@
 // worse than one that says plainly what it can do -- so an unrecognised sentence becomes
 // `unknown`, and the panel offers the five things rather than guessing a sixth.
 
+import { STATUS_WORDS } from './edit';
+
 export type Intent = 'create' | 'log_time' | 'complete' | 'update' | 'delete' | 'find' | 'ask' | 'unknown';
 
 interface Rule {
@@ -30,7 +32,10 @@ const RULES: Rule[] = [
   { intent: 'log_time', pattern: /\blog\s+(?:my\s+)?(?:time|hours)\b/i },
 
   { intent: 'complete', pattern: /\b(?:mark|set|move)\b.*\b(?:as\s+)?(?:done|complete|completed|finished|closed)\b/i },
-  { intent: 'complete', pattern: /\b(?:close|finish|complete)\s+(?:the\s+|my\s+)?\b/i },
+  // Anchored to the front, like the edits below. Looked for anywhere, "close" made "create Close
+  // books" and "set priority of Close books" into a request to mark something done -- and this
+  // firm closes books every month, so the word is in half its task names.
+  { intent: 'complete', pattern: /^(?:please\s+)?(?:can you\s+)?(?:close|finish|complete)\s+(?:the\s+|my\s+)?\b/i },
   { intent: 'complete', pattern: /\bi(?:'ve|\s+have)?\s+(?:finished|done|completed)\b/i },
 
   // Changing and deleting a task that already exists.
@@ -44,7 +49,9 @@ const RULES: Rule[] = [
   // the audit" open identically and only one of them should empty a task off the board.
   { intent: 'update', pattern: /^(?:please\s+)?(?:can you\s+)?(?:clear|remove|delete|unset)\s+(?:the\s+|its\s+)?(?:due\s*date|start\s*date|end\s*date|deadline|priority|assignee|owner|estimate)\b/i },
   { intent: 'update', pattern: /^(?:please\s+)?(?:can you\s+)?(?:change|update|edit|modify|rename|re-?assign|reschedule|postpone|push|move|shift)\b/i },
-  { intent: 'update', pattern: /^(?:please\s+)?(?:can you\s+)?set\b.*\b(?:priority|due|deadline|start|date|assignee|owner|estimate|name|title)\b/i },
+  { intent: 'update', pattern: /^(?:please\s+)?(?:can you\s+)?set\b.*\b(?:priority|due|deadline|start|date|assignee|owner|estimate|name|title|status)\b/i },
+  // A status other than done: "set the audit to in progress", "mark payroll as on hold".
+  { intent: 'update', pattern: new RegExp(`^(?:please\\s+)?(?:can you\\s+)?(?:set(?!\\s+up\\b)|mark|put|move)\\b.*\\s(?:to\\s+|as\\s+|in\\s+)?(?:${STATUS_WORDS})\\s*$`, 'i') },
   { intent: 'delete', pattern: /^(?:please\s+)?(?:can you\s+)?(?:delete|remove|bin|discard|drop|get rid of)\b/i },
 
   // Questions about their own figures, ahead of `find` -- which would otherwise take every

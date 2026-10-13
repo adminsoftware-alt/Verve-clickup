@@ -117,6 +117,20 @@ def _people_cards(everyone: bool) -> List[Card]:
     ]
 
 
+def scope_of(dash: Dashboard) -> Optional[List[str]]:
+    """Whose work a Dashboard is about, as assignee tokens -- None when it is about everybody.
+
+    A personal board is about its owner, by id rather than "me": "me" is whoever is looking, so an
+    admin opening someone's board used to see their own tasks on it. A Team board is about the Team.
+    This used to be stored as the board's filter, where it showed as a chip anybody could clear.
+    """
+    if dash.standard == MY_WORK:
+        return [dash.owner_id]
+    if dash.team_id:
+        return [f"team:{dash.team_id}"]
+    return None
+
+
 def _make(db: Session, access: Access, kind: str, name: str, filters: Dict[str, Any],
           cards: List[Card], team_id: Optional[uuid.UUID] = None) -> None:
     dash = Dashboard(
@@ -151,14 +165,14 @@ def ensure(db: Session, access: Access, standing: Standing) -> None:
     # An admin's own handful of tasks is not what they open the app to look at, so they are
     # not given a personal board; the Company one is their home. Everyone else gets theirs.
     if not standing.is_admin and (MY_WORK, access.user_id, None) not in have:
-        _make(db, access, MY_WORK, "My work", {"assignees": ["me"]}, _my_work_cards())
+        _make(db, access, MY_WORK, "My work", {}, _my_work_cards())
     for team_id in sorted(standing.led_teams, key=str):
         if any(kind == TEAM and had == team_id for kind, _, had in have):
             continue
         team = db.get(Team, team_id)
         if team is None:
             continue
-        _make(db, access, TEAM, f"{team.name} – people"[:100], {"assignees": [f"team:{team_id}"]},
+        _make(db, access, TEAM, f"{team.name} – people"[:100], {},
               _people_cards(everyone=False), team_id=team_id)
     if standing.is_admin and not any(k == COMPANY for k, _, _ in have):
         _make(db, access, COMPANY, "Company", {}, _people_cards(everyone=True))

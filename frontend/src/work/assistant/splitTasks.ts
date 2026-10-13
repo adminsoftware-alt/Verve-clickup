@@ -31,7 +31,9 @@ const HARD_SPLIT = /\n+|\s*;\s*|\s+(?:and\s+)?then\s+|\s*•\s*|\s+-\s+(?=[A-Za-
  * Anchored on the colon rather than on a vocabulary: people say "three", "a couple of", "the
  * following items", and a list of the words they might use is a list that is always one short.
  */
-const PREAMBLE = /^\s*(?:please\s+)?(?:can you\s+)?(?:add|create|make|note|capture|log)\b[^:\n]{0,60}?[:—]\s*/i;
+// Not a colon that only labels a field: in "add File TDS estimate: 90m" the colon belongs to the
+// estimate, and reading it as a preamble made a task called "90m".
+const PREAMBLE = /^\s*(?:please\s+)?(?:can you\s+)?(?:add|create|make|note|capture|log)\b[^:\n]{0,60}?(?<!\b(?:estimate|priority|due|deadline|start|date|assignee|owner|name|title))[:—]\s*/i;
 
 /** "1. foo 2. bar" or "1) foo 2) bar", which is how notes are actually written. */
 const NUMBERED = /(?:^|\s)\d{1,2}[.)]\s+/;

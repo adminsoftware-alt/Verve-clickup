@@ -20,12 +20,10 @@
 
 import { isOpen, workApi, type Hierarchy, type Task } from '../api';
 import { matchPerson, type Person } from './parseCommand';
-import { FEATURES } from '../../config/features';
 import { collabApi } from '../collabApi';
 import { dashApi, type DashboardSummary } from '../dashboards/api';
-import { dayCount, hrs, leaveApi, yearLabel } from '../leave/leaveApi';
 import { peopleApi } from '../teams/peopleApi';
-import { isoDay, parseDay, sheetApi } from '../timesheets/api';
+import { hrs, isoDay, parseDay, sheetApi } from '../timesheets/api';
 import { places } from './where';
 
 export interface Answer {
@@ -46,12 +44,6 @@ export interface Answer {
  * a pattern looking for the word "time" would happily take it.
  */
 const TOPICS: { key: string; pattern: RegExp }[] = [
-  // Leave only while the workflow is on. Asked while it is off, the question falls through to the
-  // topics below and, failing those, comes back as "I did not follow that" -- which is the truth.
-  // Answering with a balance from a feature nobody can reach is worse than not answering at all.
-  ...(FEATURES.leavePages
-    ? [{ key: 'leave', pattern: /\b(leave|time off|day off|days off|holidays?|vacation|casual|sick)\b/i }]
-    : []),
   { key: 'hours', pattern: /\b(hours?|timesheet|logged|tracked|billable|capacity)\b/i },
   { key: 'manager', pattern: /\b(my (manager|boss|reporting manager)|who(?:'s| is) my (manager|boss)|who do i report to)\b/i },
   // "which teams am i in" is the phrasing the intent reader already recognises as a question, so
@@ -179,31 +171,6 @@ export async function answer(
         sheet.submission ? `Timesheet ${sheet.submission.status === 'pending' ? 'submitted, awaiting approval' : sheet.submission.status.replace('_', ' ')}.` : null,
       ].filter(Boolean).join(' '),
       goTo: { label: 'Open my timesheet', to: '/timesheets' },
-    };
-  }
-
-  if (topic === 'leave') {
-    const balances = await leaveApi.balances(workspaceId);
-    const counted = balances.filter((b) => b.allowance != null);
-    if (!counted.length) {
-      return {
-        headline: 'None of your leave types has a yearly allowance set, so there is no balance to report.',
-        detail: balances.length ? `${plural(balances.length, 'leave type')} exist, all of them uncapped.` : undefined,
-        goTo: { label: 'Open Leave', to: '/leave' },
-      };
-    }
-    const pending = counted.reduce((n, b) => n + b.pending, 0);
-    const taken = counted.reduce((n, b) => n + b.used, 0);
-    return {
-      headline: `${counted.map((b) => `${dayCount(b.remaining)} ${b.type.name}`).join(', ')} left.`,
-      detail: [
-        // The firm's leave year runs April to March, so a label without years ("1 Apr to 31
-        // Mar") does not say which April -- and that is the whole question at a year boundary.
-        yearLabel(counted[0]) ? `Leave year ${yearLabel(counted[0])}.` : null,
-        `${dayCount(taken)} taken so far.`,
-        pending ? `${dayCount(pending)} awaiting a decision.` : 'Nothing awaiting a decision.',
-      ].filter(Boolean).join(' '),
-      goTo: { label: 'Open Leave', to: '/leave' },
     };
   }
 

@@ -19,6 +19,8 @@ type Mode = 'day' | 'week';
 const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const startOfWeek = (d: Date) => { const x = startOfDay(d); const dow = (x.getDay() + 6) % 7; return addDays(x, -dow); }; // weeks start on Monday
 const sameDay = (a: Date, b: Date) => startOfDay(a).getTime() === startOfDay(b).getTime();
+/** Saturday or Sunday: shaded the same light grey as on the Calendar and the timesheet. */
+const weekendDay = (d: Date) => d.getDay() === 0 || d.getDay() === 6;
 const hhmm = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 const snap = (minutes: number) => Math.round(minutes / SNAP_MIN) * SNAP_MIN;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -219,7 +221,6 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
         <aside className="flex w-72 shrink-0 flex-col border-r border-gray-200 bg-gray-50/60" aria-label="Tasks to plan">
           <div className="px-4 pb-2 pt-3">
             <h2 className="text-sm font-semibold text-gray-800">To plan</h2>
-            <p className="text-xs text-gray-500">Drag a task onto the calendar to block out time for it.</p>
             <span className="mt-2 flex items-center gap-2 rounded-md border border-gray-200 bg-white px-2 py-1">
               <Search size={13} className="text-gray-400" />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a task" aria-label="Find a task to plan" className="w-full text-sm focus:outline-none" />
@@ -249,7 +250,7 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
         <section className="flex min-w-0 flex-1 flex-col" aria-label="Planner calendar">
           <div className="flex border-b border-gray-200 pl-14">
             {days.map((d) => (
-              <div key={d.getTime()} className="min-w-0 flex-1 border-l border-gray-100 px-2 py-1.5">
+              <div key={d.getTime()} className={`min-w-0 flex-1 border-l border-gray-100 px-2 py-1.5 ${sameDay(d, now) ? 'bg-brand-50/50' : weekendDay(d) ? 'bg-gray-100/60' : ''}`}>
                 <div className={`text-xs ${sameDay(d, now) ? 'font-semibold text-brand-700' : 'text-gray-500'}`}>{d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}</div>
                 <div className="text-[11px] text-gray-400">{planned(d) ? `${Math.round(planned(d) / 36e5 * 10) / 10}h planned` : ' '}</div>
                 {(data?.days_off ?? []).filter((o) => o.day === `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`).map((o, i) => (
@@ -279,7 +280,7 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
                 {days.map((d) => {
                   const placed = layout(items.filter((it) => sameDay(it.start, d)));
                   return (
-                    <div key={d.getTime()} data-day={d.toDateString()} className="relative min-w-0 flex-1 border-l border-gray-100"
+                    <div key={d.getTime()} data-day={d.toDateString()} className={`relative min-w-0 flex-1 border-l border-gray-100 ${sameDay(d, now) ? 'bg-brand-50/20' : weekendDay(d) ? 'bg-gray-100/50' : ''}`}
                       onDoubleClick={(e) => { if (e.target === e.currentTarget) setNewBlock({ start: timeAt(e.clientX, e.clientY) }); }}>
                       {Array.from({ length: 24 }, (_, h) => <div key={h} className="pointer-events-none border-t border-gray-100" style={{ height: HOUR_PX }} />)}
                       {sameDay(d, now) && (
@@ -325,7 +326,6 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
               </div>
             </div>
           </div>
-          <p className="border-t border-gray-100 px-4 py-1 text-[11px] text-gray-400">Double-click an empty slot to block out time for something else. Drag a block to move it, or its bottom edge to change its length.</p>
         </section>
       </div>
 

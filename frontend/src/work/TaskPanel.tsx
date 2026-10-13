@@ -26,7 +26,6 @@ import { DurationInput } from './DurationInput';
 import { FEATURES } from '../config/features';
 import { TaskTypesDialog, TypeIcon } from './LocationSettings';
 import { TaskActions } from './task/TaskActions';
-import { LeaveWarning } from './leave/LeaveWarning';
 import { DateRange } from './DateField';
 import { TaskLists, TimeInStatusSection } from './task/TaskMore';
 import { Bar } from './Skeleton';
@@ -258,8 +257,15 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                     disabled={!canChangeStatus}
                     current={
                       <>
-                        <StatusDot status={task.status} />
-                        <span className="truncate text-sm font-medium uppercase tracking-wide text-gray-800">{task.status.name}</span>
+                        {/* The status as a coloured pill, the way ClickUp shows it: the one field on
+                            a task you should be able to read from across the room. */}
+                        <span
+                          className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md px-2 py-0.5 text-xs font-semibold uppercase tracking-wide"
+                          style={{ backgroundColor: `${task.status.color}1f`, color: task.status.color, boxShadow: `inset 0 0 0 1px ${task.status.color}40` }}
+                        >
+                          <StatusDot status={task.status} size={11} />
+                          <span className="truncate">{task.status.name}</span>
+                        </span>
                       </>
                     }
                     items={statuses.map((st) => ({
@@ -314,10 +320,6 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                     onChange={(ids) => save({ assignees: ids })}
                     onShared={() => workApi.assignable('list', task.list_id).then(setAssignable).catch(() => undefined)}
                   />
-                  {/* "They are on leave that day" -- which there is no longer a way to be, now
-                      that the approval workflow is off. The component and its endpoint are both
-                      still here behind the flag. */}
-                  {FEATURES.leavePages && <LeaveWarning dueDate={task.due_date} assignees={task.assignees} />}
                 </Field>
                 <Field label="Dates" icon={<CalendarDays size={14} />}>
                   <DateRange

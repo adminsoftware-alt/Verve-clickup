@@ -15,7 +15,7 @@ import {
 
 interface Thought {
   words: string;
-  /** Kept although it is not shown: a line worth reading is worth being able to attribute. */
+  /** Shown under the quote: a line worth reading is worth attributing. */
   who: string;
   /** A symbol for what it is about, so the band says something before it is read. */
   Icon: React.ElementType;
@@ -102,23 +102,24 @@ export const DailyThought: React.FC<{
   return (
     <section
       aria-label="Thought of the day"
-      className={`mb-4 overflow-hidden rounded-2xl bg-gradient-to-r ${skin.band} px-5 py-4 ring-1 ${skin.ring}`}
+      className={`mb-4 overflow-hidden rounded-2xl bg-gradient-to-r ${skin.band} px-6 py-5 shadow-sm ring-1 ${skin.ring}`}
     >
-      <div className="flex items-start gap-4">
+      <p className="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold text-gray-800">
+        {greeting}
+        <span className="text-xs font-normal text-gray-500">{date}</span>
+      </p>
+      <div className="mt-3 flex items-start gap-4">
         {/* A symbol for what this line is about, rather than a quote mark that says only
             "this is a quote" -- which the quotation marks already say. */}
-        <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${skin.chip}`} aria-hidden>
-          <thought.Icon size={20} strokeWidth={1.75} />
+        <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${skin.chip}`} aria-hidden>
+          <thought.Icon size={22} strokeWidth={1.75} />
         </span>
-        <div className="min-w-0 flex-1">
-          <p className="flex flex-wrap items-baseline gap-x-2 text-[15px] font-semibold text-gray-900">
-            {greeting}
-            <span className="text-xs font-normal text-gray-500">{date}</span>
-          </p>
-          <blockquote className={`mt-1.5 text-[17px] font-medium leading-snug ${skin.words}`}>
+        <figure className="min-w-0 flex-1">
+          <blockquote className={`text-lg font-semibold leading-snug tracking-tight sm:text-xl ${skin.words}`}>
             “{thought.words}”
           </blockquote>
-        </div>
+          <figcaption className="mt-1.5 text-xs font-medium uppercase tracking-wider text-gray-500">— {thought.who}</figcaption>
+        </figure>
       </div>
     </section>
   );

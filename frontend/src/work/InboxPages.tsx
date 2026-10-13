@@ -193,7 +193,6 @@ export const InboxPage: React.FC = () => {
   const open = (item: InboxItem) => {
     if (!item.read) act(item.id, { read: true });
     if (item.task) setOpenTask(item.task.id);
-    else if (item.kind.startsWith('leave_')) navigate('/leave');
     else if (item.kind === 'timesheet_reminder') navigate('/timesheets');
     else if (item.kind === 'space_join_request') navigate('/all-spaces');
     else if (item.kind === 'space_join_decision' && item.data.space_id) navigate(`/s/${item.data.space_id}`);

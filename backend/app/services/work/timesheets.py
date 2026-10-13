@@ -359,7 +359,7 @@ def timesheet(
     else:
         out_rows.sort(key=lambda r: r.added_at, reverse=descending)
 
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
 
     capacity = daily_capacity(db, access.workspace_id, [user_id], days)[user_id]  # hours less holidays and leave
     sub = current_submission(db, access.workspace_id, user_id, first)
@@ -582,7 +582,7 @@ def all_timesheets(db: Session, access: Access, any_day: date, tz: ZoneInfo, tea
             )
         )
     }
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
 
     capacities = daily_capacity(db, access.workspace_id, [u.id for u in people], days)
     out = []
@@ -737,7 +737,7 @@ def run_timesheet_reminders(db: Session, now: Optional[datetime] = None) -> int:
     """On the reminder day and hour, nudge people whose timesheet so far is short of their working hours. Once a week each."""
     from app.db.models import Notification, Workspace, WorkspaceRole
     from app.services.work import events
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
 
     now = now or datetime.now(timezone.utc)
     sent = 0

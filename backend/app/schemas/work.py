@@ -82,6 +82,7 @@ class MemberUpdate(BaseModel):
 
 Email = Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")]
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]
+Address = Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]
 
 
 class PersonCreate(BaseModel):
@@ -98,6 +99,7 @@ class PersonCreate(BaseModel):
     employee_code: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
     date_of_joining: Optional[date] = None
     location: Optional[ShortText] = None
+    address: Optional[Address] = None
     date_of_birth: Optional[date] = None
     marriage_anniversary: Optional[date] = None
     takes_interviews: bool = False
@@ -121,6 +123,7 @@ class PersonUpdate(BaseModel):
     employee_code: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
     date_of_joining: Optional[date] = None
     location: Optional[ShortText] = None
+    address: Optional[Address] = None
     date_of_birth: Optional[date] = None
     marriage_anniversary: Optional[date] = None
     takes_interviews: Optional[bool] = None
@@ -140,6 +143,7 @@ class PersonOut(BaseModel):
     employee_code: Optional[str] = None
     date_of_joining: Optional[date] = None
     location: Optional[str] = None
+    address: Optional[str] = None
     date_of_birth: Optional[date] = None
     marriage_anniversary: Optional[date] = None
     takes_interviews: bool = False

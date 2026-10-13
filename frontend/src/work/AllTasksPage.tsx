@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Layers, Search } from 'lucide-react';
+import { Layers } from 'lucide-react';
 import { FEATURES } from '../config/features';
-import { workApi, type CustomField, type Task } from './api';
+import { workApi, type Task } from './api';
 import { useMe, useWork } from './WorkContext';
 import { ListView } from './views/ListView';
 import { BoardView } from './views/BoardView';
@@ -17,8 +17,6 @@ import { PlannerPage } from './planner/PlannerPage';
 import { TaskRowsSkeleton } from './Skeleton';
 import { MyWorkloadView } from './views/MyWorkloadView';
 import { BulkBar } from './views/BulkBar';
-import { taskRows } from './views/exportTasks';
-import { ExportMenu } from './views/ExportMenu';
 
 type Layout = ViewKey;
 
@@ -53,7 +51,6 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
   const me = useMe();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[] | null>(null);
-  const [q, setQ] = useState('');
   const [layout, setLayout] = useState<Layout>(() => {
     try {
       const saved = localStorage.getItem(`${KEY}.layout`) as Layout | null;
@@ -69,7 +66,6 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
   useEffect(() => { setScope(initialScope); }, [initialScope]);
   const [meMode, setMeMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [fields] = useState<CustomField[]>([]);
   useEffect(() => {
     try {
       localStorage.setItem(KEY, JSON.stringify(settings));
@@ -86,7 +82,6 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
   const people = useMemo(() => members.map((m) => m.user), [members]);
   const where = useCallback((listId: string) => locate('list', listId)?.path.map((c) => c.name).join(' / ') ?? listName(listId), [locate, listName]);
   const filtered = useMemo(() => {
-    const text = q.trim().toLowerCase();
     const mine = (t: Task) => t.assignees.some((a) => a.id === me);
     const soon = (t: Task) => !!t.due_date && new Date(t.due_date) <= endOfToday();
     // Progress filter: which of the three states a task is in, rather than its status name.
@@ -100,12 +95,12 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
       .filter((t) => (states.length ? states.includes(progressOf(t)) : layout === 'board' || openOnly(t)))
       .filter((t) => (scope === 'mine' ? mine(t) : true))
       .filter((t) => (scope === 'now' ? mine(t) && soon(t) && t.status.group !== 'closed' && t.status.group !== 'done' : true))
-      .filter((t) => !text || t.name.toLowerCase().includes(text) || (t.custom_id ?? '').toLowerCase() === text);
+      ;
     return sortTasks(applyFilters(found, settings.filters, me, meMode), settings.sort);
-  }, [tasks, q, settings.filters, settings.sort, me, meMode, scope, layout]);
+  }, [tasks, settings.filters, settings.sort, me, meMode, scope, layout]);
   // Whether an empty list means "nothing is yours" or "your filters hide it" -- a different
   // sentence belongs on each, and only this page knows which.
-  const hasFilters = !!q.trim() || Object.values(settings.filters).some((v) => (Array.isArray(v) ? v.length > 0 : !!v));
+  const hasFilters = Object.values(settings.filters).some((v) => (Array.isArray(v) ? v.length > 0 : !!v));
   const makeGroups = useCallback((roots: Task[]) => buildGroups(settings.groupBy, roots, null, [], people), [settings.groupBy, people]);
   // The Board reads its own setting, so a List grouped by due date does not leave the Board
   // with Overdue and Upcoming columns and nowhere to put finished work.
@@ -137,16 +132,6 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
   const openTask = (id: string) => { const t = tasks?.find((x) => x.id === id); if (t) navigate(`/l/${t.list_id}?task=${id}`); };
   const select = (ids: string[], on: boolean) => setSelected((prev) => { const n = new Set(prev); ids.forEach((x) => (on ? n.add(x) : n.delete(x))); return n; });
   const selectedTasks = filtered.filter((t) => selected.has(t.id));
-  // The numbers on the two personal tabs, so the page says how much is waiting.
-  const counts = useMemo(() => {
-    const open = (tasks ?? []).filter((t) => t.status.group !== 'closed' && t.status.group !== 'done');
-    const mine = open.filter((t) => t.assignees.some((a) => a.id === me));
-    return {
-      mine: mine.length,
-      now: mine.filter((t) => !!t.due_date && new Date(t.due_date) <= endOfToday()).length,
-      all: open.length,
-    };
-  }, [tasks, me]);
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
       <header className="border-b border-gray-200 px-6 pb-2 pt-4">
@@ -156,21 +141,14 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
               the line underneath already gives both numbers, and narrowing to your own work is
               what Filter -> Assignee is for. One list, and the subtitle says what is in it. */}
         </h1>
-        <p className="text-xs text-gray-500">
-          {scope === 'all'
-            ? `${counts.all} open across every Space you can open · ${counts.mine} of them yours`
-            : `${counts.mine} open and assigned to you · ${counts.now} due today or overdue`}
-        </p>
       </header>
       <ViewTabs value={layout} onChange={setLayout} only={OFFERED} />
       {/* The Planner and the Calendar answer their own question and carry their own controls, so
           the filter toolbar would only be furniture above them. */}
       {SHOWS_TOOLBAR.includes(layout) && (
       <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-6 py-2">
-        <span className="flex items-center gap-2 rounded-md border border-gray-200 px-2 py-1">
-          <Search size={14} className="text-gray-400" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks or IDs" aria-label="Search all tasks" className="w-40 text-sm focus:outline-none" />
-        </span>
+        {/* The search box that stood here is gone: the search bar in the top bar finds tasks
+            across everything, and a second one over this list was the same job twice. */}
         {/* Two steps -- what to filter by, then its values -- as on the Dashboard. The old
             all-at-once panel is still built and still used inside a List. */}
         {FEATURES.myTasksOldFilterPanel
@@ -205,12 +183,6 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
         {FEATURES.myTasksViewButtons && (
           <label className="flex items-center gap-1.5 whitespace-nowrap text-sm text-gray-600"><input type="checkbox" checked={settings.showClosed} onChange={(e) => update('showClosed', e.target.checked)} /> Show closed</label>
         )}
-        <ExportMenu
-          filename="my-tasks"
-          title="My tasks"
-          rows={() => taskRows(filtered, fields, people, where)}
-        />
-        <span className="ml-auto text-xs text-gray-400">{filtered.length} shown</span>
       </div>
       )}
       <main className={`min-h-0 flex-1 ${SCROLLS_ITSELF.includes(layout) ? 'overflow-hidden' : 'overflow-auto'}`}>

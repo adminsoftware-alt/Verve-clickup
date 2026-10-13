@@ -38,14 +38,22 @@ export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
   const loadSettings = useCallback(() => { if (workspace) sheetApi.settings(workspace.id).then(setSettings).catch(() => undefined); }, [workspace]);
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
-  const tabs = [
-    // An admin is not filling in a timesheet of their own; the question they come here with is
-    // whose hours are missing. The page still answers at /timesheets if they want theirs.
-    { key: 'mine', label: 'My timesheet', to: '/timesheets', show: !isAdmin },
-    { key: 'all', label: 'All timesheets', to: '/timesheets/all', show: isAdmin || led.length > 0 },
-    { key: 'approvals', label: 'Approvals', to: '/timesheets/approvals', show: isAdmin || !!settings?.approvals_enabled },
-  ];
-  const shown = tabs.filter((t) => t.show);
+  // One page, called the same thing for everybody.
+  //
+  // There were three tabs sitting under a heading that already said "Timesheets", so the word
+  // appeared twice before any hours did. Approvals has gone with them: the firm has admins and
+  // employees and nobody in between, so there was no longer anyone for a timesheet to be approved
+  // *by* -- see LEAVE_APPROVALS_ENABLED and the two-tier roles. An admin who wants somebody's
+  // hours opens them from that person in Teams & People, which is where their name already is.
+  //
+  // Every route still answers, and the tab strip is one flag away if the firm ever wants it back.
+  const shown = FEATURES.timesheetTabs
+    ? [
+      { key: 'mine', label: 'My timesheet', to: '/timesheets', show: !isAdmin },
+      { key: 'all', label: 'All timesheets', to: '/timesheets/all', show: isAdmin || led.length > 0 },
+      { key: 'approvals', label: 'Approvals', to: '/timesheets/approvals', show: isAdmin || !!settings?.approvals_enabled },
+    ].filter((t) => t.show)
+    : [];
   const active = tab === 'person' ? 'all' : tab;
 
   return (
@@ -54,7 +62,7 @@ export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
           it was 58px wider than a 390px screen, which put Settings off the right edge where
           nothing could reach it. */}
       <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-gray-200 bg-white px-4 sm:gap-x-6 sm:px-6">
-        <span className="flex items-center gap-2 py-3 text-[15px] text-gray-800"><Clock size={17} /> Timesheets</span>
+        <span className="flex items-center gap-2 py-3 text-[15px] text-gray-800"><Clock size={17} /> Timesheet</span>
         {/* One tab is not a choice, and next to the heading it reads as the same word twice. */}
         {shown.length > 1 && (
           <>
@@ -181,7 +189,7 @@ const SheetPage: React.FC = () => {
     (own || !v.mineOnly) && (v.key === 'timesheet' || FEATURES.timesheetExtraViews)
   ));
   const deleteRow = async (row: SheetRow) => {
-    if (row.total_seconds && !await ask.confirm({ danger: true, title: `Delete all ${hours(row.total_seconds)} tracked on “${row.task.name}” this week?` })) return;
+    if (row.total_seconds && !await ask.confirm({ danger: true, title: `Remove “${row.task.name}” from this week's timesheet? The ${hours(row.total_seconds)} tracked on it this week is deleted; the task itself stays.` })) return;
     run(() => sheetApi.deleteRow(workspace!.id, { user_id: whose, task_id: row.task.id, start: sheet.period_start }));
   };
 

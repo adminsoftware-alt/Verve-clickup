@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { FileSpreadsheet, LayoutGrid, List as ListIcon, Mail, Network, Plus, Search, Shapes, Shield, UserPlus, Users, X } from 'lucide-react';
+import { FileSpreadsheet, LayoutGrid, List as ListIcon, Mail, Network, Plus, Search, Shapes, UserPlus, Users, X } from 'lucide-react';
 import { ImportPeopleDialog } from './AdminDialogs';
 import { useIsManager, useMe, useWork } from '../WorkContext';
 import type { Role } from '../api';
@@ -9,11 +9,12 @@ import { peopleApi, personName, type Person, type TeamFull } from './peopleApi';
 import { AddPersonDialog, InviteDialog, PersonPanel, ROLE_LABEL } from './PersonDialogs';
 import { FEATURES } from '../../config/features';
 
-interface Hub {
+export interface Hub {
   ws: string; people: Person[]; teams: TeamFull[]; me: string; isAdmin: boolean; roles: Role[];
   reload: () => Promise<void>; openPerson: (id: string) => void;
 }
-const HubContext = createContext<Hub | null>(null);
+/** Exported so Admin can stand on its own page and still use the sections written for the hub. */
+export const HubContext = createContext<Hub | null>(null);
 export const useHub = () => {
   const hub = useContext(HubContext);
   if (!hub) throw new Error('useHub outside the Teams Hub');
@@ -78,7 +79,10 @@ export const TeamsHub: React.FC = () => {
           <NavLink to="/people" end className={nav}><Users size={15} /> All people</NavLink>
           <NavLink to="/people/teams" end className={nav}><LayoutGrid size={15} /> All teams</NavLink>
           <NavLink to="/people/org" className={nav}><Network size={15} /> Org chart</NavLink>
-          {isAdmin && <NavLink to="/people/admin" className={nav}><Shield size={15} /> Admin</NavLink>}
+          {/* Admin used to be the fourth row here, under a heading that says "Teams". Adding a
+              person, what the workspace costs to run and the audit log are not teams work, and
+              putting them behind a Teams tab meant an admin looking for them went through a page
+              about something else. It is its own entry in the sidebar now, below this one. */}
           {/* Task types is a workspace setting, not a page about people. It still answers at
               /people/task-types, and the manage entry inside a task'"'"'s Type field still opens it. */}
           {FEATURES.taskTypesPage && <NavLink to="/people/task-types" className={nav}><Shapes size={15} /> Task types</NavLink>}

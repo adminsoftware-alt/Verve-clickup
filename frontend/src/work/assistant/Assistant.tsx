@@ -74,10 +74,13 @@ type Plan =
  * Only for tasks a person makes here. Subtasks inherit their parent's plan, and anything the
  * system raises -- a template, a recurrence, an import -- has nobody to ask.
  */
-const NEEDED = ['assignees', 'start_date', 'due_date', 'priority', 'time_estimate_seconds'] as const;
+const NEEDED = ['name', 'assignees', 'start_date', 'due_date', 'priority', 'time_estimate_seconds'] as const;
 type Needed = typeof NEEDED[number];
 
 const WHAT_IT_WANTS: Record<Needed, string> = {
+  // A sentence can say every detail and still not say what the work is -- "make me the assignee,
+  // start today, due tomorrow, two hours". That is a question to ask, not a task called "".
+  name: 'a name',
   assignees: 'who it is for',
   start_date: 'a start date',
   due_date: 'a due date',
@@ -88,6 +91,7 @@ const WHAT_IT_WANTS: Record<Needed, string> = {
 /** The required fields a parsed task is still missing, once the shared answers are applied. */
 function stillMissing(task: ParsedCommand, filled: Filled): Needed[] {
   const has: Record<Needed, boolean> = {
+    name: !!(task.name.trim() || filled.name.trim()),
     assignees: task.assignees.length > 0 || filled.assignees.length > 0,
     start_date: !!(task.start_date ?? filled.start_date),
     due_date: !!(task.due_date ?? filled.due_date),
@@ -99,6 +103,8 @@ function stillMissing(task: ParsedCommand, filled: Filled): Needed[] {
 
 /** The answers given in the panel, applied to every task that did not say for itself. */
 interface Filled {
+  /** Only for a task whose sentence gave no name; one that did keeps its own. */
+  name: string;
   assignees: string[];
   start_date: string | null;
   due_date: string | null;
@@ -106,12 +112,13 @@ interface Filled {
   time_estimate_seconds: number | null;
 }
 const NOTHING_FILLED: Filled = {
-  assignees: [], start_date: null, due_date: null, priority: null, time_estimate_seconds: null,
+  name: '', assignees: [], start_date: null, due_date: null, priority: null, time_estimate_seconds: null,
 };
 
 /** A task as it will be created: what was said, with the panel's answers filling the gaps. */
 const complete = (task: ParsedCommand, filled: Filled): ParsedCommand => ({
   ...task,
+  name: task.name.trim() || filled.name.trim(),
   assignees: task.assignees.length ? task.assignees : filled.assignees,
   start_date: task.start_date ?? filled.start_date,
   due_date: task.due_date ?? filled.due_date,
@@ -124,12 +131,26 @@ interface Heard { spoken: string; english: string }
 
 const CHANGE_LABEL: Record<Change['field'], string> = {
   due_date: 'Due', start_date: 'Starts', priority: 'Priority',
-  name: 'Name', estimate: 'Estimate', assignees: 'Assigned to', list: 'Move to',
+  name: 'Name', estimate: 'Estimate', assignees: 'Assigned to', list: 'Move to', status: 'Status',
 };
+
+/** Which of a List's statuses a spoken one means: its own name first, then what it is for. */
+function pickStatus(said: string, statuses: { id: string; name: string; group: string }[]) {
+  const flat = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, '');
+  const exact = statuses.find((s) => flat(s.name) === flat(said));
+  if (exact) return exact;
+  const group = /^(?:to\s*-?\s*do|todo|open|not started)$/i.test(said) ? 'not_started'
+    : /^(?:done|complete|completed)$/i.test(said) ? 'done'
+    : /^closed$/i.test(said) ? 'closed'
+    : /^(?:in\s*-?\s*progress|doing|started)$/i.test(said) ? 'active'
+    : null;
+  return (group && statuses.find((s) => s.group === group)) ?? statuses.find((s) => flat(s.name).includes(flat(said))) ?? null;
+}
 
 /** One change, in the words it will take effect in. */
 function describeChange(c: Change, members: { user: { id: string; display_name: string | null; email: string } }[], moveTo: Where | null): string {
   if (c.field === 'list') return moveTo ? moveTo.path : `“${c.said}” — pick one below`;
+  if (c.field === 'status') return c.said.replace(/^./, (x) => x.toUpperCase());
   if (c.field === 'due_date' || c.field === 'start_date') return c.value ? compactDate(c.value) : 'cleared';
   if (c.field === 'priority') return c.value ? PRIORITIES[c.value].label : 'cleared';
   if (c.field === 'estimate') return c.value ? formatDuration(c.value) : 'cleared';
@@ -437,6 +458,9 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     // that stops here and the panel asks for the rest, rather than making a task that is wrong
     // the moment it exists and leaving somebody to find the red and mend it.
     if (named.some((t) => stillMissing(t, NOTHING_FILLED).length > 0)) return false;
+    // Nor when any words went unread: spoken aloud, a misheard clause is the likeliest thing to
+    // be wrong, and the panel can show it before it becomes a task.
+    if (named.some((t) => t.confidence === 'low')) return false;
 
     setThinking(true);
     setError(null);
@@ -528,6 +552,13 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           else if (c.field === 'name') edit.name = c.value;
           else if (c.field === 'estimate') edit.time_estimate_seconds = c.value;
           else if (c.field === 'assignees') edit.assignees = c.value;
+          else if (c.field === 'status') {
+            // Every List names its own statuses, so the spoken one is matched against this task's.
+            const set = await workApi.statuses('list', plan.task.list_id);
+            const st = pickStatus(c.said, set.statuses);
+            if (!st) throw new Error(`“${plan.task.name}” has no status called “${c.said}”. Its statuses are ${set.statuses.map((s) => s.name).join(', ')}.`);
+            edit.status_id = st.id;
+          }
         }
         if (Object.keys(edit).length) await workApi.updateTask(plan.task.id, edit);
         if (plan.moveTo) await workApi.bulkEdit({ task_ids: [plan.task.id], list_id: plan.moveTo.id });
@@ -786,6 +817,16 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                       <p className="text-[11px] font-medium text-amber-900">
                         Before this can be created, it needs {needs.map((n) => WHAT_IT_WANTS[n]).join(', ')}.
                       </p>
+                      {needs.includes('name') && (
+                        <label className="flex items-center gap-2 text-[11px] text-gray-600">
+                          <span className="w-16 shrink-0">Name</span>
+                          <input
+                            aria-label="Task name" value={filled.name} placeholder="What is the work?"
+                            onChange={(e) => setFilled({ ...filled, name: e.target.value })}
+                            className="min-w-0 flex-1 rounded-lg border border-gray-300 px-2 py-1 text-xs"
+                          />
+                        </label>
+                      )}
                       {needs.includes('assignees') && (
                         <label className="flex items-center gap-2 text-[11px] text-gray-600">
                           <span className="w-16 shrink-0">Who</span>

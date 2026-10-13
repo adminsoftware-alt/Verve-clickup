@@ -6,7 +6,7 @@ import { FEATURES } from '../../config/features';
 import { Avatar } from '../ui';
 import { Select } from '../Select';
 import { STATUS_CLASS, STATUS_LABEL, isoDay, sheetApi, type AllTimesheets as Data, type SubmissionStatus } from './api';
-import { WeekNav, dayLabel, hours } from './pieces';
+import { WeekNav, dayLabel, hours, isWeekend, WEEKEND } from './pieces';
 
 type Person = Data['people'][number];
 
@@ -39,6 +39,7 @@ const APPROVAL_STATES: SubmissionStatus[] = ['pending', 'approved', 'changes_nee
 export const AllTimesheets: React.FC = () => {
   const { workspace, teams } = useWork();
   const navigate = useNavigate();
+  const today = isoDay(new Date());
   const [params, setParams] = useSearchParams();
   const day = params.get('week') || isoDay(new Date());
   const [teamId, setTeamId] = useState('');
@@ -136,11 +137,13 @@ export const AllTimesheets: React.FC = () => {
               </button>
             </p>
           )}
-          <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200 bg-white">
+          <div className="ui-card mt-4 overflow-x-auto">
             <div className="min-w-[980px]" role="table" aria-label="All timesheets">
               <div className="grid border-b border-gray-200 text-xs text-gray-500" style={{ gridTemplateColumns: cols }} role="row">
                 <div className="px-4 py-3 text-sm text-gray-700">Person</div>
-                {data.days.map((d) => <div key={d} className="border-l border-gray-100 px-2.5 py-3">{dayLabel(d)}</div>)}
+                {data.days.map((d) => (
+                  <div key={d} className={`border-l border-gray-100 px-2.5 py-3 ${d === today ? 'bg-brand-50/50 font-medium text-brand-700' : isWeekend(d) ? `${WEEKEND} text-gray-400` : ''}`}>{dayLabel(d)}</div>
+                ))}
                 <div className="border-l border-gray-100 px-2.5 py-3">Total</div>
               </div>
               {people.length === 0 && (
@@ -165,7 +168,7 @@ export const AllTimesheets: React.FC = () => {
                     const cap = p.capacity_per_day[i];
                     const over = sec > cap;
                     return (
-                      <div key={i} className={`border-l border-gray-100 px-2.5 py-2.5 ${cap === 0 ? 'bg-gray-50' : ''}`}
+                      <div key={i} className={`border-l border-gray-100 px-2.5 py-2.5 ${isWeekend(data.days[i]) ? WEEKEND : cap === 0 ? 'bg-gray-50' : ''}`}
                         title={`Capacity ${hours(cap)} · Tracked ${hours(sec)} · Billable ${hours(p.billable_per_day[i])} · ${over ? `Over by ${hours(sec - cap)}` : `Remaining ${hours(cap - sec)}`}`}>
                         <div className={`text-sm ${sec ? 'text-gray-900' : 'text-gray-300'}`}>{sec ? hours(sec) : '—'}</div>
                         <div className="mt-1 h-1 overflow-hidden rounded-full bg-gray-200"><div className={`h-full ${over ? 'bg-red-500' : 'bg-brand-500'}`} style={{ width: `${cap ? Math.min(100, (100 * sec) / cap) : sec ? 100 : 0}%` }} /></div>

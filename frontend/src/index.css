@@ -520,13 +520,98 @@ select:not([multiple]):not([size]) {
 .org-chart > ul > li::before, .org-chart > ul > li::after { display: none; }
 
 /* Printing a Dashboard (Print / save as PDF): only the Dashboard, every card, no app chrome. */
+/* Admin: the options pop up, the chosen one grows into its window, and the page behind fades. */
+@keyframes admin-pop { from { opacity: 0; transform: translateY(8px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes admin-grow { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
+@keyframes admin-fade { from { opacity: 0; } to { opacity: 1; } }
+.admin-pop { animation: admin-pop 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.admin-grow { animation: admin-grow 220ms cubic-bezier(0.2, 0.8, 0.2, 1); transform-origin: center; }
+.admin-fade { animation: admin-fade 180ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .admin-pop, .admin-grow, .admin-fade { animation: none; } }
+
+/* Shown only on paper: a Dashboard's title and when it was printed. */
+.print-only { display: none; }
+
 @media print {
   .no-print { display: none !important; }
+  .print-only { display: block !important; }
   html, body, #root, #root * { overflow: visible !important; }
   #root, #root > *, .dashboard-print, .dashboard-print main { height: auto !important; min-height: 0 !important; }
-  .dashboard-print { background: #fff !important; }
-  .dashboard-print section[data-card-id] { break-inside: avoid; border-color: #d1d5db !important; }
+  /* A document, not a screenshot of the app: white page, the content's own padding only, and
+     nothing that floats over the page -- the bottom bar, the assistant, toasts. */
+  body, #root, .dashboard-print { background: #fff !important; }
+  .dashboard-print main { padding: 0 !important; }
+  .fixed { display: none !important; }
+  .dashboard-print section, .dashboard-print section[data-card-id] { break-inside: avoid; box-shadow: none !important; }
+  .dashboard-print section[data-card-id] { border-color: #d1d5db !important; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   @page { size: A4 landscape; margin: 12mm; }
+}
+
+/* --- the look: one surface, one way of opening ---------------------------------------------
+   The calm, even finish ClickUp and Jira share comes from a few things done the same way
+   everywhere rather than from any one screen: white surfaces on a cool grey page, a hairline
+   border with the faintest shadow, numbers that line up, and anything that opens arriving
+   rather than appearing. These rules state that once, so every screen picks it up. */
+:root {
+  --ui-page: #F6F7F9;
+  --ui-line: #E6E8EC;
+  --ui-line-strong: #D5D9E0;
+  --ui-ink: #1F2328;
+  --ui-ink-soft: #5B6472;
+  --ui-shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --ui-shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.03);
+  --ui-shadow-pop: 0 12px 32px -8px rgba(16, 24, 40, 0.18), 0 4px 8px -4px rgba(16, 24, 40, 0.06);
+  --ui-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@layer base {
+  body { background-color: var(--ui-page); }
+  /* Figures in tables, tiles and counters line up digit under digit. */
+  table, [role="table"], .tabular { font-variant-numeric: tabular-nums; }
+  /* One focus ring for every control, shown to the keyboard and never to the mouse. */
+  button:focus-visible, a:focus-visible, [role="button"]:focus-visible, [role="tab"]:focus-visible, [role="menuitem"]:focus-visible {
+    outline: 2px solid #0F766E;
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+/* A card: the one surface every panel, tile and chart sits on. */
+.ui-card {
+  background: #fff;
+  border: 1px solid var(--ui-line);
+  border-radius: 14px;
+  box-shadow: var(--ui-shadow-xs);
+}
+/* A card you can click lifts a little under the pointer. */
+.ui-card-hover { transition: box-shadow 160ms var(--ui-ease), border-color 160ms var(--ui-ease), transform 160ms var(--ui-ease); }
+.ui-card-hover:hover { border-color: var(--ui-line-strong); box-shadow: var(--ui-shadow-sm); transform: translateY(-1px); }
+/* A small heading over a group of cards. */
+.ui-eyebrow { font-size: 0.6875rem; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: #6B7280; }
+
+/* Controls on a card stay out of the way until the card has your attention. On a touch screen
+   there is no hover, so they stay on show. */
+@media (hover: hover) {
+  .reveal-on-hover { opacity: 0; transition: opacity 140ms ease; }
+  .group:hover .reveal-on-hover, .group:focus-within .reveal-on-hover, .reveal-on-hover[aria-expanded="true"],
+  .reveal-on-hover:has([aria-expanded="true"]) { opacity: 1; }
+}
+
+/* Opening. A menu drops from where it was clicked, a dialog rises into place, the page behind
+   dims (and softens, so the eye goes to what opened), and a side panel slides in from the right. */
+@keyframes ui-menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes ui-dialog-in { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes ui-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ui-slide-in { from { opacity: 0.4; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+[role="menu"], [role="listbox"]:not(select) { animation: ui-menu-in 130ms var(--ui-ease); transform-origin: top; }
+[role="menu"] { box-shadow: var(--ui-shadow-pop) !important; border-color: var(--ui-line) !important; }
+.fixed.inset-0[class*="bg-black/"] { animation: ui-fade-in 160ms ease-out; backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+.fixed.inset-0[class*="bg-black/"] > [role="dialog"] { animation: ui-dialog-in 200ms var(--ui-ease); box-shadow: var(--ui-shadow-pop); }
+.ui-slide-in { animation: ui-slide-in 220ms var(--ui-ease); }
+@media (prefers-reduced-motion: reduce) {
+  [role="menu"], [role="listbox"], .fixed.inset-0[class*="bg-black/"], .fixed.inset-0[class*="bg-black/"] > [role="dialog"], .ui-slide-in { animation: none !important; }
+  .ui-card-hover:hover { transform: none; }
 }
 
 /* --- touch, and the shapes a small screen needs --------------------------------------------- */

@@ -1,7 +1,7 @@
 """Dashboards, cards, sharing and scheduled email reports."""
 
 import uuid
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -14,7 +14,7 @@ from app.db.session import get_db
 from app.schemas import dashboards as d
 from app.schemas import work as s
 from app.services.work.access import Access
-from app.services.work.dashboards import reports, service
+from app.services.work.dashboards import insights, people_boards, reports, service, standard
 from app.services.work.dashboards.access import OpenedDashboard, open_dashboard
 from app.services.work.dashboards.engine import Engine
 from app.services.work.errors import Invalid
@@ -36,7 +36,8 @@ def _open(db: Session, user: User, dashboard_id: uuid.UUID, minimum: PermissionL
 
 
 def _engine(db: Session, opened: OpenedDashboard, tz: str) -> Engine:
-    return Engine(db, opened.access, _zone(tz), d.Filters.model_validate(opened.dashboard.filters or {}))
+    return Engine(db, opened.access, _zone(tz), d.Filters.model_validate(opened.dashboard.filters or {}),
+                  scope=standard.scope_of(opened.dashboard))
 
 
 # --- dashboards ----------------------------------------------------------------------
@@ -80,6 +81,37 @@ def update_dashboard(
     service.update_dashboard(db, opened, data)
     db.commit()
     return service.dashboard_out(db, opened)
+
+
+@router.get("/workspaces/{workspace_id}/dashboards/people", response_model=List[Dict[str, Any]])
+def people_with_boards(workspace_id: uuid.UUID, tz: str = Tz, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Whose own Dashboards the caller may open (admins: everyone; leads: their Teams), with their figures."""
+    return people_boards.people(db, Access.for_workspace(db, user.id, workspace_id), tz)
+
+
+@router.get("/workspaces/{workspace_id}/people/{user_id}/dashboard", response_model=d.DashboardOut)
+def person_board(workspace_id: uuid.UUID, user_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Someone's own Dashboard as they see it, read-only; made now if they have never opened the app."""
+    opened = people_boards.board_of(db, Access.for_workspace(db, user.id, workspace_id), user_id)
+    out = service.dashboard_out(db, opened)
+    db.commit()  # keeps a board made just now
+    return out
+
+
+@router.post("/dashboards/{dashboard_id}/reset-filters", response_model=d.DashboardOut)
+def reset_filters(dashboard_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Clear the board's filters and every card's added ones, back to how each card was built."""
+    opened = _open(db, user, dashboard_id)
+    service.reset_filters(db, opened)
+    db.commit()
+    return service.dashboard_out(db, opened)
+
+
+@router.get("/dashboards/{dashboard_id}/insights", response_model=Dict[str, Any])
+def dashboard_insights(dashboard_id: uuid.UUID, tz: str = Tz, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """What needs attention on this board: late, due today, stalled, urgent and soon, missing details."""
+    opened = _open(db, user, dashboard_id)
+    return insights.compute(_engine(db, opened, tz), service.cards_of(db, dashboard_id))
 
 
 @router.delete("/dashboards/{dashboard_id}", status_code=status.HTTP_204_NO_CONTENT)

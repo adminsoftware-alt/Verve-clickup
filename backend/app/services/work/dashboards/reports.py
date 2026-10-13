@@ -32,6 +32,7 @@ from app.schemas import dashboards as d
 from app.schemas import work as s
 from app.services.work.dashboards.access import OpenedDashboard, at_least, open_dashboard
 from app.services.work.dashboards.engine import Engine
+from app.services.work.dashboards import standard
 from app.services.work.dashboards.service import cards_of
 from app.services.work.errors import Forbidden, Invalid, NotFound, WorkError
 
@@ -310,7 +311,8 @@ def render_card(card, data: d.CardData) -> str:
 
 def render_report(db: Session, opened: OpenedDashboard, tz: ZoneInfo, now: Optional[datetime] = None) -> str:
     dash = opened.dashboard
-    engine = Engine(db, opened.access, tz, d.Filters.model_validate(dash.filters or {}), now=now)
+    engine = Engine(db, opened.access, tz, d.Filters.model_validate(dash.filters or {}), now=now,
+                    scope=standard.scope_of(dash))
     moment = engine.now.astimezone(tz)
     blocks = []
     for card in cards_of(db, dash.id):
@@ -434,7 +436,6 @@ _stop = threading.Event()
 
 
 _compliance_hour: Optional[str] = None
-_escalation_hour: Optional[str] = None
 
 
 # Which outbound email jobs run, and why the list is shorter than the module.
@@ -505,7 +506,7 @@ def _loop() -> None:
                     db.commit()
         except Exception:
             log.exception("Running due-date automations failed")
-        global _compliance_hour, _escalation_hour
+        global _compliance_hour
         hour = datetime.now(timezone.utc).strftime("%Y-%m-%d %H")
         if hour != _compliance_hour:  # compliance tasks: once an hour is plenty
             _compliance_hour = hour
@@ -546,19 +547,6 @@ def _loop() -> None:
                     db.commit()
         except Exception:
             log.exception("Completing finished sprints failed")
-        # Chasing an undecided leave request, once an hour. Nothing creates leave requests while the
-        # workflow is off, so this would find nothing anyway -- but a timer that runs looking for a
-        # switched-off feature is a thing the next person has to work out, so it is explicit.
-        if settings.LEAVE_APPROVALS_ENABLED and hour != _escalation_hour:
-            _escalation_hour = hour
-            try:
-                from app.services.work import leave as leave_service
-
-                with new_session() as db:
-                    if leave_service.run_escalations(db):
-                        db.commit()
-            except Exception:
-                log.exception("Escalating undecided leave failed")
         try:
             from app.services.work import calendar_sync
 

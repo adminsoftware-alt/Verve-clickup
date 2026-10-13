@@ -90,7 +90,7 @@ def people_load(
                     if day in inside:
                         row[i] += by_day.get(day, 0) // share
 
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
 
     capacity = daily_capacity(db, access.workspace_id, wanted, window)
     fallback = [CAPACITY_SECONDS if d.weekday() < 5 else 0 for d in window]

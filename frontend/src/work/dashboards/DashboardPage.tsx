@@ -3,7 +3,7 @@ import { FEATURES } from '../../config/features';
 import { FavoriteStar } from '../Favorites';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  BarChart3, ChevronRight, Copy, Download, Expand, FileSpreadsheet, GripVertical, ImageDown, LayoutDashboard, Mail, MoreHorizontal, Pencil, PieChart as PieChartIcon, Plus, Printer, RefreshCw,
+  BarChart3, ChevronRight, Copy, Download, Expand, FileSpreadsheet, FilterX, GripVertical, ImageDown, LayoutDashboard, Mail, MoreHorizontal, Pencil, PieChart as PieChartIcon, Plus, Printer, RefreshCw,
   RotateCcw, Share2, Trash2, Undo2, Users,
 } from 'lucide-react';
 import { useWork } from '../WorkContext';
@@ -11,11 +11,12 @@ import { TaskPanel } from '../TaskPanel';
 import { Menu, NameDialog } from '../ui';
 import { Check, ChevronDown } from 'lucide-react';
 import { useNow } from '../RunningTimer';
-import { dashApi, type Card, type CardData, type Dashboard, type Filters, type Period } from './api';
+import { dashApi, type Card, type CardData, type Dashboard, type Filters, type Insights, type Period } from './api';
+import { InsightsPanel } from './InsightsPanel';
 import { CardBody } from './cards';
 import { PeriodBar, PeriodMenu, StatCard, followsPeriod, periodLabel } from './StatRow';
 import { ANY_TIME, CardFilterMenu } from './CardFilters';
-import { WorkloadPanel } from './WorkloadPanel';
+import { WorkloadPanel, workloadFinding } from './WorkloadPanel';
 import { CardEditor } from './CardEditor';
 import { DrillDialog, Modal, ReportsDialog, RepointDialog, ShareDashboardDialog, useLeadership } from './dialogs';
 import { FiltersEditor, useFilterSummary } from './pickers';
@@ -33,19 +34,21 @@ const layoutOf = (cards: Card[]): Layout => cards.map((c) => ({ id: c.id, width:
 /** What "no period" means on this card, which depends on whether finished work counts. */
 const anyLabel = (card: Card) => (card.config.include_closed ? 'All work' : 'All open work');
 
-/** "Total 24 tasks across all priorities" -- what the chart adds up to, said in words. */
-function chartSubtitle(card: Card, row: CardData | undefined): string {
-  const segments = (row?.data as { segments?: { value: number }[] } | undefined)?.segments;
-  if (!row || !segments) return 'Loading…';
-  const total = segments.reduce((n, sg) => n + sg.value, 0);
-  const unit = card.config.measure === 'tasks' ? `task${total === 1 ? '' : 's'}` : 'hours';
-  const by = card.config.group_by === 'priority' ? 'priorities'
-    : card.config.group_by === 'assignee' ? 'people'
-    : card.config.group_by === 'status' || card.config.group_by === 'status_group' ? 'statuses'
-    : card.config.group_by === 'list' ? 'Lists'
-    : card.config.group_by === 'tag' ? 'tags'
-    : 'groups';
-  return `Total ${total.toLocaleString()} ${unit} across all ${by}`;
+/** A filter with its empty fields dropped, so two that mean the same compare equal. */
+const plainFilters = (f: Filters | null | undefined) =>
+  JSON.stringify(Object.fromEntries(Object.entries(f ?? {}).filter(([, v]) => v !== null && v !== undefined).sort(([a], [b]) => a.localeCompare(b))));
+
+/**
+ * Whether a card is narrowed beyond how it was built -- the same test the server's
+ * reset-filters applies, including leaving a stat tile's period-bar window alone.
+ */
+function narrowed(card: Card): boolean {
+  const base: Filters = { ...(card.config.base_filters ?? card.config.filters) };
+  if (card.type === 'calculation') {
+    if (card.config.filters.due === 'period') base.due = 'period';
+    if (card.config.filters.done === 'period') base.done = 'period';
+  }
+  return plainFilters(base) !== plainFilters(card.config.filters);
 }
 
 function ago(ms: number): string {
@@ -135,17 +138,21 @@ export const DashboardPage: React.FC<{
   heading?: string | false;
   /** Shown above the cards, on the Dashboard the app opens on. */
   intro?: React.ReactNode;
-}> = ({ dashboardId, embedded, heading, intro }) => {
+  /** Opened from People: the bar above already says whose board this is and that it is view only. */
+  viewing?: boolean;
+}> = ({ dashboardId, embedded, heading, intro, viewing }) => {
   const params = useParams();
   const id = dashboardId ?? params.id ?? '';
   const navigate = useNavigate();
   const { refresh: refreshTree } = useWork();
-  const { isGuest } = useLeadership();
+  const { isGuest, isAdmin, led } = useLeadership();
   const filterSummary = useFilterSummary();
 
   const [dash, setDash] = useState<Dashboard | null>(null);
   const [data, setData] = useState<Record<string, CardData>>({});
   const [loadedAt, setLoadedAt] = useState(0);
+  const [insights, setInsights] = useState<Insights | null>(null);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [undo, setUndo] = useState<Layout[]>([]);
@@ -169,6 +176,11 @@ export const DashboardPage: React.FC<{
 
   const loadData = useCallback(async () => {
     const at = edits.current;
+    // The highlights are read beside the cards, from the same tasks, so the two never disagree
+    // for longer than a refresh. A failure there costs the highlights, not the cards.
+    dashApi.insights(id)
+      .then((x) => { setInsights(x); setInsightsError(null); })
+      .catch((e) => setInsightsError((e as Error).message));
     try {
       const rows = await dashApi.data(id);
       setData((prev) => {
@@ -304,10 +316,41 @@ export const DashboardPage: React.FC<{
       ] : []),
       ...(hasRows ? [{ label: 'Export as CSV', icon: <FileSpreadsheet size={14} />, onClick: () => exportCard(card, 'csv') }] : []),
       ...(isChart && hasRows ? [{ label: 'Download image (PNG)', icon: <ImageDown size={14} />, onClick: () => exportCard(card, 'png') }] : []),
-      ...(canEdit ? [{ label: 'Delete card', icon: <Trash2 size={14} />, danger: true, onClick: () => removeCard(card) }] : []),
+      // Deleting a card is admin-only (the server says the same); everyone else doesn't see it.
+      ...(canEdit && isAdmin ? [{ label: 'Delete card', icon: <Trash2 size={14} />, danger: true, onClick: () => removeCard(card) }] : []),
     ];
   };
   const saveFilters = (filters: Filters) => act(async () => { setDash(await dashApi.update(id, { filters })); setDialog(null); await loadData(); });
+
+  /** Anything narrowing the board: its own filter, or a card filtered past how it was built. */
+  const filtered = !!dash && (plainFilters(dash.filters) !== '{}' || dash.cards.some(narrowed));
+  const clearAllFilters = () => act(async () => {
+    edits.current += 1;
+    setDash(await dashApi.resetFilters(id));
+    await loadData();
+  });
+  /** Refresh starts the board over: every filter off, every card read again. */
+  const refresh = () => (canEdit && filtered ? clearAllFilters() : loadData());
+
+  /** Every card's numbers in one workbook, a sheet each -- the same rows as "Export as CSV". */
+  const downloadAll = () => act(async () => {
+    if (!dash) return;
+    const XLSX = await import('xlsx');
+    const book = XLSX.utils.book_new();
+    const used = new Set<string>();
+    for (const card of dash.cards) {
+      const rows = cardRows(card, data[card.id]);
+      if (!rows.length) continue;
+      // Sheet names: at most 31 characters, none of []:*?/\, and unique.
+      let name = card.title.replace(/[[\]:*?/\\]/g, ' ').slice(0, 28).trim() || 'Card';
+      for (let n = 2; used.has(name.toLowerCase()); n += 1) name = `${name.slice(0, 26)} ${n}`;
+      used.add(name.toLowerCase());
+      XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(rows), name);
+    }
+    if (!book.SheetNames.length) throw new Error('There is nothing on this Dashboard to download yet.');
+    const day = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(book, `${dash.name.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Dashboard'} ${day}.xlsx`);
+  });
 
   /** Change what a time card covers, from the card itself. "Custom range" opens the editor. */
   // --- the stat row -------------------------------------------------------------------------
@@ -464,8 +507,16 @@ export const DashboardPage: React.FC<{
     { label: 'Duplicate', icon: <Copy size={14} />, onClick: () => setDialog({ type: 'duplicate' }) },
     ...(canEdit ? [
       // The Edit button is off the header; arranging cards lives here instead.
-      ...(FEATURES.dashboardEditButton ? [] : [{ label: 'Arrange cards', icon: <GripVertical size={14} />, onClick: () => setEditMode(true) }]),
-      ...(FEATURES.dashboardEmailReports ? [] : [{ label: 'Email reports', icon: <Mail size={14} />, onClick: () => setDialog({ type: 'reports' }) }]),
+      // "Arrange cards" is off. Every standard board is now built from one template and kept to
+      // it -- see scripts/align_standard_dashboards.py -- so dragging cards about on one of them
+      // puts it out of step with the other fifteen until something aligns it back. The edit mode
+      // itself is untouched and returns with FEATURES.dashboardEditButton.
+      ...(FEATURES.dashboardArrangeCards && !FEATURES.dashboardEditButton
+        ? [{ label: 'Arrange cards', icon: <GripVertical size={14} />, onClick: () => setEditMode(true) }] : []),
+      // The test was the wrong way round: with dashboardEmailReports off, the header button at the
+      // top of this file hid itself and this menu row appeared in its place, so the scheduled
+      // reports we turned off were still one click away. Both now read the flag the same way.
+      ...(FEATURES.dashboardEmailReports ? [{ label: 'Email reports', icon: <Mail size={14} />, onClick: () => setDialog({ type: 'reports' }) }] : []),
       { label: 'Rename', icon: <Pencil size={14} />, onClick: () => setDialog({ type: 'rename' }) },
       { label: 'Change locations', icon: <LayoutDashboard size={14} />, onClick: () => setDialog({ type: 'repoint' }) },
       { label: dash.auto_refresh ? 'Turn off auto refresh' : 'Turn on auto refresh (30 min)', icon: <RefreshCw size={14} />, onClick: () => act(async () => setDash(await dashApi.update(id, { auto_refresh: !dash.auto_refresh }))) },
@@ -476,9 +527,18 @@ export const DashboardPage: React.FC<{
   ];
 
   return (
-    <div className="dashboard-print flex h-full min-h-0 flex-col bg-gray-50/70">
-      <header className="border-b border-gray-200 bg-white px-6 py-3">
-        <nav className="flex items-center gap-1.5 text-sm text-gray-500">
+    <div className="dashboard-print flex h-full min-h-0 flex-col">
+      {/* On paper the page says what it is and when it was taken, in place of the app around it. */}
+      <div className="print-only mb-3 border-b border-gray-300 pb-2">
+        <p className="text-lg font-semibold text-gray-900">{heading || dash.name}</p>
+        <p className="text-xs text-gray-500">
+          {dash.team ? `${dash.team.name} · ` : dash.owner ? `${dash.owner.display_name || dash.owner.email} · ` : ''}
+          Printed {new Date().toLocaleString(undefined, { day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+        </p>
+      </div>
+      {(embedded || heading !== false) && (
+      <header className="no-print border-b border-gray-200 bg-white px-6 py-3">
+        <nav className="flex flex-wrap items-center gap-1.5 text-sm text-gray-500">
           {embedded ? (
             <h2 className="truncate text-base font-semibold text-gray-900">{dash.name}</h2>
           ) : heading === false ? null : heading ? (
@@ -495,18 +555,62 @@ export const DashboardPage: React.FC<{
             <>
               <Link to="/dashboards" className="no-print text-gray-500 no-underline hover:text-gray-800">Dashboards</Link>
               <ChevronRight size={14} className="no-print text-gray-300" />
-              <h1 className="truncate text-lg font-semibold text-gray-900">{dash.name}</h1>
+              <h1 className="min-w-0 truncate text-lg font-semibold text-gray-900">{dash.name}</h1>
               <FavoriteStar kind="dashboard" id={id} size={14} />
             </>
           )}
           {dash.team && <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700"><Users size={12} /> {dash.team.name}</span>}
-          {dash.owner && dash.relation !== 'mine' && <span className="ml-1 text-xs text-gray-400">by {dash.owner.display_name || dash.owner.email}</span>}
-          <div className="no-print ml-auto flex items-center gap-1.5">
-            <span className="mr-1 text-xs text-gray-400" title={dash.auto_refresh ? 'Refreshes every 30 minutes' : 'Auto refresh is off'}>
-              Refreshed {loadedAt ? ago(now - loadedAt) : '…'}
-            </span>
-            <button type="button" title="Refresh" onClick={loadData} className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><RefreshCw size={15} /></button>
-            <button type="button" title="Print or save as PDF" onClick={() => { setEditMode(false); setTimeout(() => window.print(), 50); }} className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><Printer size={15} /></button>
+          {dash.owner && dash.relation !== 'mine' && <span className="ml-1 hidden shrink-0 whitespace-nowrap text-xs text-gray-400 sm:inline">by {dash.owner.display_name || dash.owner.email}</span>}
+        </nav>
+      </header>
+      )}
+
+      <main className="min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-8 sm:py-6">
+        {/* The quote first, where it is the first thing read; it is not dashboard content, so
+            it stays off the printout. */}
+        {intro && <div className="no-print">{intro}</div>}
+
+        {/* Everything that acts on the whole board, in one card: what it is filtered by on the
+            left, where filters are read; what you can do with it on the right. */}
+        <div className="ui-card no-print mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs">
+            {/* Someone who cannot change the board gets no filter controls, so the strip says
+                when it was read instead of leaving its left half empty. */}
+            {!canEdit && (
+              <span className="px-1 text-gray-500" title={dash.auto_refresh ? 'Refreshes every 30 minutes' : 'Auto refresh is off'}>
+                Refreshed {loadedAt ? ago(now - loadedAt) : '…'}
+              </span>
+            )}
+            {canEdit && <>
+            {/* One filter over the whole board, in the same two-step panel the cards use. It is
+                set on the Dashboard and applied on top of whatever each card already filters by. */}
+            <CardFilterMenu
+              value={dash.filters ?? {}}
+              disabled={!canEdit}
+              triggerLabel="Filter all cards"
+              title="Filters for every card"
+              onApply={saveFilters}
+            />
+            {summary.length > 0 && (
+              <span className="text-gray-500" title="Applied to every card on this Dashboard">{summary.join(' · ')}</span>
+            )}
+            <button type="button" onClick={clearAllFilters} disabled={!filtered}
+              title={filtered ? 'Take every filter off: the board’s and each card’s' : 'No filters are on'}
+              className="flex items-center gap-1 rounded-md px-2 py-1 font-medium text-brand-700 transition-colors hover:bg-brand-50 disabled:cursor-default disabled:text-gray-400 disabled:hover:bg-transparent">
+              <FilterX size={13} /> Clear all filters
+            </button>
+            </>}
+            {!viewing && RELATION_NOTE[dash.relation] && <span className="text-gray-400">{RELATION_NOTE[dash.relation]}</span>}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {canEdit && (
+              <span className="mr-1 hidden text-xs text-gray-400 sm:inline" title={dash.auto_refresh ? 'Refreshes every 30 minutes' : 'Auto refresh is off'}>
+                Refreshed {loadedAt ? ago(now - loadedAt) : '…'}
+              </span>
+            )}
+            <button type="button" title={canEdit ? 'Refresh and clear all filters' : 'Refresh'} aria-label="Refresh" onClick={refresh} className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"><RefreshCw size={15} /></button>
+            <button type="button" title="Download every card (Excel)" aria-label="Download" onClick={downloadAll} className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"><Download size={15} /></button>
+            <button type="button" title="Print or save as PDF" aria-label="Print" onClick={() => { setEditMode(false); setTimeout(() => window.print(), 50); }} className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"><Printer size={15} /></button>
             {canEdit && (FEATURES.dashboardEditButton || editMode) && (
               <button
                 type="button"
@@ -518,50 +622,24 @@ export const DashboardPage: React.FC<{
               </button>
             )}
             {FEATURES.dashboardEmailReports && !isGuest && <button type="button" onClick={() => setDialog({ type: 'reports' })} className="flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><Mail size={14} /> Email reports</button>}
-            <button type="button" onClick={() => setDialog({ type: 'share' })} className="flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><Share2 size={14} /> Share</button>
+            {/* Sharing is an admin's decision (the server refuses anyone else). */}
+            {isAdmin && <button type="button" onClick={() => setDialog({ type: 'share' })} className="ml-1 flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-[var(--ui-shadow-xs)] transition-colors hover:border-gray-300 hover:bg-gray-50"><Share2 size={14} /> Share</button>}
             {/* Your own board is not something you rename, re-point or delete, so it carries no
-                actions menu. Dashboards opened from the Hub keep theirs -- it is the only way to
-                reach Rename, Change locations, Arrange cards and Delete. */}
+                actions menu. Dashboards opened from the Hub keep theirs. */}
             {!isGuest && heading === undefined && FEATURES.dashboardActionsMenu && (
               <Menu align="right" label="Dashboard actions" items={menu} trigger={<span className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><MoreHorizontal size={16} /></span>} />
             )}
           </div>
-        </nav>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs empty:mt-0">
-          {/* One filter over the whole board, in the same two-step panel the cards use, so
-              "urgent only" or "just my team" is one control rather than eight. It is set on the
-              Dashboard and applied on top of whatever each card already filters by. */}
-          <span className="flex items-center gap-1.5">
-            <CardFilterMenu
-              value={dash.filters ?? {}}
-              disabled={!canEdit}
-              triggerLabel="Filter all cards"
-              title="Filters for every card"
-              onApply={saveFilters}
-            />
-            {/* The chip beside it already says how many; this says which. No icon and no "Me":
-                a Dashboard filtered to yourself is the ordinary case, not news. */}
-            {summary.length > 0 && (
-              <span className="text-gray-500" title="Applied to every card on this Dashboard">
-                {summary.join(' · ')}
-              </span>
-            )}
-          </span>
-          {RELATION_NOTE[dash.relation] && <span className="text-gray-400">{RELATION_NOTE[dash.relation]}</span>}
           {editMode && (
-            <>
+            <div className="flex w-full items-center gap-2 text-xs">
               <span className="text-gray-400">Drag cards by their handle to move them; drag the corner to resize.</span>
               <button type="button" disabled={!undo.length} onClick={undoLayout} className="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40"><Undo2 size={13} /> Undo</button>
               <button type="button" onClick={() => setDialog({ type: 'card', card: null })} className="flex items-center gap-1 rounded-md bg-brand-600 px-2.5 py-1 font-medium text-white hover:bg-brand-700"><Plus size={13} /> Add card</button>
-            </>
+            </div>
           )}
         </div>
-      </header>
 
-      {error && <div className="mx-6 mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-
-      <main className="min-h-0 flex-1 overflow-auto px-6 py-5">
-        {intro}
+        {error && <div className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
         {dash.cards.length === 0 ? (
           <div className="mx-auto mt-16 max-w-md text-center">
             <LayoutDashboard size={32} className="mx-auto text-gray-300" />
@@ -582,7 +660,7 @@ export const DashboardPage: React.FC<{
                 onPick={applyRowPeriod}
                 onCustom={() => { const card = statCards.find(followsPeriod); if (card) setDialog({ type: 'card', card }); }}
               />
-              <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {statCards.map((card) => (
                   <StatCard
                     key={card.id}
@@ -590,13 +668,15 @@ export const DashboardPage: React.FC<{
                     data={data[card.id]}
                     onDrill={() => setDialog({ type: 'drill', cardId: card.id, title: card.title })}
                     filter={(
-                      <CardFilterMenu
-                        value={card.config.filters ?? {}}
-                        disabled={!canEdit}
-                        compact
-                        hideDue
-                        onApply={(filters) => setCardFilters(card, filters)}
-                      />
+                      <span className="no-print">
+                        <CardFilterMenu
+                          value={card.config.filters ?? {}}
+                          disabled={!canEdit}
+                          compact
+                          hideDue
+                          onApply={(filters) => setCardFilters(card, filters)}
+                        />
+                      </span>
                     )}
                   />
                 ))}
@@ -623,10 +703,10 @@ export const DashboardPage: React.FC<{
                 aria-label={card.title}
                 onDragOver={(e) => { if (editMode && dragging) e.preventDefault(); }}
                 onDrop={(e) => { e.preventDefault(); if (dragging) moveBefore(dragging, card.id); setDragging(null); }}
-                className={`relative flex min-w-0 flex-col rounded-xl border bg-white ${dragging === card.id ? 'opacity-50' : ''} ${editMode ? 'border-dashed border-brand-200' : 'border-gray-200'}`}
+                className={`ui-card group relative flex min-w-0 flex-col transition-shadow hover:shadow-[var(--ui-shadow-sm)] ${dragging === card.id ? 'opacity-50' : ''} ${editMode ? '!border-dashed !border-brand-200' : ''}`}
                 style={{ gridColumn: `span ${card.width} / span ${card.width}`, gridRow: `span ${card.height} / span ${card.height}` }}
               >
-                <header className="flex items-center gap-1.5 px-3 pt-2.5">
+                <header className="flex items-center gap-1.5 px-4 pt-3.5">
                   {editMode && (
                     <span
                       draggable
@@ -640,22 +720,20 @@ export const DashboardPage: React.FC<{
                   )}
                   {card.type === 'bar' || card.type === 'pie' ? (
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                        {card.type === 'pie' ? <PieChartIcon size={16} /> : <BarChart3 size={16} />}
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+                        {card.type === 'pie' ? <PieChartIcon size={15} /> : <BarChart3 size={15} />}
                       </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-semibold text-gray-900">{card.title}</span>
-                        <span className="block truncate text-[11px] text-gray-500">{chartSubtitle(card, data[card.id])}</span>
-                      </span>
+                      <span className="block min-w-0 truncate text-sm font-semibold text-gray-900">{card.title}</span>
                     </span>
                   ) : (
-                    <h2 className="min-w-0 truncate text-sm font-semibold text-gray-800">{card.title}</h2>
+                    <h2 className="min-w-0 truncate text-sm font-semibold text-gray-900">{card.title}</h2>
                   )}
                   {/* Time cards carry their own period, so today / this week / this month or a
                       range is one click away rather than an edit. */}
                   <span className="flex-1" />
                   {/* The timesheet carries its own week arrows, and the estimate card its
                       window inside Filter, so a period dropdown as well is one control too many. */}
+                  <span className="no-print flex items-center gap-1.5">
                   {TIME_CARDS.includes(card.type) && card.type !== 'timesheet' && card.type !== 'variance' && (
                     <PeriodMenu
                       label={CARD_PERIODS.find(([v]) => v === (card.config.period?.preset ?? 'this_week'))?.[1] ?? 'Custom'}
@@ -679,25 +757,26 @@ export const DashboardPage: React.FC<{
                   {FEATURES.dashboardCardScopeMenu && (card.type === 'bar' || card.type === 'pie') && (
                     <ScopeMenu time={cardTime(card)} disabled={!canEdit} />
                   )}
+                  </span>
                   {!!data[card.id]?.hidden_sources && (
                     <span className="text-[10px] text-amber-600" title="Some locations on this card are not shared with you and are left out">partial</span>
                   )}
-                  <span className="no-print flex items-center gap-1.5">
-                    <button type="button" title="Refresh card" onClick={() => refreshCard(card.id)} className="rounded p-0.5 text-gray-300 hover:text-gray-600"><RefreshCw size={12} /></button>
+                  <span className="reveal-on-hover no-print flex items-center gap-0.5">
+                    <button type="button" title="Refresh card" onClick={() => refreshCard(card.id)} className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><RefreshCw size={13} /></button>
                     {FEATURES.dashboardCardFullScreen && (
-                      <button type="button" title="Full screen" onClick={() => setDialog({ type: 'expand', cardId: card.id })} className="rounded p-0.5 text-gray-300 hover:text-gray-600"><Expand size={12} /></button>
+                      <button type="button" title="Full screen" onClick={() => setDialog({ type: 'expand', cardId: card.id })} className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Expand size={13} /></button>
                     )}
                     {cardMenu(card).length > 0 && (
                       <Menu
                         align="right"
                         label={`Actions for ${card.title}`}
                         items={cardMenu(card)}
-                        trigger={<span className="rounded p-0.5 text-gray-400 hover:bg-gray-100">{canEdit ? <MoreHorizontal size={14} /> : <Download size={13} />}</span>}
+                        trigger={<span className="flex rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700">{canEdit ? <MoreHorizontal size={14} /> : <Download size={13} />}</span>}
                       />
                     )}
                   </span>
                 </header>
-                <div className="min-h-0 flex-1 px-3 pb-3 pt-1">
+                <div className="min-h-0 flex-1 px-4 pb-4 pt-2">
                   <CardBody
                     card={card}
                     data={data[card.id]}
@@ -718,6 +797,12 @@ export const DashboardPage: React.FC<{
               </section>
             ))}
           </div>
+          <InsightsPanel
+            insights={insights} error={insightsError} onOpenTask={setOpenTask}
+            // Names on a Team or Company board open that person's own board, for those who may.
+            onOpenPerson={isAdmin || led.length > 0 ? (uid) => navigate(`/dashboards/people/${encodeURIComponent(uid)}`) : undefined}
+            extra={workloadCards.map((c) => workloadFinding(data[c.id])).filter((x): x is NonNullable<typeof x> => !!x)}
+          />
           </>
         )}
       </main>
@@ -789,12 +874,29 @@ const DuplicateDialog: React.FC<{ dash: Dashboard; onClose: () => void; onDone: 
   const [name, setName] = useState(`${dash.name} (copy)`);
   const [team, setTeam] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Copying a board with a dozen cards is a round trip, and the button gave no sign of it. It
+  // looked dead, so people pressed it again -- and the second press made a second copy.
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const copy = await dashApi.duplicate(dash.id, { name: name.trim(), team_id: team || null });
+      onDone(copy.id);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  };
   return (
     <Modal label="Duplicate Dashboard" title="Duplicate Dashboard" onClose={onClose}
       footer={<>
         <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-        <button type="button" disabled={!name.trim()} onClick={() => dashApi.duplicate(dash.id, { name: name.trim(), team_id: team || null }).then((c) => onDone(c.id)).catch((e) => setError(e.message))}
-          className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">Duplicate</button>
+        <button type="button" disabled={!name.trim() || busy} onClick={run}
+          className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
+          {busy ? 'Duplicating…' : 'Duplicate'}
+        </button>
       </>}>
       <label className="block text-xs font-medium text-gray-600">Name
         <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal" />
@@ -805,7 +907,7 @@ const DuplicateDialog: React.FC<{ dash: Dashboard; onClose: () => void; onDone: 
           {creatableTeams.map((t) => <option key={t.id} value={t.id}>Team: {t.name}</option>)}
         </select>
       </label>
-      <p className="mt-3 text-xs text-gray-500">The copy is yours: cards and filters are copied, sharing and email reports are not. Use “Change locations” afterwards to point it at another team's work.</p>
+      <p className="mt-3 text-xs text-gray-500">The copy is yours: cards and filters are copied, who it is shared with is not. Use “Change locations” afterwards to point it at another team's work.</p>
       {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
     </Modal>
   );

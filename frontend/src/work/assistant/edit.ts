@@ -29,7 +29,9 @@ export type Change =
   | { field: 'estimate'; value: number | null; says: string }
   | { field: 'assignees'; value: string[]; says: string }
   /** A move to another List. The name is resolved against the tree by the caller. */
-  | { field: 'list'; said: string; says: string };
+  | { field: 'list'; said: string; says: string }
+  /** A status, by name. Each List has its own, so the caller resolves it against the task's. */
+  | { field: 'status'; said: string; says: string };
 
 export interface EditRead {
   /** How they referred to the task, for the caller to search on. */
@@ -62,6 +64,7 @@ const FIELDS: { field: Change['field']; pattern: RegExp }[] = [
   { field: 'estimate', pattern: /\b(?:estimates?|time\s*estimates?)\b/i },
   { field: 'assignees', pattern: /\b(?:assignees?|owner)\b/i },
   { field: 'name', pattern: /\b(?:names?|titles?)\b/i },
+  { field: 'status', pattern: /\bstatus\b/i },
   // Bare "date", last so "due date" and "start date" are read first. "Change the date of the audit
   // to Friday" names a field without saying which, and the due date is the one people mean.
   { field: 'due_date', pattern: /\bdates?\b/i },
@@ -71,7 +74,22 @@ const FIELDS: { field: Change['field']; pattern: RegExp }[] = [
 const PLACE_WORD = /\b(?:lists?|folders?|spaces?|sections?|boards?|projects?)\b/i;
 
 /** Verbs that open an instruction to change something. */
-const VERB = /^(?:please\s+)?(?:can you\s+)?(?:change|update|edit|modify|rename|re-?assign|assign|reschedule|postpone|push(?:\s+back)?|move|shift|set|clear|remove|delete|unset)\s+/i;
+const VERB = /^(?:please\s+)?(?:can you\s+)?(?:change|update|edit|modify|rename|re-?assign|assign|reschedule|postpone|push(?:\s+back)?|move|shift|set|clear|remove|delete|unset|mark|put)\s+/i;
+
+/**
+ * The status names people say, whatever a List actually calls them. Only these are read as a
+ * status without the word "status" -- "move the audit to review" is a status, "move the audit to
+ * the review list" is a move, and the place word is what tells them apart.
+ */
+export const STATUS_WORDS = "to[\\s-]?do|todo|open|not started|in[\\s-]?progress|doing|started|in review|review|on hold|hold|blocked|waiting|done|complete|completed|closed";
+const STATUS = new RegExp(`^(?:${STATUS_WORDS})$`, 'i');
+const STATUS_AT_END = new RegExp(`\\s+(?:as\\s+)?(${STATUS_WORDS})\\s*$`, 'i');
+
+/**
+ * Further changes said after the first: "... to friday and make it high priority". Each one is
+ * read as its own short instruction about the same task.
+ */
+const MORE = /\s*,?\s+and\s+(?:also\s+)?(?=(?:make|set|change|mark|move|push|reschedule|re-?assign|assign|give)\s+(?:it|its|the)\b)/i;
 
 /**
  * Verbs that name the field by themselves.
@@ -105,6 +123,20 @@ const EMPTY = /^(?:nothing|none|no\s+\w+|empty|blank|unset|clear(?:ed)?|nobody)$
  * @param me the signed-in person's id, so "assign it to me" has somebody to mean.
  */
 export function readEdit(input: string, people: Person[], me?: string, now = new Date()): EditRead {
+  const [first, ...more] = squash(input).split(MORE);
+  const read = readOne(first, people, me, now);
+  for (const clause of more) {
+    // "make it high priority" says nothing a "set it to" would not, and "set it to" is a shape
+    // the reader already knows.
+    const said = clause.replace(/^(?:make|give)\s+it\s+(?:an?\s+)?/i, 'set it to ');
+    const extra = readOne(said, people, me, now);
+    read.changes.push(...extra.changes);
+    read.unknown.push(...extra.unknown.filter((u) => u !== 'which task did you mean?'));
+  }
+  return read;
+}
+
+function readOne(input: string, people: Person[], me?: string, now = new Date()): EditRead {
   const unknown: string[] = [];
   const changes: Change[] = [];
   let rest = squash(input);
@@ -127,6 +159,14 @@ export function readEdit(input: string, people: Person[], me?: string, now = new
     said = squash(rest.slice(last.index + last[0].length));
     valueSays = rest.slice(last.index);
     rest = squash(rest.slice(0, last.index));
+  } else {
+    // "Mark the audit in progress" has no "to" -- the status itself is the last thing said.
+    const st = rest.match(STATUS_AT_END);
+    if (st && st.index !== undefined) {
+      said = st[1];
+      valueSays = st[0];
+      rest = squash(rest.slice(0, st.index));
+    }
   }
 
   // --- which field ----------------------------------------------------------------------------
@@ -167,6 +207,7 @@ export function readEdit(input: string, people: Person[], me?: string, now = new
     if (asPriority) return 'priority';
     if (everyoneNamed) return 'assignees';
     if (/\b(?:list|folder|space|section|board)\b/i.test(said)) return 'list';
+    if (STATUS.test(said)) return 'status';
     return null;
   };
   const target = field ?? guess();
@@ -195,6 +236,9 @@ export function readEdit(input: string, people: Person[], me?: string, now = new
   } else if (target === 'list') {
     if (said) changes.push({ field: 'list', said, says: said });
     else unknown.push('no destination was given');
+  } else if (target === 'status') {
+    if (said) changes.push({ field: 'status', said: said.toLowerCase(), says: said });
+    else unknown.push('no new status was given');
   } else if (said) {
     unknown.push(`I could not tell what "${said}" was meant to change`);
   } else {

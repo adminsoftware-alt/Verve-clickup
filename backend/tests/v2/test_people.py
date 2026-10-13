@@ -74,6 +74,23 @@ def test_who_may_change_what(api, workspace):
     add(api, ws, "admin", code=403, email="boss@example.com", name="Boss", role="admin")
 
 
+def test_an_address_is_kept_like_a_phone_number(api, workspace):
+    ws = workspace["id"]
+    # Theirs to keep up to date, and an admin's; nobody else's.
+    got = ok(api.patch(f"/workspaces/{ws}/people/member", "member", {"address": " 12 MG Road, Pune 411001 "}))
+    assert got["address"] == "12 MG Road, Pune 411001"
+    assert api.patch(f"/workspaces/{ws}/people/admin", "member", {"address": "x"}).status_code == 403
+    ok(api.patch(f"/workspaces/{ws}/people/member", "admin", {"address": "14 MG Road, Pune"}))
+    # Everyone inside the firm can see it; guests cannot.
+    assert people(api, ws, "owner")["member@example.com"]["address"] == "14 MG Road, Pune"
+    assert people(api, ws, "guest")["member@example.com"]["address"] is None
+    # Working hours stay with admins, including for the person themselves.
+    week = [8 * 3600] * 5 + [0, 0]
+    assert api.put(f"/workspaces/{ws}/members/member/capacity", "member", {"capacity_seconds": week}).status_code == 403
+    ok(api.put(f"/workspaces/{ws}/members/member/capacity", "admin", {"capacity_seconds": week}))
+    assert ok(api.get(f"/workspaces/{ws}/members/member/capacity", "member"))["capacity_seconds"] == week
+
+
 def test_email_invitations(api, workspace, monkeypatch):
     ws = workspace["id"]
     out = ok(api.post(f"/workspaces/{ws}/invites", "owner", {"emails": ["a1@example.com", "member@example.com"], "message": "Welcome!"}), 201)

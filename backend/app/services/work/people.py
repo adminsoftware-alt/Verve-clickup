@@ -23,7 +23,7 @@ from app.services.work.permissions import can_manage_workspace
 
 PROFILE_FIELDS = (
     "designation", "level", "department", "phone", "employee_code", "date_of_joining", "location",
-    "date_of_birth", "marriage_anniversary", "takes_interviews",
+    "address", "date_of_birth", "marriage_anniversary", "takes_interviews",
 )
 # Who sees what on someone else's profile, as person_out applies it:
 #   * a phone number is for everyone inside the firm, and hidden from guests -- see
@@ -31,7 +31,7 @@ PROFILE_FIELDS = (
 #   * a birthday and an anniversary are the person's and the admins', nobody else's.
 # There used to be a PRIVATE_FIELDS tuple here naming all three as admin-only. Nothing read it,
 # and it described a rule the code does not follow, which is worse than no note at all.
-SELF_EDITABLE = {"name", "phone", "location"}
+SELF_EDITABLE = {"name", "phone", "location", "address"}
 # The fields a promotion or a transfer moves. Changes to these are logged with their old and new
 # values, because "what was their designation before?" is the question the log gets asked.
 MOVEMENT_FIELDS = ("designation", "level", "department", "manager_id")
@@ -88,6 +88,8 @@ def person_out(member: WorkspaceMember, user: User, team_ids: Sequence[uuid.UUID
         employee_code=member.employee_code,
         date_of_joining=member.date_of_joining,
         location=member.location,
+        # Hidden wherever the phone is: a home address is contact detail, not directory detail.
+        address=None if hide_contact else member.address,
         date_of_birth=member.date_of_birth if show_private else None,
         marriage_anniversary=member.marriage_anniversary if show_private else None,
         takes_interviews=member.takes_interviews,

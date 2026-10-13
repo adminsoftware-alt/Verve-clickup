@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Lock, PartyPopper, Send, Trash2, TrendingUp } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Lock, PartyPopper, Send, Trash2 } from 'lucide-react';
 import { useMe } from '../WorkContext';
 import { workApi, type Task, type UserRef } from '../api';
 import { Avatar, AvatarStack, StatusDot, formatDue, formatDuration } from '../ui';
@@ -324,7 +324,6 @@ const Empty: React.FC<{ text?: string }> = ({ text = 'No matching tasks' }) => (
 const PieCard: React.FC<{ segments: Segment[]; format: string; total: number; donut: boolean } & Pick<CardHandlers, 'onDrill'>> = ({ segments, format, total, donut, onDrill }) => {
   if (!segments.length || !total) return <Empty />;
   const share = (value: number) => (total ? (100 * value) / total : 0);
-  const biggest = [...segments].sort((a, b) => b.value - a.value)[0];
 
   // Each slice is named where it sits, with a leader line back to it, so nothing has to be
   // matched up against a legend on the far side of the card.
@@ -381,26 +380,8 @@ const PieCard: React.FC<{ segments: Segment[]; format: string; total: number; do
           </div>
         )}
       </div>
-
-      {/* What the split means, rather than leaving the reader to work out which slice is biggest. */}
-      {biggest && (
-        <button
-          type="button"
-          onClick={() => onDrill(biggest.key, biggest.label)}
-          className="flex items-center gap-2.5 rounded-lg bg-gray-50 px-3 py-2 text-left hover:bg-gray-100"
-          title={`Show the ${biggest.label} tasks`}
-        >
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${biggest.color}1f`, color: biggest.color }}>
-            <TrendingUp size={14} />
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate text-xs font-semibold text-gray-800">Most of your work is {biggest.label}</span>
-            <span className="block truncate text-[11px] text-gray-500">
-              {share(biggest.value).toFixed(1)}% of the total sits there.
-            </span>
-          </span>
-        </button>
-      )}
+      {/* "Most of your work is In progress" used to sit here. The chart and its legend already
+          say it, and the board's notes now live together in Highlights at the foot of the page. */}
     </div>
   );
 };
@@ -494,7 +475,9 @@ const BarCard: React.FC<{ segments: Segment[]; format: string } & Pick<CardHandl
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={shown} margin={{ top: 30, right: 8, bottom: crowded ? 34 : 0, left: 6 }}>
+          {/* The figure and its share sit above each bar and need about 36px; any less and the
+              tallest bar's label is cut off at the top of the card. */}
+          <BarChart data={shown} margin={{ top: 40, right: 8, bottom: crowded ? 34 : 0, left: 6 }}>
             <defs>
               {shown.map((sg) => (
                 <linearGradient key={sg.key} id={`bar-${sg.key.replace(/[^\w-]/g, '')}`} x1="0" y1="0" x2="0" y2="1">
@@ -526,10 +509,11 @@ const BarCard: React.FC<{ segments: Segment[]; format: string } & Pick<CardHandl
               }}
               tickFormatter={(v: number) => (format === 'duration' ? `${Math.round(v / 3600)}h` : String(v))}
             />
-            <Tooltip formatter={(v: number) => fmt(v, format)} cursor={{ fill: '#f5f5ff' }} />
+            <Tooltip formatter={(v: number) => fmt(v, format)} cursor={{ fill: '#f3f4f6' }} />
             <Bar
               dataKey="value"
               radius={[8, 8, 0, 0]}
+              maxBarSize={96}
               isAnimationActive={false}
               onClick={(entry: { key?: string; label?: string }) => entry.key && onDrill(entry.key, entry.label ?? '')}
             >
@@ -662,8 +646,9 @@ const TaskListCard: React.FC<{ tasks: Task[]; total: number; onOpenTask: (id: st
   );
 };
 
-const OnlyYours: React.FC<{ seesEveryone: boolean }> = ({ seesEveryone }) =>
-  seesEveryone ? null : <p className="mt-1 text-[11px] text-gray-400">Showing your time, and your Team's if you lead one.</p>;
+// "Showing your time, and your Team's if you lead one" used to be printed under every time card.
+// The cards keep only their heading now; who may see whose time is the rule, not news.
+const OnlyYours: React.FC<{ seesEveryone: boolean }> = () => null;
 
 /**
  * Hours per person for a period, against the hours each of them had.

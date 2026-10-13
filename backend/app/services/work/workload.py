@@ -165,7 +165,7 @@ def my_workload(
             status=s.StatusOut.model_validate(statuses[task.status_id]), seconds_per_day=seconds,
         ))
 
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
 
     own = daily_capacity(db, access.workspace_id, [access.user_id], window)
     me = db.get(User, access.user_id)
@@ -275,7 +275,7 @@ def workload(
                 scheduled[i] += value
             row_tasks.append(entry)
 
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
 
     # Each person's own working hours, less company holidays and approved leave.
     capacities = daily_capacity(db, opened.access.workspace_id, [u.id for u, _, _ in rows.values() if u], window)

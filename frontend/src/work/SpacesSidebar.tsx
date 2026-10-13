@@ -1,12 +1,14 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Archive, EyeOff, Zap, Settings2, Star, Tag as TagIcon, ChevronDown, ChevronRight, CircleDot, Copy, Folder, FolderOpen, LayoutTemplate, List as ListIcon, Lock, MoreHorizontal, MoveRight, Pencil, Plus, Share2, Trash2, Users, Blocks, Compass, Mail, Timer, Rows3, UserRound } from 'lucide-react';
+import { Archive, EyeOff, Zap, Settings2, Star, Tag as TagIcon, ChevronDown, ChevronRight, CircleDot, Copy, Folder, FolderOpen, LayoutTemplate, List as ListIcon, Lock, MoreHorizontal, MoveRight, Pencil, Plus, Share2, Trash2, Users, Blocks, Compass, Mail, Timer, Rows3, Shield, UserRound } from 'lucide-react';
 import { ClickAppsDialog, DuplicateSpaceDialog, ListEmailDialog, SprintSettingsDialog } from './SpaceDialogs';
 import { spacesApi } from './spacesApi';
 // The sidebar is the shell, so anything it imports is in the first download. These two are
 // dialogs that open from a menu, so they wait until the menu is used.
 const SaveTemplateDialog = lazy(() => import('./templates/Templates').then((m) => ({ default: m.SaveTemplateDialog })));
 const TemplateCenter = lazy(() => import('./templates/Templates').then((m) => ({ default: m.TemplateCenter })));
+// Admin, likewise: only admins open it, and it brings the spreadsheet importer with it.
+const AdminLauncher = lazy(() => import('./teams/AdminPage').then((m) => ({ default: m.AdminLauncher })));
 import { useFavorites } from './Favorites';
 import { LocationSettingsDialog, TagManagerDialog } from './LocationSettings';
 import { AutomationsDialog } from './AutomationsDialog';
@@ -50,6 +52,7 @@ export const SpacesSidebar: React.FC = () => {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [adminOpen, setAdminOpen] = useState(false);
   const favorites = useFavorites();
   // Hidden Spaces are a personal, per-browser choice, as in ClickUp's "Hide Space".
   const [hidden, setHidden] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('timetriq.hiddenSpaces') || '[]'); } catch { return []; } });
@@ -446,6 +449,22 @@ export const SpacesSidebar: React.FC = () => {
           <span className="w-4 shrink-0" aria-hidden /><Users size={16} /> Teams &amp; People
         </Link>
       )}
+
+      {/* Admin, next to Teams & People rather than inside it, and only for the people who can
+          open it. The old route still answers so a bookmark does not break. */}
+      {/* Admin opens where you are: the options in a pop-up, the chosen one in a full window.
+          /admin still answers as a page, for bookmarks. */}
+      {workspace && isAdmin && (
+        <button
+          type="button"
+          onClick={() => setAdminOpen(true)}
+          aria-haspopup="dialog"
+          className={`side-row flex w-full items-center gap-2 pl-1.5 ${adminOpen || pathname.startsWith('/admin') ? 'is-active bg-brand-50 text-brand-700' : 'text-gray-500'}`}
+        >
+          <span className="w-4 shrink-0" aria-hidden /><Shield size={16} /> Admin
+        </button>
+      )}
+      {adminOpen && <Suspense fallback={null}><AdminLauncher onClose={() => setAdminOpen(false)} /></Suspense>}
 
       {workspace && FEATURES.archived && (
         <button

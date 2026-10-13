@@ -128,9 +128,12 @@ export const CardEditor: React.FC<{
     setError(null);
     try {
       const height = card?.height ?? CARD_TYPES.find((c) => c.type === type)!.height;
+      // The editor defines the card, so what it is filtered by here becomes what "Clear all
+      // filters" returns it to. Leaving the old baseline off lets the server take this one.
+      const defined: CardConfig = { ...config, base_filters: null };
       const saved = card
-        ? await dashApi.updateCard(dashboardId, card.id, { title: title.trim() || card.title, config, width })
-        : await dashApi.addCard(dashboardId, { type, title: title.trim() || undefined, config, width, height });
+        ? await dashApi.updateCard(dashboardId, card.id, { title: title.trim() || card.title, config: defined, width })
+        : await dashApi.addCard(dashboardId, { type, title: title.trim() || undefined, config: defined, width, height });
       onSaved(saved);
     } catch (err) {
       setError((err as Error).message);

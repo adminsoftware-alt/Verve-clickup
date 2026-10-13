@@ -125,6 +125,9 @@ export type EntryUpdate = Partial<{
 export const viewerTz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
 /** yyyy-mm-dd of a local date. */
+/** Seconds as the hours a person would say out loud: 5400 -> "1.5h". */
+export const hrs = (seconds: number) => `${Math.round((seconds / 3600) * 10) / 10}h`;
+
 export const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 export const parseDay = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 
