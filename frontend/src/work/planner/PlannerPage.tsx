@@ -1,18 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, GripVertical, Search, X } from 'lucide-react';
-import { useWork } from '../WorkContext';
+import { CalendarDays, ChevronLeft, ChevronRight, GripVertical, Search, X } from 'lucide-react';
+import { useMe, useWork } from '../WorkContext';
 import { useMyTasks } from '../MyTasksContext';
 import { TaskPanel } from '../TaskPanel';
 import { NameDialog, PriorityFlag, StatusDot, formatDue, startOfDay } from '../ui';
 import { planningApi, type CalendarEvent, type Planner, type TimeBlock } from '../planningApi';
-import { CalendarsDialog } from './CalendarsDialog';
+import { FilterPanel } from '../views/FilterPanel';
+import { EMPTY_FILTERS, applyFilters, type ViewFilters } from '../views/viewSettings';
 
 const HOUR_PX = 48;
 const SNAP_MIN = 15;
 const DAY_MS = 86_400_000;
 const MIN_MS = 60_000;
 const KEY = 'timetriq.planner.mode';
+const FILTER_KEY = 'timetriq.planner.filters';
 
 type Mode = 'day' | 'week';
 
@@ -51,7 +52,8 @@ function layout(items: Item[]): Placed[] {
 
 /** ClickUp's Planner: drag your tasks into time slots, next to the meetings in your calendars. */
 export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
-  const { workspace, listName, refresh: refreshTree } = useWork();
+  const { workspace, members, listName, refresh: refreshTree } = useWork();
+  const me = useMe();
   const { tasks, refresh: refreshMine } = useMyTasks();
   const [mode, setMode] = useState<Mode>(() => { try { return (localStorage.getItem(KEY) as Mode) || 'week'; } catch { return 'week'; } });
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
@@ -60,17 +62,13 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
   const [q, setQ] = useState('');
   const [openTask, setOpenTask] = useState<string | null>(null);
   const [newBlock, setNewBlock] = useState<{ start: Date } | null>(null);
-  const [showCalendars, setShowCalendars] = useState(false);
-  // Back from signing in to Google or Outlook: say how it went, and show the calendars.
-  const [params, setParams] = useSearchParams();
-  const [calendarNote, setCalendarNote] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => {
-    const done = params.get('calendar'), failed = params.get('calendar_error');
-    if (!done && !failed) return;
-    setCalendarNote(failed ? { ok: false, text: failed } : { ok: true, text: 'Calendar connected — your tasks and time blocks are syncing both ways.' });
-    setShowCalendars(true);
-    setParams({}, { replace: true });
-  }, [params, setParams]);
+  // The same Filter the List tab has, over the tasks waiting to be planned. Kept per browser,
+  // like the Day / Week choice beside it.
+  const [filters, setFilters] = useState<ViewFilters>(() => {
+    try { return { ...EMPTY_FILTERS, ...JSON.parse(localStorage.getItem(FILTER_KEY) || 'null') }; } catch { return EMPTY_FILTERS; }
+  });
+  useEffect(() => { try { localStorage.setItem(FILTER_KEY, JSON.stringify(filters)); } catch { /* ignore */ } }, [filters]);
+  const people = useMemo(() => members.map((m) => m.user), [members]);
   const [drag, setDrag] = useState<{ id: string; start: Date; end: Date } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -181,23 +179,16 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
   const planned = (day: Date) => items.filter((it) => it.kind === 'block' && sameDay(it.start, day)).reduce((sum, it) => sum + (it.end.getTime() - it.start.getTime()), 0);
 
   const blockedTaskIds = new Set((data?.blocks ?? []).map((b) => b.task_id).filter(Boolean));
-  const tray = tasks
+  const tray = applyFilters(tasks, filters, me, false)
     .filter((t) => !q.trim() || t.name.toLowerCase().includes(q.trim().toLowerCase()))
     .sort((a, b) => Number(blockedTaskIds.has(a.id)) - Number(blockedTaskIds.has(b.id)) || (a.due_date ?? '9').localeCompare(b.due_date ?? '9'));
 
   const title = mode === 'week'
     ? `${days[0].toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${days[6].toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
     : anchor.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
-  const feedErrors = Object.values(data?.feed_errors ?? {});
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
-      {calendarNote && (
-        <div role="status" className={`flex items-center gap-2 px-6 py-1.5 text-sm ${calendarNote.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'}`}>
-          {calendarNote.text}
-          <button type="button" onClick={() => setCalendarNote(null)} className="ml-auto text-xs underline">Dismiss</button>
-        </div>
-      )}
       <header className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-6 py-3">
         {/* Inside My Tasks the page already says where you are, so the Planner keeps only its
             own controls. */}
@@ -207,16 +198,16 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
         <button type="button" title="Previous" onClick={() => setAnchor(addDays(anchor, mode === 'week' ? -7 : -1))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={16} /></button>
         <button type="button" title="Next" onClick={() => setAnchor(addDays(anchor, mode === 'week' ? 7 : 1))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={16} /></button>
         <span className="text-sm font-medium text-gray-700" aria-live="polite">{title}</span>
+        <span className="ml-2">
+          <FilterPanel filters={filters} onChange={setFilters} tasks={tasks} statuses={null} people={people} />
+        </span>
         <span className="ml-auto flex rounded-md border border-gray-200 p-0.5" role="radiogroup" aria-label="Planner range">
           {(['day', 'week'] as Mode[]).map((m) => (
             <button key={m} type="button" role="radio" aria-checked={mode === m} onClick={() => setMode(m)} className={`rounded px-2.5 py-0.5 text-sm capitalize ${mode === m ? 'bg-gray-100 font-medium text-gray-900' : 'text-gray-500'}`}>{m}</button>
           ))}
         </span>
-        <button type="button" onClick={() => setShowCalendars(true)} className="flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><CalendarPlus size={14} /> Calendars</button>
       </header>
-      {(error || feedErrors.length > 0) && (
-        <div className="mx-6 mt-2 rounded-md bg-amber-50 px-3 py-1.5 text-sm text-amber-800">{error ?? `A calendar couldn't be read: ${feedErrors[0]}`}</div>
-      )}
+      {error && <div className="mx-6 mt-2 rounded-md bg-amber-50 px-3 py-1.5 text-sm text-amber-800">{error}</div>}
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-72 shrink-0 flex-col border-r border-gray-200 bg-gray-50/60" aria-label="Tasks to plan">
           <div className="px-4 pb-2 pt-3">
@@ -227,7 +218,11 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
             </span>
           </div>
           <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-3">
-            {tray.length === 0 && <li className="px-2 py-6 text-center text-xs text-gray-400">No open tasks assigned to you.</li>}
+            {tray.length === 0 && (
+              <li className="px-2 py-6 text-center text-xs text-gray-400">
+                {tasks.length ? 'No tasks match the filter.' : 'No open tasks assigned to you.'}
+              </li>
+            )}
             {tray.map((t) => (
               <li key={t.id} draggable aria-label={`Plan ${t.name}`}
                 onDragStart={(e) => { e.dataTransfer.setData('application/x-timetriq-task', t.id); e.dataTransfer.effectAllowed = 'copy'; }}
@@ -338,7 +333,6 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
             await load();
           }} />
       )}
-      {showCalendars && <CalendarsDialog onClose={() => { setShowCalendars(false); load(); }} />}
       {openTask && <TaskPanel taskId={openTask} onClose={() => setOpenTask(null)} onChanged={() => { load(); refreshMine(); refreshTree(); }} onOpen={setOpenTask} />}
     </div>
   );

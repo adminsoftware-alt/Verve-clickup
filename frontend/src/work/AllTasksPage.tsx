@@ -12,7 +12,6 @@ import { COLUMNS, applyFilters, readSettings, sortTasks, type ViewSettings } fro
 import { ColumnsButton, FilterButton, GroupByButton, MeButton, SortButton } from './views/ViewControls';
 import { FilterPanel } from './views/FilterPanel';
 import { ViewTabs, type ViewKey } from './views/ViewTabs';
-import { CalendarView } from './views/CalendarView';
 import { PlannerPage } from './planner/PlannerPage';
 import { TaskRowsSkeleton } from './Skeleton';
 import { MyWorkloadView } from './views/MyWorkloadView';
@@ -22,10 +21,12 @@ type Layout = ViewKey;
 
 const KEY = 'timetriq.allTasks';
 /** The views this page offers. */
-const OFFERED: Layout[] = ['list', 'board', 'workload', 'calendar', 'planner'];
+// The Calendar tab is gone: the Planner already shows the week by day and is the one that syncs
+// with Google Calendar, so a second calendar here was the same page twice.
+const OFFERED: Layout[] = ['list', 'board', 'workload', 'planner'];
 
 /** Views that read the filtered task list, and so deserve the toolbar above them. */
-const SHOWS_TOOLBAR: Layout[] = ['list', 'board', 'table', 'calendar'];
+const SHOWS_TOOLBAR: Layout[] = ['list', 'board', 'table'];
 /** Views that scroll their own insides, so the page must not scroll them a second time. */
 const SCROLLS_ITSELF: Layout[] = ['planner'];
 
@@ -54,6 +55,8 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
   const [layout, setLayout] = useState<Layout>(() => {
     try {
       const saved = localStorage.getItem(`${KEY}.layout`) as Layout | null;
+      // Someone who left this on the old Calendar tab comes back to the Planner that replaced it.
+      if (saved === 'calendar') return 'planner';
       return saved && OFFERED.includes(saved) ? saved : 'list';
     } catch { return 'list'; }
   });
@@ -143,7 +146,7 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
         </h1>
       </header>
       <ViewTabs value={layout} onChange={setLayout} only={OFFERED} />
-      {/* The Planner and the Calendar answer their own question and carry their own controls, so
+      {/* The Planner answers its own question and carry their own controls, so
           the filter toolbar would only be furniture above them. */}
       {SHOWS_TOOLBAR.includes(layout) && (
       <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-6 py-2">
@@ -192,10 +195,7 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
           <MyWorkloadView onOpenTask={openTask} listName={where} />
         ) : layout === 'planner' ? (
           <PlannerPage embedded />
-        ) : tasks === null ? <TaskRowsSkeleton rows={8} /> : layout === 'calendar' ? (
-          <CalendarView tasks={filtered} canCreate={false} onCreate={async () => undefined}
-            onUpdate={async (id, input) => { await workApi.updateTask(id, input); load(); }} onOpenTask={openTask} />
-        ) : layout === 'board' ? (
+        ) : tasks === null ? <TaskRowsSkeleton rows={8} /> : layout === 'board' ? (
           <BoardView
             tasks={filtered}
             statuses={null}
