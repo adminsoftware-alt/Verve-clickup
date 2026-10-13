@@ -32,6 +32,7 @@ from app.schemas import work as s
 from app.services.work.access import Access, Opened, chain_for_folder, chain_for_list, chain_for_space
 from app.services.work.permissions import Node
 from app.services.work.errors import Invalid
+from app.services.work.permissions import can_manage_workspace
 from app.services.work.statuses import OPEN_GROUPS
 from app.services.work.tasks import TaskFilter, visible_lists, visible_tasks
 from app.services.work.teams import team_or_404
@@ -85,7 +86,13 @@ def _chain_for(db: Session, location) -> List[Node]:
     return chain_for_list(db, location)
 
 
-def _people_who_can_see(db: Session, location, workspace_id: uuid.UUID) -> List[User]:
+def _people_who_can_see(db: Session, location, workspace_id: uuid.UUID, assigned: Set[str]) -> List[User]:
+    """The people whose week this location's Workload is about.
+
+    Everyone who can open it -- except owners and admins, who can open every List in the firm and
+    so had a row on every Team's Workload. They appear where they have work assigned here, like
+    anyone else would; otherwise a Team's Workload is that Team's people.
+    """
     rows = db.execute(
         select(WorkspaceMember, User)
         .join(User, User.id == WorkspaceMember.user_id)
@@ -95,6 +102,8 @@ def _people_who_can_see(db: Session, location, workspace_id: uuid.UUID) -> List[
     chain = _chain_for(db, location)
     people = []
     for member, user in rows:
+        if can_manage_workspace(member.role) and user.id not in assigned:
+            continue
         viewer = Access(db, user.id, workspace_id, member.role)
         if viewer.level(chain) is not None:
             people.append(user)
@@ -226,7 +235,9 @@ def workload(
             assignees.setdefault(task_id, []).append(user_id)
 
     # Who gets a row: everyone who can see this location, or one Team's members.
-    people = _people_who_can_see(db, location, opened.access.workspace_id)
+    people = _people_who_can_see(
+        db, location, opened.access.workspace_id, {uid for ids in assignees.values() for uid in ids},
+    )
     team_members: Optional[Set[str]] = None
     if team_id is not None:
         team = team_or_404(db, opened.access, team_id)

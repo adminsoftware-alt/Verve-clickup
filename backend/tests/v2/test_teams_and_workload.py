@@ -158,8 +158,9 @@ def test_workload_rows_capacity_and_multi_assignee(api, workspace, space, folder
     w = ok(api.get(f"/spaces/{space['id']}/workload", "owner", params={"start": monday.isoformat(), "days": 7}))
     assert len(w["days"]) == 7 and w["days"][0] == "2026-09-21"
     rows = {(r["user"]["id"] if r["user"] else None): r for r in w["rows"]}
-    # Everyone who can see the Space gets a row, guests excluded.
-    assert set(rows) == {"owner", "member", "admin", None}
+    # Everyone who can see the Space gets a row, guests excluded -- and owners and admins only
+    # where they have work here: the admin is on "pair work", the owner on nothing.
+    assert set(rows) == {"member", "admin", None}
     assert rows["member"]["capacity_seconds"] == [8 * HOUR] * 5 + [0, 0]
     # A two-person task counts in full for each of them.
     assert rows["member"]["scheduled_seconds"][:2] == [4 * HOUR, 4 * HOUR]
