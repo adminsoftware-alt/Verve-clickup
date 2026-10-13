@@ -10,8 +10,8 @@ is missing the details that would let it be planned, and -- on a board about sev
 who is furthest behind.
 """
 
-from datetime import timedelta
-from typing import Any, Dict, List
+from datetime import date, timedelta
+from typing import Any, Dict, List, Optional, Set
 
 from app.db.models import DashboardCard, StatusGroup
 from app.schemas import dashboards as d
@@ -85,11 +85,21 @@ def compute(engine: Engine, cards: List[DashboardCard]) -> Dict[str, Any]:
     )
 
     week_start = today - timedelta(days=today.weekday())
-    done_this_week = sum(
-        1 for f in engine.matching(config, loaded, force_closed=True)
+    yesterday = today - timedelta(days=1)
+    finished_on = [
+        engine._local_day(f.task.date_done or f.task.date_closed)
+        for f in engine.matching(config, loaded, force_closed=True)
         if f.group in FINISHED and (f.task.date_done or f.task.date_closed) is not None
-        and engine._local_day(f.task.date_done or f.task.date_closed) >= week_start
+    ]
+    done_this_week = sum(1 for day in finished_on if day >= week_start)
+    done_yesterday = sum(1 for day in finished_on if day == yesterday)
+    week_end = week_start + timedelta(days=6)
+    due_this_week = sum(
+        1 for f in open_facts
+        if f.task.due_date is not None and today <= engine._local_day(f.task.due_date) <= week_end
     )
+    urgent_today = sum(1 for f in due_today if f.task.priority in (1, 2))
+    time = _time(engine, config, loaded, yesterday, week_start, week_end)
 
     return {
         "open": len(open_facts),
@@ -102,4 +112,52 @@ def compute(engine: Engine, cards: List[DashboardCard]) -> Dict[str, Any]:
         "unassigned": sum(1 for f in open_facts if not f.assignees),
         "people_behind": people_behind,
         "done_this_week": done_this_week,
+        "done_yesterday": done_yesterday,
+        "due_this_week": due_this_week,
+        "urgent_today": urgent_today,
+        **time,
     }
+
+
+def _time(engine: Engine, config: d.CardConfig, loaded: Any, yesterday: date, week_start: date, week_end: date) -> Dict[str, Any]:
+    """Hours logged yesterday and this week, against the hours there were, for whoever the board
+    is about -- so a highlight can say "you logged 6h yesterday, of 8h". Only hours the viewer may
+    see are counted, exactly as on the board's time cards."""
+    from app.services.work.working_time import daily_capacity
+
+    def logged(first: date, last: date) -> int:
+        window = config.model_copy(update={"period": d.Period(preset="custom", start=first, end=last)})
+        entries, _, _ = engine._entries(window, loaded)
+        return sum(e.duration_seconds or 0 for e, _ in entries)
+
+    # Who the board is about: its owner on a personal board, its Team on a Team board, and
+    # nobody in particular on a company board.
+    people: Optional[Set[str]] = None
+    if engine.scope.assignees:
+        people, _ = engine._people(engine.scope.assignees)
+    visible = engine.time_people()
+    if people is not None and visible is not None:
+        people &= visible
+    me = engine.access.user_id
+    who = (
+        "everyone" if people is None
+        else "me" if people == {me}
+        else "person" if len(people) == 1
+        else "team"
+    )
+    out: Dict[str, Any] = {
+        "who": who,
+        "who_name": None,
+        "logged_yesterday": logged(yesterday, yesterday),
+        "logged_this_week": logged(week_start, min(engine.today, week_end)),
+        "capacity_yesterday": None,
+        "capacity_week": None,
+    }
+    if who == "person":
+        out["who_name"] = engine._person(next(iter(people or []))).get("display_name")
+    if people:
+        days = [week_start + timedelta(days=i) for i in range(7)]
+        per = daily_capacity(engine.db, engine.access.workspace_id, sorted(people), days + [yesterday])
+        out["capacity_week"] = sum(sum(v[:7]) for v in per.values())
+        out["capacity_yesterday"] = sum(v[7] for v in per.values())
+    return out

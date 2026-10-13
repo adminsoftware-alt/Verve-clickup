@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Archive, EyeOff, Zap, Settings2, Star, Tag as TagIcon, ChevronDown, ChevronRight, CircleDot, Copy, Folder, FolderOpen, LayoutTemplate, List as ListIcon, Lock, MoreHorizontal, MoveRight, Pencil, Plus, Share2, Trash2, Users, Blocks, Compass, Mail, Timer, Rows3, Shield, UserRound } from 'lucide-react';
+import { Archive, EyeOff, Zap, Settings2, Star, Tag as TagIcon, ChevronDown, ChevronRight, CircleDot, Copy, Folder, FolderOpen, LayoutTemplate, List as ListIcon, Lock, MoreHorizontal, MoveRight, Pencil, Plus, Share2, Trash2, Users, Blocks, Compass, Mail, Timer, Rows3, Shield, UserRound, UserPlus } from 'lucide-react';
 import { ClickAppsDialog, DuplicateSpaceDialog, ListEmailDialog, SprintSettingsDialog } from './SpaceDialogs';
 import { spacesApi } from './spacesApi';
 // The sidebar is the shell, so anything it imports is in the first download. These two are
@@ -20,6 +20,7 @@ import { workApi, type FolderNode, type Level, type ListNode, type LocationKind,
 import { Menu, NameDialog, type MenuItem } from './ui';
 import { FEATURES } from '../config/features';
 import { ShareLocationDialog } from './ShareLocationDialog';
+import { AssignListDialog } from './AssignListDialog';
 import { notify } from '../components/notify';
 import { ask } from '../components/ask';
 
@@ -43,6 +44,7 @@ type Dialog =
   | { type: 'list-email'; id: string; name: string }
   | { type: 'templates'; kind?: TemplateKind; target?: string }
   | { type: 'settings'; kind: LocationKind; id: string }
+  | { type: 'assign'; node: ListNode }
   | { type: 'team'; kind: LocationKind; id: string; name: string; team: string | null }
   | { type: 'tags'; id: string; name: string; canEdit: boolean }
   | { type: 'automations'; kind: LocationKind; id: string; name: string; canManage: boolean };
@@ -173,6 +175,11 @@ export const SpacesSidebar: React.FC = () => {
       : []),
     ...(FEATURES.spaceMenuSettings && canEdit(node.permission_level)
       ? [{ label: kind === 'list' ? 'List info & dates' : `${kind === 'space' ? 'Space' : 'Folder'} settings`, icon: <Settings2 size={14} />, onClick: () => setDialog({ type: 'settings', kind, id: node.id }) }]
+      : []),
+    // Assigning a List hands it to people, which used to be a button on every List's header.
+    // It lives here now, beside the List's other actions, for anyone with full access to it.
+    ...(kind === 'list' && node.permission_level === 'full'
+      ? [{ label: 'Assign to people', icon: <UserPlus size={14} />, onClick: () => setDialog({ type: 'assign', node: node as ListNode }) }]
       : []),
     ...(FEATURES.spaceMenuTags && kind === 'space'
       ? [{ label: 'Tags', icon: <TagIcon size={14} />, onClick: () => setDialog({ type: 'tags', id: node.id, name: node.name, canEdit: canEdit(node.permission_level) }) }]
@@ -503,6 +510,13 @@ export const SpacesSidebar: React.FC = () => {
           onDone={(id) => { const kind = dialog.kind; setDialog(null); refresh().then(() => navigate(pathFor(kind, id))); }} />
       )}
       {FEATURES.automations && dialog?.type === 'automations' && <AutomationsDialog kind={dialog.kind} id={dialog.id} name={dialog.name} canManage={dialog.canManage} onClose={() => setDialog(null)} />}
+      {dialog?.type === 'assign' && (
+        <AssignListDialog
+          listId={dialog.node.id}
+          name={dialog.node.name}
+          current={dialog.node.assignee_ids ?? [dialog.node.assignee_id].filter((x): x is string => !!x)}
+          onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />
+      )}
       {dialog?.type === 'settings' && <LocationSettingsDialog kind={dialog.kind} id={dialog.id} onClose={() => setDialog(null)} />}
       {dialog?.type === 'tags' && <TagManagerDialog spaceId={dialog.id} spaceName={dialog.name} canEdit={dialog.canEdit} onClose={() => setDialog(null)} />}
       {dialog?.type === 'archived' && <ArchivedDialog onClose={() => setDialog(null)} onRestored={refresh} />}

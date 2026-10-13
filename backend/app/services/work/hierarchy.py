@@ -17,6 +17,7 @@ from app.db.models import (
     StatusGroup,
     Task,
     TaskList,
+    Team,
 )
 from app.schemas import work as s
 from app.services.work.access import (
@@ -176,6 +177,27 @@ def update_space(db: Session, opened: Opened[Space], data: s.SpaceUpdate) -> Spa
 # --- folders -----------------------------------------------------------------
 
 
+def _home_team(db: Session, access: Access, space: Space, folder: Optional[Folder]) -> Optional[uuid.UUID]:
+    """Which Team a new Folder or List belongs to.
+
+    Its parent's Team if the parent has one, so a Team's Folder stays the Team's. Otherwise, when a
+    Team lead makes it, the Team they lead -- the first by name if they lead several -- so a lead's
+    new List is their Team's work and not every Team's. An admin's is the workspace's unless its
+    parent says otherwise; they can hand it to a Team afterwards.
+    """
+    for parent in (folder, db.get(Folder, folder.parent_folder_id) if folder and folder.parent_folder_id else None, space):
+        if parent is not None and parent.team_id is not None:
+            return parent.team_id
+    if can_manage_workspace(access.role):
+        return None
+    from app.services.work.teams import led_team_ids
+
+    led = led_team_ids(db, access.workspace_id, access.user_id)
+    if not led:
+        return None
+    return db.scalars(select(Team.id).where(Team.id.in_(list(led))).order_by(func.lower(Team.name))).first()
+
+
 def create_folder(
     db: Session,
     access: Access,
@@ -195,6 +217,7 @@ def create_folder(
     parent_condition = (
         Folder.parent_folder_id == parent.id if parent else Folder.parent_folder_id.is_(None)
     )
+    team_id = _home_team(db, access, space, parent)
     folder = Folder(
         space_id=space.id,
         parent_folder_id=parent.id if parent else None,
@@ -202,6 +225,7 @@ def create_folder(
         color=data.color,
         is_private=data.is_private,
         created_by=access.user_id,
+        team_id=team_id,
         orderindex=_next_orderindex(
             db, Folder.orderindex, Folder.space_id == space.id, parent_condition
         ),
@@ -215,6 +239,7 @@ def create_folder(
         folder_id=folder.id,
         name="List",
         created_by=access.user_id,
+        team_id=team_id,
         orderindex=1.0,
     )
     db.add(starter)
@@ -255,6 +280,7 @@ def create_list(
         color=data.color,
         is_private=data.is_private,
         created_by=access.user_id,
+        team_id=_home_team(db, access, space, folder),
         orderindex=_next_orderindex(
             db, TaskList.orderindex, TaskList.space_id == space.id, parent_condition
         ),
@@ -509,6 +535,28 @@ def get_hierarchy(db: Session, access: Access, include_archived: bool = False) -
         (parent_node.lists if parent_node else shared.lists).append(node)
 
     shared.tasks = _shared_tasks(db, access, lists, list_chain, placed_lists)
+
+    # A Folder whose Lists all belong to other Teams is an empty heading to this person -- "Learning"
+    # with nothing under it, on every Team's sidebar. Admins see everything, and someone who made
+    # the Folder keeps it; a Folder that is empty for everyone (just made) stays too.
+    if not can_manage_workspace(access.role):
+        holds_lists = {lst.folder_id for lst in lists if lst.folder_id and visible(lst)}
+        holds_lists |= {f.parent_folder_id for f in folders if f.parent_folder_id and f.id in holds_lists}
+
+        def prune(nodes: List[s.FolderNode]) -> List[s.FolderNode]:
+            kept = []
+            for node in nodes:
+                node.folders = prune(node.folders)
+                folder = folder_by_id[node.id]
+                empty_to_me = not node.lists and not node.folders and node.id in holds_lists
+                if empty_to_me and folder.created_by != access.user_id:
+                    continue
+                kept.append(node)
+            return kept
+
+        for space_node_ in space_nodes.values():
+            space_node_.folders = prune(space_node_.folders)
+        shared.folders = prune(shared.folders)
 
     for node in list(space_nodes.values()) + list(folder_nodes.values()):
         node.folders.sort(key=_sort_key)

@@ -89,6 +89,17 @@ export interface Insights {
   no_due_date: number; no_estimate: number; unassigned: number;
   people_behind: { user: UserRef; overdue: number }[];
   done_this_week: number;
+  done_yesterday: number;
+  due_this_week: number;
+  urgent_today: number;
+  /** Whose board: the viewer's own, one other person's, a Team's, or the whole company. */
+  who: 'me' | 'person' | 'team' | 'everyone';
+  who_name: string | null;
+  logged_yesterday: number;
+  logged_this_week: number;
+  /** Hours there were to work, for the people the board is about; null on a company board. */
+  capacity_yesterday: number | null;
+  capacity_week: number | null;
 }
 
 export interface Segment { key: string; label: string; color: string; value: number }
@@ -176,7 +187,6 @@ export const dashApi = {
   runs: (id: string) => request<ReportRun[]>('GET', `/dashboards/${id}/report-runs`),
   run: (runId: string) => request<ReportRun & { html: string }>('GET', `/report-runs/${runId}`),
   forView: (viewId: string) => request<Dashboard | null>('GET', `/views/${viewId}/dashboard`),
-  customiseView: (viewId: string) => request<Dashboard>('POST', `/views/${viewId}/dashboard`),
   messages: (id: string, cardId: string) => request<DiscussionMessage[]>('GET', `/dashboards/${id}/cards/${cardId}/messages`),
   postMessage: (id: string, cardId: string, body: string) => request<DiscussionMessage[]>('POST', `/dashboards/${id}/cards/${cardId}/messages`, { body }),
   deleteMessage: (messageId: string) => request('DELETE', `/dashboard-messages/${messageId}`),

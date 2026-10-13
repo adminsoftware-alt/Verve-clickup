@@ -1,15 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Activity, Calendar, CalendarRange, ChevronRight, ClipboardList, Columns3, FileSpreadsheet, FileText, Folder, GanttChart, Globe, History, Home, Layers, LayoutDashboard, List as ListIcon, ListPlus, Lock, Map as MapIcon, MessagesSquare, MoreHorizontal, Network, Pencil, Plus, PenTool, Search, Share2, Shield, Star, Table2, Upload, UserPlus, Users, X } from 'lucide-react';
+import { Activity, ArrowDownToLine, Calendar, CalendarRange, ChevronRight, ClipboardList, Columns3, FileSpreadsheet, FileText, Folder, GanttChart, Globe, History, Home, LayoutDashboard, List as ListIcon, ListPlus, Lock, Map as MapIcon, MessagesSquare, Network, PenTool, Plus, Share2, Table2, Upload, Users } from 'lucide-react';
 import { useWork, useMe } from './WorkContext';
-import { workApi, type CustomField, type Dependency, type FolderNode, type ListNode, type LocationKind, type Recurrence, type SpaceNode, type Status, type Task, type TaskGroup, type TaskInput, type UserRef, type View, type ViewType } from './api';
+import { workApi, type CustomField, type Dependency, type FolderNode, type ListNode, type LocationKind, type Recurrence, type SpaceNode, type Status, type Task, type TaskGroup, type TaskInput, type View, type ViewType } from './api';
 import { DateRange } from './DateField';
 import { FieldEditor } from './fields/FieldValue';
 import { TaskRowsSkeleton } from './Skeleton';
 import { Menu, NameDialog, PRIORITIES, Portal, StatusDot, formatDue, fromDateInput } from './ui';
 import { DurationInput } from './DurationInput';
 import { Select } from './Select';
-import { FavoriteStar, useFavorites } from './Favorites';
 import { TaskPanel } from './TaskPanel';
 import { ListView } from './views/ListView';
 import { CalendarView } from './views/CalendarView';
@@ -23,12 +22,13 @@ import { rememberList } from './recent';
 import { ShareDialog } from './ShareDialog';
 import { useLeadership } from './dashboards/dialogs';
 import { GroupsDialog } from './GroupsDialog';
-import { AssignListDialog } from './AssignListDialog';
 import { AssigneePicker } from './task/AssigneePicker';
 import { RecurrenceEditor } from './RecurrenceEditor';
 import { NO_GROUP, buildGroups, type GroupBy } from './views/grouping';
 import { applyFilters, readSettings, sameSettings, sortTasks, COLUMNS, type ViewSettings } from './views/viewSettings';
 import { FilterPanel } from './views/FilterPanel';
+import { AssigneeButton, FieldsButton, MeAvatar, ShowButton } from './views/QuickControls';
+import { GroupByButton } from './views/ViewControls';
 import { BulkBar } from './views/BulkBar';
 import { TableView } from './views/TableView';
 import { TeamView } from './views/TeamView';
@@ -39,14 +39,12 @@ import { FormBuilder } from './views/FormView';
 import { FieldsDialog } from './fields/FieldsDialog';
 import { ImportDialog } from './templates/ImportDialog';
 import { TemplateCenter } from './templates/Templates';
-import { Avatar, AvatarStack } from './ui';
 import { FEATURES } from '../config/features';
 import { notify } from '../components/notify';
 import { DocView } from './views/DocView';
 import { WhiteboardView } from './views/WhiteboardView';
 import { MindMapView } from './views/MindMapView';
 import { MapView } from './views/MapView';
-import { ask } from '../components/ask';
 import { ChatView } from './views/ChatView';
 import { EmbedView } from './views/EmbedView';
 import { SprintBar } from './views/SprintBar';
@@ -74,7 +72,9 @@ const VIEW_META: Record<ViewType, { label: string; icon: React.ReactNode }> = {
 };
 // The views offered in "+ View". The rest are built and still open where they already exist;
 // they come back to this menu with FEATURES.extraViewTypes.
-const CORE_VIEWS: ViewType[] = ['dashboard', 'table', 'team', 'calendar', 'workload'];
+// Team is no longer offered: the Workload view answers who is doing what. Team views that
+// already exist still open.
+const CORE_VIEWS: ViewType[] = ['dashboard', 'table', 'calendar', 'workload'];
 const EXTRA_VIEWS: ViewType[] = ['list', 'board', 'gantt', 'timeline', 'activity', 'form', 'doc', 'whiteboard', 'mind_map', 'map', 'chat', 'embed'];
 const ADDABLE: ViewType[] = FEATURES.extraViewTypes ? [...CORE_VIEWS, ...EXTRA_VIEWS] : CORE_VIEWS;
 // Views that bring their own data and controls instead of the shared task toolbar.
@@ -110,7 +110,6 @@ export const LocationPage: React.FC = () => {
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [statuses, setStatuses] = useState<Status[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
   const [openTask, setOpenTask] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [newTaskList, setNewTaskList] = useState<string | null>(null);
@@ -123,7 +122,6 @@ export const LocationPage: React.FC = () => {
   const [managingFields, setManagingFields] = useState(false);
   const [importing, setImporting] = useState(false);
   const [templatesFor, setTemplatesFor] = useState<string | null>(null);
-  const [assigning, setAssigning] = useState(false);
   const [publicView, setPublicView] = useState<View | null>(null);
   const me = useMe();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -151,6 +149,12 @@ export const LocationPage: React.FC = () => {
   // place people now look, so the toggle went and only the remembered state is read.
   const [meMode, setMeModeState] = useState(false);
   useEffect(() => { try { setMeModeState(localStorage.getItem(meKey) === '1'); } catch { setMeModeState(false); } }, [meKey]);
+  const setMeMode = (on: boolean) => { setMeModeState(on); try { localStorage.setItem(meKey, on ? '1' : '0'); } catch { /* ignore */ } };
+  // Subtasks on or off, per view in this browser, like Me mode.
+  const subKey = `timetriq.subtasks.${activeView?.id ?? ''}`;
+  const [showSubtasks, setShowSubtasksState] = useState(true);
+  useEffect(() => { try { setShowSubtasksState(localStorage.getItem(subKey) !== '0'); } catch { setShowSubtasksState(true); } }, [subKey]);
+  const setShowSubtasks = (on: boolean) => { setShowSubtasksState(on); try { localStorage.setItem(subKey, on ? '1' : '0'); } catch { /* ignore */ } };
   const saveView = async () => {
     if (!activeView) return;
     try {
@@ -226,6 +230,10 @@ export const LocationPage: React.FC = () => {
   const selectView = (view: View) => setSearchParams({ v: view.id });
 
   const addView = async (type: ViewType, isPrivate = false) => {
+    // One of each: choosing Calendar again goes to the Calendar already here rather than
+    // opening a second tab of the same thing.
+    const existing = views.find((v) => v.type === type && !v.private);
+    if (existing && !isPrivate) { selectView(existing); return; }
     try {
       const view = await workApi.createView(kind, id, type, isPrivate);
       setViews((prev) => [...prev, view]);
@@ -235,18 +243,7 @@ export const LocationPage: React.FC = () => {
     }
   };
 
-  const favorites = useFavorites();
-  const isWorkspaceAdmin = hierarchy?.role === 'owner' || hierarchy?.role === 'admin';
   const canEditHere = located?.node.permission_level === 'edit' || located?.node.permission_level === 'full';
-  const patchView = async (view: View, body: Parameters<typeof workApi.updateView>[1]) => {
-    try {
-      const saved = await workApi.updateView(view.id, body);
-      if (body.is_default) await loadViews();
-      else setViews((prev) => prev.map((v) => (v.id === saved.id ? saved : v)));
-    } catch (e) {
-      notify.error(e);
-    }
-  };
   // Drag a view tab onto another to put it there.
   const draggingView = useRef<string | null>(null);
   const dropView = async (target: View) => {
@@ -259,19 +256,11 @@ export const LocationPage: React.FC = () => {
     await Promise.all(order.map((vid, i) => workApi.updateView(vid, { orderindex: i + 1 }).catch(() => undefined)));
   };
 
-  const removeView = async (view: View) => {
-    if (!(await ask.confirm({ danger: true, title: `Delete the "${view.name}" view?` }))) return;
-    await workApi.deleteView(view.id);
-    setViews((prev) => prev.filter((v) => v.id !== view.id));
-    if (activeView?.id === view.id) setSearchParams({});
-  };
-
   const people = useMemo(() => members.map((m) => m.user), [members]);
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const searched = q ? tasks.filter((t) => t.name.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q)) : tasks;
-    return sortTasks(applyFilters(searched, settings.filters, me, meMode), settings.sort);
-  }, [tasks, search, settings.filters, settings.sort, me, meMode]);
+    const shown = showSubtasks ? tasks : tasks.filter((t) => !t.parent_id);
+    return sortTasks(applyFilters(shown, settings.filters, me, meMode), settings.sort);
+  }, [tasks, settings.filters, settings.sort, me, meMode, showSubtasks]);
   const makeGroups = useCallback(
     (roots: Task[]) => buildGroups(groupBy, roots, statuses, groups, people, taskTypes),
     [groupBy, statuses, groups, people, taskTypes],
@@ -304,9 +293,6 @@ export const LocationPage: React.FC = () => {
     (listId: string) => (locate('list', listId)?.path.slice(depth).map((c) => c.name).join(' / ') || listName(listId)),
     [locate, listName, depth],
   );
-  const visibleIds = useMemo(() => new Set(filtered.map((t) => t.id)), [filtered]);
-  const subtaskCount = filtered.filter((t) => t.parent_id && visibleIds.has(t.parent_id)).length;
-  const taskCount = filtered.length - subtaskCount;
 
   // What a new task gets from the group it's added in, e.g. "+ Add Task" under "High" sets High.
   const inputForGroup = (key: string): TaskInput => {
@@ -391,7 +377,6 @@ export const LocationPage: React.FC = () => {
             </React.Fragment>
           ))}
           {located.node.is_private && <Lock size={14} className="ml-1 text-gray-400" />}
-          <FavoriteStar kind={kind} id={id} size={14} />
           {kind === 'list' && (() => {
             const lst = located.node as ListNode;
             return (lst.start_date || lst.due_date) ? (
@@ -400,32 +385,13 @@ export const LocationPage: React.FC = () => {
               </span>
             ) : null;
           })()}
-          {kind === 'list' && !isPersonal && (() => {
-            const node = located.node as ListNode;
-            const ids = node.assignee_ids ?? (node.assignee_id ? [node.assignee_id] : []);
-            const people = ids.map((uid) => members.find((m) => m.user.id === uid)?.user).filter((u): u is UserRef => !!u);
-            const canAssign = located.node.permission_level === 'full';
-            return (
-              <button
-                type="button"
-                disabled={!canAssign}
-                onClick={() => setAssigning(true)}
-                title={canAssign ? 'Assign this List to one or more people' : undefined}
-                className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-default disabled:hover:bg-transparent"
-              >
-                {people.length === 0 ? <><UserPlus size={14} /> Assign</>
-                  : people.length === 1 ? <><Avatar user={people[0]} size={18} /> {people[0].display_name || people[0].email}</>
-                  : <><AvatarStack users={people} max={4} /> {people.length} people</>}
-              </button>
-            );
-          })()}
           {isPersonal ? (
             <span className="ml-auto text-xs text-gray-400">Only you can see this List</span>
           ) : (
             <button
               type="button"
               onClick={() => setSharing(true)}
-              className={`${kind === 'list' ? '' : 'ml-auto '}flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50`}
+              className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"
             >
               <Share2 size={14} /> Share
             </button>
@@ -434,42 +400,27 @@ export const LocationPage: React.FC = () => {
 
         {/* Views bar */}
         <div className="mt-3 flex items-center gap-1">
-          {views.map((view) => {
-            const mine = view.created_by === me;
-            const canLock = mine || isWorkspaceAdmin;
-            const items = [
-              { label: 'Rename', icon: <Pencil size={14} />, onClick: async () => { const n = await ask.prompt('Rename view', view.name); if (n && n.trim() && n.trim() !== view.name) patchView(view, { name: n.trim() }); } },
-              { label: favorites.isFavorite('view', view.id) ? 'Remove from Favourites' : 'Add to Favourites', icon: <Star size={14} />, onClick: () => favorites.toggle('view', view.id) },
-              ...(!view.private && canEditHere ? [{ label: view.is_default ? 'Default view ✓' : 'Set as default view', icon: <Home size={14} />, onClick: () => patchView(view, { is_default: !view.is_default }) }] : []),
-              ...(!view.is_required && mine ? [{ label: view.private ? 'Share with everyone' : 'Make private (only you)', icon: <Lock size={14} />, onClick: () => patchView(view, { private: !view.private }) }] : []),
-              ...(canLock ? [{ label: view.protected ? 'Unprotect view' : 'Protect view', icon: <Shield size={14} />, onClick: () => patchView(view, { protected: !view.protected }) }] : []),
-              ...(!view.private && hierarchy?.role !== 'guest' ? [{ label: 'Share publicly…', icon: <Globe size={14} />, onClick: () => setPublicView(view) }] : []),
-              ...(!view.is_required ? [{ label: 'Delete view', icon: <X size={14} />, danger: true, onClick: () => removeView(view) }] : []),
-            ];
-            return (
-              <div
-                key={view.id}
-                draggable
-                onDragStart={() => { draggingView.current = view.id; }}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => dropView(view)}
-                className={`group flex items-center gap-1.5 border-b-2 px-2.5 pb-2 pt-1 text-sm ${activeView?.id === view.id ? 'border-brand-600 font-medium text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
-              >
-                <button type="button" onClick={() => selectView(view)} className="flex items-center gap-1.5">
-                  {VIEW_META[view.type].icon}
-                  {view.name}
-                  {view.private && <Lock size={11} className="text-gray-400" aria-label="Private view" />}
-                  {view.protected && <Shield size={11} className="text-gray-400" aria-label="Protected view" />}
-                </button>
-                <Menu label={`View options for ${view.name}`} align="left" items={items}
-                  trigger={<span className={`${activeView?.id === view.id ? 'inline' : 'hidden group-hover:inline'} rounded text-gray-400 hover:text-gray-700`}><MoreHorizontal size={13} /></span>} />
-              </div>
-            );
-          })}
+          {/* One tab per kind of view: a second Calendar or Team tab made earlier is left out. The
+              tab menu (rename, favourite, default, share publicly) is gone; a tab is a tab. */}
+          {views.filter((view, i) => views.findIndex((v) => v.type === view.type && v.private === view.private) === i).map((view) => (
+            <div
+              key={view.id}
+              draggable
+              onDragStart={() => { draggingView.current = view.id; }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => dropView(view)}
+              className={`flex items-center gap-1.5 border-b-2 px-2.5 pb-2 pt-1 text-sm ${activeView?.id === view.id ? 'border-brand-600 font-medium text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+            >
+              <button type="button" onClick={() => selectView(view)} className="flex items-center gap-1.5">
+                {view.type !== 'list' && VIEW_META[view.type].icon}
+                {view.name}
+                {view.private && <Lock size={11} className="text-gray-400" aria-label="Private view" />}
+              </button>
+            </div>
+          ))}
           <Menu
             items={[
               ...ADDABLE.map((type) => ({ label: VIEW_META[type].label, icon: VIEW_META[type].icon, onClick: () => addView(type) })),
-              { label: 'Private view (only you)…', icon: <Lock size={14} />, onClick: async () => { const t = await ask.prompt(`Which view? ${ADDABLE.join(', ')}`, ADDABLE[0]); if (t && (ADDABLE as string[]).includes(t)) addView(t as ViewType, true); } },
             ]}
             trigger={
               <span className="ml-1 flex cursor-pointer items-center gap-1 rounded px-2 pb-2 pt-1 text-sm text-gray-500 hover:text-gray-800">
@@ -483,27 +434,16 @@ export const LocationPage: React.FC = () => {
       {/* Toolbar */}
       {activeView && !SELF_CONTAINED.includes(activeView.type) && (
         <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-6 py-2">
-          {/* Search first, because looking for one task by name is the commonest thing anyone
-              does here and it used to be the last control on the row. */}
-          <label className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50/70 px-2.5 py-1.5 transition-colors focus-within:border-brand-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-brand-100 hover:border-gray-300">
-            <Search size={14} className="shrink-0 text-gray-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search tasks"
-              aria-label="Search tasks"
-              className="w-32 bg-transparent text-sm placeholder:text-gray-400 focus:w-52 focus:outline-none"
-            />
-            {search && (
-              <button type="button" aria-label="Clear the search" onClick={() => setSearch('')} className="shrink-0 rounded-full p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700">
-                <X size={12} />
-              </button>
-            )}
-          </label>
-          <span className="whitespace-nowrap text-xs tabular-nums text-gray-400">
-            {taskCount} task{taskCount === 1 ? '' : 's'}
-            {subtaskCount > 0 && ` · ${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`}
-          </span>
+          {/* Left: how the list is laid out -- grouping, what is shown, which fields. ClickUp keeps
+              these on the bar rather than inside Filter, and so does this. */}
+          {(activeView.type === 'list' || activeView.type === 'board') && (
+            <GroupByButton value={groupBy} onChange={(g) => update('groupBy', g)}
+              options={['status', 'assignee', 'priority', 'due', 'tags', 'group', 'type', 'none'] as GroupBy[]} />
+          )}
+          <ShowButton closed={settings.showClosed} onClosed={(on) => update('showClosed', on)} subtasks={showSubtasks} onSubtasks={setShowSubtasks} />
+          {(activeView.type === 'list' || activeView.type === 'table') && (
+            <FieldsButton hidden={settings.hidden} onChange={(h) => update('hidden', h)} fields={viewFields} />
+          )}
           {dirty && (
             <span className="ml-1 flex items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800" role="status">
               View changed
@@ -524,22 +464,13 @@ export const LocationPage: React.FC = () => {
               tasks={tasks}
               statuses={statuses}
               people={people}
-              view={{
-                ...(activeView.type === 'list' || activeView.type === 'board' ? {
-                  groupBy,
-                  groupOptions: ['status', 'assignee', 'priority', 'due', 'tags', 'group', 'type', 'none'] as GroupBy[],
-                  onGroupBy: (g: GroupBy) => update('groupBy', g),
-                } : {}),
-                hidden: settings.hidden,
-                onHidden: (h: string[]) => update('hidden', h),
-                showClosed: settings.showClosed,
-                onShowClosed: (on: boolean) => update('showClosed', on),
-              }}
             />
+            <AssigneeButton people={people} value={settings.filters.assignees}
+              onChange={(ids) => update('filters', { ...settings.filters, assignees: ids })} />
+            <MeAvatar me={members.find((m) => m.user.id === me)?.user} on={meMode} onChange={setMeMode} />
             <Menu
-              label="More view options"
+              label="Export or import tasks"
               items={[
-                { label: `Task groups${groups.length ? ` (${groups.length})` : ''}`, icon: <Layers size={14} />, onClick: () => setManagingGroups(true) },
                 // Custom fields are set up per Space, in its own settings, rather than from
                 // every view that happens to show them.
                 ...(FEATURES.listCustomFields
@@ -552,7 +483,7 @@ export const LocationPage: React.FC = () => {
                 ] : []),
                 ...(canCreate ? [{ label: 'Import tasks', icon: <Upload size={14} />, onClick: () => setImporting(true) }] : []),
               ]}
-              trigger={<span className="flex rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><MoreHorizontal size={16} /></span>}
+              trigger={<span title="Export or import" className="flex rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><ArrowDownToLine size={16} /></span>}
             />
             {writableLists.length > 0 && (
               <button
@@ -752,13 +683,6 @@ export const LocationPage: React.FC = () => {
       {managingGroups && (
         <GroupsDialog kind={kind} id={id} name={located.node.name} canEdit={located.node.permission_level === 'edit' || located.node.permission_level === 'full'}
           onClose={() => setManagingGroups(false)} onChanged={() => { workApi.groups(kind, id).then(setGroups).catch(() => undefined); loadTasks(); }} />
-      )}
-      {assigning && kind === 'list' && (
-        <AssignListDialog
-          listId={id}
-          name={located.node.name}
-          current={(located.node as ListNode).assignee_ids ?? [(located.node as ListNode).assignee_id].filter((x): x is string => !!x)}
-          onClose={() => setAssigning(false)} onDone={() => { setAssigning(false); refreshTree(); }} />
       )}
       {sharing && (
         <ShareDialog kind={kind} id={id} name={located.node.name} onClose={() => setSharing(false)} onChanged={refreshTree} />

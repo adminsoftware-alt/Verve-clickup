@@ -609,8 +609,17 @@ export const DashboardPage: React.FC<{
               </span>
             )}
             <button type="button" title={canEdit ? 'Refresh and clear all filters' : 'Refresh'} aria-label="Refresh" onClick={refresh} className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"><RefreshCw size={15} /></button>
-            <button type="button" title="Download every card (Excel)" aria-label="Download" onClick={downloadAll} className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"><Download size={15} /></button>
-            <button type="button" title="Print or save as PDF" aria-label="Print" onClick={() => { setEditMode(false); setTimeout(() => window.print(), 50); }} className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"><Printer size={15} /></button>
+            {/* One "Save" for both ways of taking the board away: a workbook of every card's numbers,
+                or the board itself as a PDF through the browser's print dialog. */}
+            <Menu
+              align="right"
+              label="Save this Dashboard"
+              items={[
+                { label: 'Download Excel', icon: <FileSpreadsheet size={14} />, onClick: downloadAll },
+                { label: 'Print / save as PDF', icon: <Printer size={14} />, onClick: () => { setEditMode(false); setTimeout(() => window.print(), 50); } },
+              ]}
+              trigger={<span title="Save" className="flex rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"><Download size={15} /></span>}
+            />
             {canEdit && (FEATURES.dashboardEditButton || editMode) && (
               <button
                 type="button"

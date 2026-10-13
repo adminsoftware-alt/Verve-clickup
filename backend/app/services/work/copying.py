@@ -423,7 +423,9 @@ def _copy_list(
 ) -> TaskList:
     copy = TaskList(
         space_id=space_id, folder_id=folder_id, name=name, description=lst.description, color=lst.color,
-        is_private=lst.is_private, created_by=actor,
+        # A copy of a Team's List is still that Team's: without this, duplicating
+        # "Attending Special Events - Atish" made a List the whole workspace could see.
+        is_private=lst.is_private, created_by=actor, team_id=lst.team_id,
         orderindex=_next_orderindex(
             db, TaskList.orderindex, TaskList.space_id == space_id,
             TaskList.folder_id == folder_id if folder_id else TaskList.folder_id.is_(None),
@@ -526,7 +528,7 @@ def duplicate_folder(
     def copy_folder(src: Folder, space_id: uuid.UUID, parent_id: Optional[uuid.UUID], new_name: str) -> Folder:
         new = Folder(
             space_id=space_id, parent_folder_id=parent_id, name=new_name, color=src.color,
-            is_private=src.is_private, created_by=actor,
+            is_private=src.is_private, created_by=actor, team_id=src.team_id,
             orderindex=_next_orderindex(db, Folder.orderindex, Folder.space_id == space_id),
         )
         db.add(new)
