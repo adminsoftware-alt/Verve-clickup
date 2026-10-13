@@ -387,7 +387,7 @@ export const MyWorkloadView: React.FC<{
               );
             }) : (
               <div className="px-3 py-8 text-center text-sm text-gray-400">
-                {all.length ? 'Nothing matches these filters.' : 'Nothing of yours falls in these days.'}
+                {all.length ? 'Nothing matches these filters.' : ''}
               </div>
             ))}
           </div>

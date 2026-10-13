@@ -290,7 +290,36 @@ export const WorkingHoursSection: React.FC<{ ws: string }> = ({ ws }) => {
             </div>
           )}
 
-          <div className="ui-card overflow-x-auto">
+          {/* A phone gets a card per person: the week underneath the name rather than off the
+              right edge of a table that has to be scrolled to reach the Edit button. */}
+          <ul className="space-y-2 sm:hidden">
+            {people.map((p) => {
+              const src = SOURCE[p.source];
+              return (
+                <li key={p.user.id} className={`ui-card p-3 ${selected.has(p.user.id) ? '!border-brand-300 !bg-brand-50/40' : ''}`}>
+                  <div className="flex items-center gap-2.5">
+                    <input type="checkbox" aria-label={`Select ${name(p)}`} checked={selected.has(p.user.id)} onChange={() => toggle(p.user.id)} />
+                    <Avatar user={p.user} size={30} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-gray-900">{name(p)}</span>
+                      <span className="block truncate text-xs text-gray-500">{daysOf(p.capacity_seconds)} days · {fmt(totalOf(p.capacity_seconds))} a week</span>
+                    </span>
+                    <button type="button" onClick={() => setEditing({ kind: 'people', ids: [p.user.id] })} aria-label={`Edit ${name(p)}'s hours`}
+                      className="tap rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Pencil size={16} /></button>
+                  </div>
+                  <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                    <WeekStrip week={p.capacity_seconds} muted={p.source === 'company'} />
+                    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${src.cls}`}>
+                      <src.Icon size={12} /> {src.label(p)}
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
+            {people.length === 0 && <li className="py-10 text-center text-sm text-gray-500">Nobody matches.</li>}
+          </ul>
+
+          <div className="ui-card hidden overflow-x-auto sm:block">
             <table className="w-full min-w-[46rem] text-sm">
               <thead>
                 <tr className="border-b border-gray-200 text-left text-xs font-medium text-gray-500">

@@ -157,7 +157,6 @@ export const WorkloadPanel: React.FC<{
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Tile
               tone="blue" Icon={Users} label="Total capacity" value={hours(capacity)}
-              note={`${d.working_days} working day${d.working_days === 1 ? '' : 's'} · ${hours(d.seconds_per_day)}/day${d.people > 1 ? ` · ${d.people} people` : ''}`}
             />
             <Tile tone="violet" Icon={CalendarClock} label="Planned" value={hours(d.planned_seconds)} share={share(d.planned_seconds)} onClick={() => onDrill('Planned')} />
             <Tile tone="green" Icon={PlayCircle} label="Logged" value={hours(d.logged_seconds)} share={share(d.logged_seconds)} onClick={() => onDrill('Logged')} />

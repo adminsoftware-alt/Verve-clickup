@@ -118,7 +118,6 @@ export const DailyThought: React.FC<{
           <blockquote className={`text-lg font-semibold leading-snug tracking-tight sm:text-xl ${skin.words}`}>
             “{thought.words}”
           </blockquote>
-          <figcaption className="mt-1.5 text-xs font-medium uppercase tracking-wider text-gray-500">— {thought.who}</figcaption>
         </figure>
       </div>
     </section>

@@ -616,6 +616,13 @@ select:not([multiple]):not([size]) {
 
 /* --- touch, and the shapes a small screen needs --------------------------------------------- */
 
+/* A Dashboard's cards keep the widths they were given on a laptop -- a third, a half -- but on a
+   phone a third of the screen is 110px, too narrow for a task list or a chart. There every card
+   takes the full width, one under another. */
+@media (max-width: 639px) {
+  .dash-grid > section { grid-column: span 12 / span 12 !important; }
+}
+
 /* An icon button a finger can hit. Apple and Google both ask for 44px; 173 buttons in this app
    were 24. The padding grows the hit area without moving anything around it, because the icon
    stays centred in a box that was already there. */
@@ -652,7 +659,10 @@ select:not([multiple]):not([size]) {
 
 /* The bar of tabs across the bottom of a phone, and the room it takes up. Pages add
    `pb-nav` so their last row is not hidden behind it. */
-.pb-nav { padding-bottom: calc(4rem + env(safe-area-inset-bottom)); }
+/* A utility rather than a plain class, so it takes variants: the sidebar drawer asks for
+   `max-md:pb-nav`, and as a plain class Tailwind silently dropped it -- the drawer's last row
+   (Admin) sat behind the tab bar where it could not be tapped. */
+@utility pb-nav { padding-bottom: calc(4rem + env(safe-area-inset-bottom)); }
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 
 /* iOS zooms the whole page in when it focuses an input whose text is under 16px. Nothing else

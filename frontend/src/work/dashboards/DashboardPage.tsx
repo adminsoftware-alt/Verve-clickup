@@ -695,7 +695,7 @@ export const DashboardPage: React.FC<{
               onSetFilters={(filters) => setCardFilters(card, filters)}
             />
           ))}
-          <div ref={gridRef} className="grid grid-cols-12" style={{ gridAutoRows: ROW_PX, gap: GAP_PX, gridAutoFlow: 'row dense' }}>
+          <div ref={gridRef} className="dash-grid grid grid-cols-12" style={{ gridAutoRows: ROW_PX, gap: GAP_PX, gridAutoFlow: 'row dense' }}>
             {dash.cards.filter((card) => !outOfGrid.has(card.id)).map((card) => (
               <section
                 key={card.id}
