@@ -13,7 +13,7 @@ import { ask } from '../../components/ask';
 import { notify } from '../../components/notify';
 import { DurationInput } from '../DurationInput';
 import { formatClock, useNow, useRunningTimer } from '../RunningTimer';
-import { useMe, useWork } from '../WorkContext';
+import { useWork } from '../WorkContext';
 import { workApi, type TaskTime } from '../api';
 import { sheetApi, type TimeTag } from '../timesheets/api';
 import { Avatar, formatDuration } from '../ui';
@@ -227,7 +227,6 @@ export const TrackTime: React.FC<{
   /** In a cell, show only what is already in that cell; on a task, show the lot. */
   onlyThatDay?: boolean;
 }> = ({ taskId, canTrack, onClose, onChanged, day: openOn, forUserId, onlyThatDay }) => {
-  const meId = useMe();
   const { workspace } = useWork();
   const { timer, version, start, stop } = useRunningTimer();
   const running = !forUserId && timer?.entry.task_id === taskId ? timer : null;
@@ -544,7 +543,8 @@ export const TrackTime: React.FC<{
                       <span className="shrink-0 font-mono text-[12px] font-medium tabular-nums text-gray-900">
                         {e.running ? '—' : formatDuration(e.duration_seconds ?? 0) || '0m'}
                       </span>
-                      {(e.user.id === meId || time?.shows_everyone) && !e.running && (
+                      {/* Every entry listed is one you may change: your own, your team's if you are a Manager, everyone's if admin. */}
+                      {!e.running && (
                         <button
                           type="button"
                           aria-label="Delete this entry"
@@ -561,7 +561,7 @@ export const TrackTime: React.FC<{
             ))}
           </ul>
           {time && !time.shows_everyone && (
-            <p className="mt-2 text-[11px] text-gray-400">You see your own entries. Admins see everyone's.</p>
+            <p className="mt-2 text-[11px] text-gray-400">You see your own entries, and your team's if you are a Manager. Admins see everyone's.</p>
           )}
         </div>
       )}

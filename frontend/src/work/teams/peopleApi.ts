@@ -18,8 +18,10 @@ export interface ImportRow {
   email: string; name?: string; role?: string; designation?: string; department?: string; manager_email?: string; teams?: string;
   phone?: string; employee_code?: string; date_of_joining?: string; date_of_birth?: string; marriage_anniversary?: string; location?: string;
 }
+export interface ImportTeam { name: string; parent?: string; description?: string }
 export interface ImportResult {
   dry_run: boolean; added: number; updated: number; errors: number; email_problem: string | null;
+  teams_created: string[]; team_problems: string[];
   rows: { row: number; email: string; outcome: 'added' | 'updated' | 'unchanged' | 'error'; problems: string[] }[];
 }
 export interface OffboardPreview {
@@ -105,7 +107,7 @@ export const peopleApi = {
   deleteTeam: (id: string) => request('DELETE', `/teams/${id}`),
   overview: (id: string) => request<TeamOverview>('GET', `/teams/${id}/overview`),
 
-  importPeople: (ws: string, body: { rows: ImportRow[]; dry_run: boolean; send_invites?: boolean; start_joiner_checklist?: boolean; update_existing?: boolean }) =>
+  importPeople: (ws: string, body: { rows: ImportRow[]; teams?: ImportTeam[]; dry_run: boolean; send_invites?: boolean; start_joiner_checklist?: boolean; update_existing?: boolean }) =>
     request<ImportResult>('POST', `/workspaces/${ws}/people/import`, body),
   offboardPreview: (ws: string, userId: string) => request<OffboardPreview>('GET', `/workspaces/${ws}/people/${encodeURIComponent(userId)}/offboard`),
   costs: (ws: string) => request<CostSummary>('GET', `/workspaces/${ws}/costs`),

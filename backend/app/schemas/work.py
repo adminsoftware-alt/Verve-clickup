@@ -205,8 +205,18 @@ class PersonImportRow(BaseModel):
     location: Optional[ShortText] = None
 
 
+class TeamImportRow(BaseModel):
+    """One Team from the onboarding workbook's Teams sheet. Created if the workspace has no Team of that name."""
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+    parent: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=64)]] = None
+    description: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=5000)]] = None
+
+
 class PersonImportIn(BaseModel):
     rows: List[PersonImportRow] = Field(min_length=1, max_length=1000)
+    # The Teams sheet, when the file has one: made first, so People can name them.
+    teams: List[TeamImportRow] = Field(default_factory=list, max_length=300)
     dry_run: bool = False
     send_invites: bool = False
     start_joiner_checklist: bool = False
@@ -228,6 +238,8 @@ class PersonImportResult(BaseModel):
     errors: int
     rows: List[PersonImportRowResult]
     email_problem: Optional[str] = None
+    teams_created: List[str] = Field(default_factory=list)
+    team_problems: List[str] = Field(default_factory=list)
 
 
 class OffboardPreview(BaseModel):

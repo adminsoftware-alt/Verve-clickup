@@ -2,10 +2,12 @@
 
   * Tracking time needs edit access to the task (comment access cannot track).
   * Each person has at most one running timer; starting another stops the first.
-  * Only owners and admins can log, change or delete time for other people.
+  * Owners and admins can log, change or delete anyone's time; a Manager can do the same for
+    the people in their team, so a Manager can fix a wrong entry instead of only seeing
+    it. The person is told, and the change is kept in the audit log.
   * Everyone who can see a task sees its total. Other people's individual entries
     ("View time tracked by other users") are shown to owners and admins for everyone,
-    and to Team leads for the people in the Teams they lead.
+    and to Managers for the people in their team.
 """
 
 import uuid
@@ -31,6 +33,39 @@ def time_visible_people(db: Session, access: Access) -> Optional[Set[str]]:
     return {access.user_id} | people_led_by(db, access.workspace_id, access.user_id)
 
 
+def may_change_time_of(db: Session, access: Access, person_id: str) -> bool:
+    """Whether this person may log, change or delete `person_id`'s time: their own, everyone's for
+    owners and admins, and a Manager's for the people in their team (a Manager is whoever leads a Team)."""
+    if person_id == access.user_id or can_manage_workspace(access.role):
+        return True
+    return person_id in people_led_by(db, access.workspace_id, access.user_id)
+
+
+def tell_time_owner(
+    db: Session, access: Access, person_id: str, task_id: uuid.UUID, action: str, day: str,
+    seconds: Optional[int], before: Optional[int] = None,
+) -> None:
+    """When someone else logs, changes or deletes your time, you hear about it, and the firm keeps
+    a record. `action` is logged, changed or deleted; `day` is an ISO date or timestamp."""
+    if person_id == access.user_id:
+        return
+    from app.services.work import audit, events
+
+    task = db.get(Task, task_id)
+    data = {"action": action, "task": task.name if task else None, "day": day, "seconds": seconds, "before": before}
+    events.notify(db, access.workspace_id, [person_id], access.user_id, "time_changed", "primary", task=task, data=data)
+    owner = db.get(User, person_id)
+    audit.record(
+        db, access.workspace_id, access.user_id, f"time.{action}", "person", person_id,
+        (owner.display_name or owner.email) if owner else None, data,
+    )
+
+
+def _tell_owner(db: Session, access: Access, entry: TimeEntry, action: str, before: Optional[int] = None) -> None:
+    tell_time_owner(db, access, entry.user_id, entry.task_id, action, entry.started_at.isoformat(),
+                    entry.duration_seconds, before)
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -49,7 +84,14 @@ def ensure_not_future(ended: datetime, now: Optional[datetime] = None) -> None:
         raise Invalid("Time can only be logged for work already done, not for later today or days ahead")
 
 
-def _require_tracking(opened: Opened[Task]) -> None:
+def _require_tracking(opened: Opened[Task], for_someone_else: bool = False) -> None:
+    # Someone fixing another person's time (an admin, or that person's Manager) is not
+    # recording their own hours on the task: seeing it is enough, since may_change_time_of has
+    # already said they may. A Manager whose own access is capped at comment on a colleague's
+    # task must still be able to correct what their team member logged there.
+    if for_someone_else:
+        _require_time_tracking_on(opened)
+        return
     # Edit, but measured before the employee cap.
     #
     # Employees are read-and-comment on tasks that are not theirs, and recording hours is one of
@@ -66,6 +108,11 @@ def _require_tracking(opened: Opened[Task]) -> None:
     level = tracking_level(db, opened.access, opened.obj) if db is not None else opened.level
     if level is None or not level.at_least(PermissionLevel.edit):
         raise Forbidden("You need edit access to a task to track time on it")
+    _require_time_tracking_on(opened)
+
+
+def _require_time_tracking_on(opened: Opened[Task]) -> None:
+    """The task's Space must have time tracking switched on."""
     from app.db.models import TaskList
     from app.services.work import space_admin
 
@@ -206,12 +253,12 @@ def stop_timer(db: Session, user_id: str) -> TimeEntry:
 
 
 def add_entry(db: Session, opened: Opened[Task], data: s.TimeEntryCreate) -> TimeEntry:
-    _require_tracking(opened)
     access = opened.access
     user_id = data.user_id or access.user_id
+    _require_tracking(opened, for_someone_else=user_id != access.user_id)
     if user_id != access.user_id:
-        if not can_manage_workspace(access.role):
-            raise Forbidden("Only owners and admins can log time for other people")
+        if not may_change_time_of(db, access, user_id):
+            raise Forbidden("Only admins, and Managers for their own team members, can log time for other people")
         member = db.get(WorkspaceMember, (access.workspace_id, user_id))
         if member is None:
             raise Invalid("Time can only be logged for workspace members")
@@ -231,7 +278,7 @@ def add_entry(db: Session, opened: Opened[Task], data: s.TimeEntryCreate) -> Tim
             started = ended - timedelta(seconds=data.duration_seconds)
 
     ensure_not_future(ended)
-    ensure_unlocked(db, access.workspace_id, user_id, started, access.role)
+    ensure_unlocked(db, access.workspace_id, user_id, started, access.role, reviewer=user_id != access.user_id)
     entry = TimeEntry(
         task_id=opened.obj.id,
         user_id=user_id,
@@ -246,6 +293,7 @@ def add_entry(db: Session, opened: Opened[Task], data: s.TimeEntryCreate) -> Tim
     db.flush()
     if data.tag_ids:
         set_tags(db, entry, access.workspace_id, data.tag_ids)
+    _tell_owner(db, access, entry, "logged")
     return entry
 
 
@@ -254,16 +302,18 @@ def _open_entry(db: Session, user_id: str, entry_id: uuid.UUID) -> Tuple[TimeEnt
     if entry is None:
         raise NotFound("Time entry not found")
     opened = open_task(db, user_id, entry.task_id, PermissionLevel.view)
-    if entry.user_id != user_id and not can_manage_workspace(opened.access.role):
+    if not may_change_time_of(db, opened.access, entry.user_id):
         raise NotFound("Time entry not found")  # other people's entries are not visible
     return entry, opened
 
 
 def update_entry(db: Session, user_id: str, entry_id: uuid.UUID, data: s.TimeEntryUpdate) -> TimeEntry:
     entry, opened = _open_entry(db, user_id, entry_id)
-    _require_tracking(opened)
+    _require_tracking(opened, for_someone_else=entry.user_id != user_id)
+    before = entry.duration_seconds
     access = opened.access
-    ensure_unlocked(db, access.workspace_id, entry.user_id, entry.started_at, access.role)
+    reviewer = entry.user_id != user_id
+    ensure_unlocked(db, access.workspace_id, entry.user_id, entry.started_at, access.role, reviewer=reviewer)
     fields = data.model_fields_set
     timing = {f for f in ("duration_seconds", "started_at", "ended_at") if f in fields and getattr(data, f) is not None}
     if timing and entry.ended_at is None:
@@ -288,7 +338,7 @@ def update_entry(db: Session, user_id: str, entry_id: uuid.UUID, data: s.TimeEnt
     if timing:
         assert entry.ended_at is not None
         ensure_not_future(entry.ended_at)
-        ensure_unlocked(db, access.workspace_id, entry.user_id, entry.started_at, access.role)
+        ensure_unlocked(db, access.workspace_id, entry.user_id, entry.started_at, access.role, reviewer=reviewer)
     if "task_id" in fields and data.task_id is not None and data.task_id != entry.task_id:
         # Opened at view, then held to the tracking bar: moving an entry onto a task is recording
         # your hours against it, which is the same question as logging them there in the first place.
@@ -309,13 +359,16 @@ def update_entry(db: Session, user_id: str, entry_id: uuid.UUID, data: s.TimeEnt
     if "billable" in fields and data.billable is not None:
         entry.billable = data.billable
     db.flush()
+    _tell_owner(db, access, entry, "changed", before)
     return entry
 
 
 def delete_entry(db: Session, user_id: str, entry_id: uuid.UUID) -> None:
     entry, opened = _open_entry(db, user_id, entry_id)
-    _require_tracking(opened)
-    ensure_unlocked(db, opened.access.workspace_id, entry.user_id, entry.started_at, opened.access.role)
+    _require_tracking(opened, for_someone_else=entry.user_id != user_id)
+    ensure_unlocked(db, opened.access.workspace_id, entry.user_id, entry.started_at, opened.access.role,
+                    reviewer=entry.user_id != user_id)
+    _tell_owner(db, opened.access, entry, "deleted")
     db.delete(entry)
     db.flush()
 

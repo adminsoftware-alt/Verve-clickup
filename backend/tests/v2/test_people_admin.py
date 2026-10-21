@@ -51,6 +51,40 @@ def test_import_adds_people_with_managers_from_the_same_file(api, ws):
     assert api.post(f"/workspaces/{ws}/people/import", "member", {"rows": rows}).status_code == 403
 
 
+def test_the_onboarding_workbook_makes_teams_people_and_managers_in_one_go(api, ws):
+    teams = [
+        {"name": "Tax", "description": "GST and TDS"},
+        {"name": "GST", "parent": "Tax"},  # a sub-team, listed after its parent
+        {"name": "Orphan", "parent": "Nowhere"},
+    ]
+    rows = [
+        {"email": "laxmi@example.com", "name": "Laxmi", "role": "Manager", "teams": "Tax"},
+        {"email": "priya@example.com", "name": "Priya", "role": "Employee", "teams": "Tax, GST", "manager_email": "laxmi@example.com"},
+        {"email": "dev@example.com", "name": "Dev", "role": "Admin"},
+        {"email": "lonely@example.com", "role": "Manager"},
+    ]
+    dry = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows, "teams": teams, "dry_run": True}))
+    assert dry["teams_created"] == ["Tax", "GST"] and "parent team Nowhere is not on Teams" in dry["team_problems"][0]
+    assert not ok(api.get(f"/workspaces/{ws}/teams", "owner"))  # a check changes nothing
+
+    out = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows, "teams": teams}))
+    assert out["added"] == 4 and "a Manager needs at least one Team" in out["rows"][3]["problems"][0]
+    made = {t["name"]: t for t in ok(api.get(f"/workspaces/{ws}/teams", "owner"))}
+    assert set(made) == {"Tax", "GST"} and made["GST"]["parent_team_id"] == made["Tax"]["id"]
+    laxmi, priya = by_email(api, ws, "laxmi@example.com"), by_email(api, ws, "priya@example.com")
+    assert made["Tax"]["lead_ids"] == [laxmi["user"]["id"]]  # the Manager manages their Team
+    assert made["GST"]["lead_ids"] == [] and priya["manager_id"] == laxmi["user"]["id"]
+    assert by_email(api, ws, "dev@example.com")["role"] == "admin"
+
+    # Re-importing the same workbook creates nothing twice; a demotion to Employee takes effect.
+    rows[0]["role"] = "Employee"
+    again = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows, "teams": teams}))
+    assert again["teams_created"] == [] and again["updated"] == 4
+    assert {t["name"]: t for t in ok(api.get(f"/workspaces/{ws}/teams", "owner"))}["Tax"]["lead_ids"] == []
+    bad = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": [{"email": "x@example.com", "role": "Boss"}]}))
+    assert "use Admin, Manager or Employee" in bad["rows"][0]["problems"][0]
+
+
 # --- joiner checklist --------------------------------------------------------------------------------------
 
 

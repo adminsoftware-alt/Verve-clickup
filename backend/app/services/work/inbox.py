@@ -37,7 +37,7 @@ KIND_GROUPS: Dict[str, List[str]] = {
     "status": ["status"],
     "dates": ["due_date"],
     "shared": ["shared", "space_join_request", "space_join_decision"],
-    "reminders": ["reminder", "timesheet_reminder", "escalation", "automation"],
+    "reminders": ["reminder", "timesheet_reminder", "time_changed", "escalation", "automation"],
     "task_detail": ["attachment", "checklist_item", "custom_field"],
 }
 

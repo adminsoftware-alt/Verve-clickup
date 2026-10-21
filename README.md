@@ -5,17 +5,43 @@ than bolted on the side.
 
 Work is organised the way ClickUp organises it — Spaces, Folders, Lists, tasks — and is read
 back the way an accountancy practice needs to read it: hours against capacity, estimates
-against actuals, statutory filings against their due dates, and a timesheet that goes to a
-manager on Friday.
+against actuals, and a timesheet that goes to a Manager at the end of the week.
+
+**Live:** [verve-clickup.vercel.app](https://verve-clickup.vercel.app)
 
 ---
 
-## Running it
+## Where it runs
+
+```
+ Browser ──► Vercel (frontend, React)          verve-clickup.vercel.app
+               │  VITE_API_URL
+               ▼
+            Render (backend, FastAPI)          verve-workflow-api.onrender.com
+               │  DATABASE_URL                 │  sign-in tokens
+               ▼                               ▼
+            Supabase (PostgreSQL, Seoul)     Firebase Auth (Google / email sign-in)
+```
+
+| Part | Service | Deploys |
+|---|---|---|
+| Frontend | Vercel | Automatically on every push to `main` |
+| Backend | Render, from [`render.yaml`](render.yaml) | Automatically on every push to `main`; runs `alembic upgrade head` before starting |
+| Database | Supabase Postgres | Schema changes arrive through the backend's migrations |
+| Sign-in | Firebase Authentication | — |
+
+Secrets are never in this repository. Vercel holds the `VITE_FIREBASE_*` values and
+`VITE_API_URL`; Render holds `DATABASE_URL`, `AI_API_KEY`, and two Secret Files —
+`firebase.json` (the Firebase service account) and `vapid.json` (the Web Push keys).
+
+---
+
+## Running it locally
 
 You need Python 3.12, Node 20 and PostgreSQL.
 
 ```bash
-# 1. Database — a local cluster on port 5433
+# 1. A local Postgres on port 5433 (used for the tests, and as a fallback database)
 backend/scripts/start-dev-db.ps1
 
 # 2. Backend — http://127.0.0.1:8000, API docs at /docs
@@ -32,17 +58,23 @@ npm run dev
 
 Open **`localhost:5173`**, not `127.0.0.1:5173` — sign-in is bound to the hostname.
 
-`backend/.env` holds the database URL and the Firebase service account. It is not in the
-repository and should never be. `DEV_LOGIN=true` in that file turns on a local sign-in page
-that skips Firebase; it defaults to off and must stay off anywhere real.
+`backend/.env` holds:
+
+| Setting | What it is |
+|---|---|
+| `DATABASE_URL` | The database the app uses — Supabase, or the local server |
+| `TEST_DATABASE_URL` | Where the tests run. **Always a local database**: the tests empty every table |
+| `FIREBASE_CREDENTIALS_PATH` | The Firebase service-account file |
+| `DEV_LOGIN` | `true` adds a local "sign in as anyone" page. Never on anywhere real |
+| `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY` | The assistant's AI fallback (any OpenAI-compatible API) |
 
 ```bash
-cd backend && venv/Scripts/python -m pytest tests/v2 -q   # 337 tests
-cd frontend && npm run build                              # typecheck + build
+cd backend && venv/Scripts/python -m pytest tests/v2 -q    # 424 tests, about 30 minutes
+cd frontend && npx tsc --noEmit -p tsconfig.app.json       # type-check
 ```
 
-`npx tsc --noEmit` checks nothing here — the root `tsconfig.json` only holds references.
-Use `npx tsc -b` or `npm run build`.
+`npx tsc --noEmit -p .` checks nothing here — the root `tsconfig.json` only holds references.
+Run one pytest at a time: two runs share the test database and empty each other's tables.
 
 ---
 
@@ -64,13 +96,36 @@ backend/app/
   alembic/         migrations
 
 frontend/src/
-  work/            the application: spaces, tasks, dashboards, timesheets
+  work/            the application: spaces, tasks, dashboards, timesheets, assistant
   components/      shared pieces used across it
   config/          feature flags
 ```
 
-The API is versioned. `/api/v1` is the original Firestore-backed app; `/api/v2` is this
-rebuild and is where everything new goes.
+The API is versioned. `/api/v1` is the original Firestore-backed app and now only carries a few
+leftovers (presence, the old notification bell); `/api/v2` is the Postgres rebuild and is where
+everything new goes.
+
+---
+
+## Who can do what
+
+There are three kinds of access: **Admin**, **Manager** and **Employee**. A Manager is anyone
+who leads a Team; everyone else who is not an Admin is an Employee.
+
+| | Tasks | Lists | Folders | Spaces | Time |
+|---|---|---|---|---|---|
+| **Employee** | create · edit their own; comment on others' | create inside Spaces/Folders they can edit | — | — | their own |
+| **Manager** | all of the above, plus edit their team's tasks | create · share | create · share | — | their own, and **fix their team's** |
+| **Admin** | all | all | all | create · share · rename · delete | everyone's |
+
+- **Fixing time.** A Manager can log, change or delete a team member's time entries and
+  timesheet cells — including a week that has been submitted and is waiting for their
+  decision. An approved week is final for everyone but Admins. The team member gets a
+  notification ("Harsh changed your time on 21 Oct from 3h to 2.5h"), and every change is kept
+  in the audit log.
+- **Renaming and deleting are admin-only everywhere.** Access alone was never a sufficient
+  test: everyone who can see a public Space resolves to full access on everything inside it,
+  so without a role check any member could have deleted a Folder holding a year of work.
 
 ---
 
@@ -83,22 +138,13 @@ Spaces hold Folders, Folders hold Lists, Lists hold tasks, tasks hold subtasks f
 > *VAPL Common Operations* → *Monthly Review* → *PMS – Accounts* → "File Infrabeat GSTR-3B"
 > → "Collect the purchase register"
 
-**Statuses** are defined at any level and inherit downward, so one status set can cover a
-whole Space while a single List overrides it. **Custom task IDs** give every task a name you
-can say out loud — `VAP-1942`. **Task types** mark what kind of thing a task is (Milestone,
-Client Request) and can be applied to many tasks at once from the selection bar.
+A new Space is made through a short **Create Space** flow and carries a **default
+permission** and **default views**; each List opens on its List view. **Statuses** are defined
+at any level and inherit downward. **Custom task IDs** give every task a name you can say out
+loud — `VAP-1942`.
 
-A task carries status, priority, assignees, start and due dates, a time estimate, type,
-tags, custom fields, checklists, attachments, relationships, watchers and its own activity
-feed.
-
-### Seeing it
-
-The same tasks, read six ways: **List**, **Board**, **Table**, **Calendar**, **Workload**
-and **Activity**. Gantt, Timeline, Team, Chat, Map, Form and Doc are built and behind a flag.
-
-Each view remembers its own grouping, filters and columns, so one List can carry "Mine, by
-due date" and "Everything, by client" without either disturbing the other.
+A task carries status, priority, assignees, start and due dates, a time estimate, checklists,
+attachments and its own activity feed.
 
 ### Tracking time
 
@@ -113,111 +159,101 @@ Three ways, because people record time in three different situations:
 ### Timesheets
 
 A week as a grid: tasks down the side, days across. Hovering a cell shows the entries behind
-it. Capacity is set per weekday per person, by an admin, and the day column turns red when
-the hours pass it.
+it. Working hours are set for the company, each Team and each person, and the day column
+turns red when the hours pass them.
 
-A week can be **submitted**, which locks it and routes it to the person's reporting manager,
-who approves it or asks for changes with a comment thread attached.
+A week can be **submitted**, which locks it and routes it to the person's Manager, who
+approves it, fixes it, or asks for changes with a comment thread attached.
 
-### Dashboards
+### Planner and dashboards
 
-Nineteen card types — figures, pie, bar, line, capacity, variance, timesheet, time report,
-workload, portfolio, task lists, notes and more. Each card carries its own filters, and
-clicking into one drills through to the tasks behind the number.
-
-Three boards are made automatically:
+The **Planner** shows work by day, week or month. **Highlights** describe a person's or a
+Team's week in sentences. Dashboards are made automatically:
 
 | Board | Who gets it |
 |---|---|
 | **My work** | everyone |
-| **Team** | whoever leads a Team, person by person |
-| **Company** | owners and admins |
+| **Team** | Managers, person by person |
+| **Company** | Admins |
+
+### The assistant
+
+A chat bubble that understands plain requests — *"create a task to file GSTR-3B for Infrabeat
+every month on the 20th"*, *"how much time did I log yesterday?"* — in English and Hindi. Its
+phrase rules answer most things instantly; what they cannot parse goes to an AI model
+(`backend/app/services/work/ai_assistant.py`) through any OpenAI-compatible API.
 
 ### Working together
 
-Comments with `@mentions`, assigned comments, replies and reactions; watchers on a task; and
-an Inbox that sorts twenty-one kinds of notification into *things that need you* and
-*activity you follow*, with snooze. Notifications also reach people by email — instantly or
-as a daily digest at an hour they choose — by browser push, and by WhatsApp.
-
-### Duplicating
-
-Tasks, Lists, Folders and Spaces. Choose where the copy goes, choose **Everything**,
-**Tasks only** or **Customize**, decide whether archived tasks come along, and decide who
-the copy is for — either everyone, or named people, in which case the copy is made private
-and handed to them.
-
-### Sharing one task
-
-Distinct from duplicating, and the distinction matters. A shared task is *the same task* on
-several people's lists: an hour one person tracks is an hour the others see, and there is
-one comment thread. A duplicate is two tasks that drift apart from the moment they are made.
-
-### Automations
-
-Six triggers — created, status changed, priority changed, assignee added, due soon, overdue —
-against six actions: assign, notify, set priority, set status, escalate to the assignee's
-manager, add a tag. Set on any Space, Folder or List, inherited downward.
-
-> *When a task is two days overdue → tell the assignee's manager.*
+Comments with `@mentions`, replies and reactions, and an Inbox that sorts notifications into
+*things that need you* and *activity you follow*, with snooze. Notifications reach people in
+the app and by browser push. **Email is used for invitations only** — no digests, no updates.
 
 ### People
 
-Teams with sub-teams and leads, an org chart, a reporting manager per person, per-person
-working capacity, joiner and leaver checklists, bulk import, and an audit log.
-
----
-
-## Who can do what
-
-Permissions follow ClickUp's resolution order, with the firm's own rules on top.
-
-| | Task | List | Folder | Space |
-|---|---|---|---|---|
-| **Employee** | create · edit · duplicate | — | — | — |
-| **Manager** (leads a Team) | all | create · share · duplicate | create · share · duplicate | — |
-| **Admin / owner** | all | all | all | create · share · duplicate · rename · delete |
-
-**Renaming and deleting are admin-only everywhere.** Access alone was never a sufficient
-test: everyone who can see a public Space resolves to full access on everything inside it,
-so without a role check any member could have deleted a Folder holding a year of work. The
-one exception is a person's own Personal List, which is invisible to everyone else and so is
-theirs to name.
+Teams with sub-teams, an org chart (exportable), a reporting manager per person, addresses,
+per-person working hours, a leaver hand-over that moves open work to someone else, bulk
+import, and an audit log.
 
 ---
 
 ## Features behind flags
 
-Roughly two thirds of what is built is switched off in
-[`frontend/src/config/features.ts`](frontend/src/config/features.ts). Each flag carries a
-comment saying what it hides and why. Nothing behind a flag is unfinished — it is complete,
-tested, and waiting on a decision.
-
-The ones worth knowing about:
+Some finished features are switched off in
+[`frontend/src/config/features.ts`](frontend/src/config/features.ts), each with a comment
+saying why. Features the firm decided against (leave, billing) have been removed from the code
+rather than hidden.
 
 | Flag | What it turns on |
 |---|---|
 | `compliance` | Statutory calendar — GSTR-3B, TDS, AOC-4 and the rest, per client, as dated tasks |
-| `leave` | Leave types, allowances, Indian holidays, approvals, and capacity that drops when someone is off |
-| `billing` | Rates per person and location, client fees, profitability, invoice drafts |
 | `goals` | Numeric, currency, yes/no and task-completion targets |
 | `teamWeek` | One screen showing a team's whole week |
 | `templates` | Save any task, List, Folder or Space as a reusable template |
+| `automations` | When-this-then-that rules on Spaces, Folders and Lists |
 | `listEmail` | Forward an email to a List's own address and it becomes a task |
 
-`listEmail` additionally needs a catch-all mailbox with plus-addressing and four values in
-`backend/.env`; the rest are a single boolean.
+---
+
+## Recent work (October 2026)
+
+- **Went live:** the database moved from a local server to Supabase (every table and row
+  checked), the backend to Render, the frontend to Vercel.
+- **Managers fix their team's time**, including submitted weeks, with a notification and an
+  audit record.
+- **Three kinds of access** — Admin, Manager, Employee — replacing the older role names.
+- **Create Space** flow, Space default permissions and views.
+- **The assistant** gained an AI fallback, a guide, and better recurrence and phrase handling.
+- People got **addresses**, the org chart became **exportable**, and the phone layout gained
+  a scope switcher.
+- The original v1 pages (Calendar, Time Entries, Workload, Teams, Projects, Reports) were
+  removed; their v2 replacements are the only versions.
+
+## Next
+
+1. **Daily reminders** in the app and by push: nothing planned for today (10:30), no time
+   logged today (18:00), a timer running longer than 4 or 8 hours.
+2. **Notification controls:** quiet hours, a daily summary, and approving or completing work
+   straight from a notification.
+3. **Bulk actions with a preview:** hand all of someone's open tasks to another person, shift
+   due dates for a holiday, move people between Teams.
+4. **Files to Supabase Storage**, so attachments survive a redeploy.
+5. **Sign-in to Supabase Auth**, retiring Firebase.
 
 ---
 
 ## Known issues
 
-- **The server reads "today" in UTC.** Between midnight and 05:30 IST a public link outlives
-  its expiry and the sprint burndown loses today. Three call sites.
-- **Deleting cascades with no undo.** A Space takes its Folders, Lists and every task with
-  it. The audit log records who did it, not how to recover. Archive exists and is off.
-- **Muting an automation silences all of them.** Notification settings work per kind, not
-  per rule.
-- **Google Sheets export** needs OAuth credentials that are not configured. PDF, CSV and
-  Excel all work.
+- **The backend sleeps on Render's free plan** after 15 minutes without requests, and the
+  first request after that waits about a minute. Scheduled jobs pause while it sleeps; an
+  external ping every 10 minutes keeps it awake.
+- **Attachments are stored on the server's disk**, which Render wipes on every deploy.
+  Moving them to Supabase Storage is planned.
+- **Supabase's free plan has no automatic backups.** Take a `pg_dump` before risky changes.
+- **Sign-in still goes through Firebase**, and a few leftovers (presence, the old bell) still
+  read Firestore.
+- **The server reads "today" in UTC** in three places: between midnight and 05:30 IST a public
+  link outlives its expiry and the sprint burndown loses today.
+- **Deleting cascades with no undo.** A Space takes its Folders, Lists and every task with it.
+  The audit log records who did it, not how to recover.
 - **One large JavaScript chunk.** Every build warns; the app has not been split yet.

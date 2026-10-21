@@ -42,7 +42,9 @@ from app.services.work.access import Access, chain_for_task, open_task, tracking
 from app.services.work.errors import Forbidden, Invalid, NotFound
 from app.services.work.permissions import can_manage_workspace
 from app.services.work.timelocks import LOCKED, ensure_unlocked
-from app.services.work.timetracking import ensure_not_future, tags_for, time_visible_people
+from app.services.work.timetracking import (
+    ensure_not_future, may_change_time_of, tags_for, tell_time_owner, time_visible_people,
+)
 
 DEFAULT_CAPACITY = [8 * 3600] * 5 + [0, 0]  # Monday first
 DAY = timedelta(days=1)
@@ -152,7 +154,7 @@ def _member(db: Session, access: Access, user_id: str) -> WorkspaceMember:
 
 
 def can_view(db: Session, access: Access, user_id: str) -> bool:
-    """Own sheet, Team leads their Teams', admins everyone's, approvers the people they approve."""
+    """Own sheet, Managers their team's, admins everyone's, approvers the people they approve."""
     people = time_visible_people(db, access)
     if people is None or user_id in people:
         return True
@@ -167,8 +169,8 @@ def _require_view(db: Session, access: Access, user_id: str) -> None:
 
 def _require_edit(db: Session, access: Access, user_id: str) -> None:
     _require_view(db, access, user_id)
-    if user_id != access.user_id and not can_manage_workspace(access.role):
-        raise Forbidden("Only owners and admins can change someone else's time")
+    if not may_change_time_of(db, access, user_id):
+        raise Forbidden("Only admins, and Managers for their own team members, can change someone else's time")
 
 
 def current_submission(db: Session, workspace_id: uuid.UUID, user_id: str, period_start: date) -> Optional[TimesheetSubmission]:
@@ -369,6 +371,9 @@ def timesheet(
     settings = settings_row(db, access.workspace_id)
     locked = sub is not None and sub.status in LOCKED
     is_admin = can_manage_workspace(access.role)
+    # A Manager may fix their people's weeks, and a submitted one too (not an approved one).
+    may_fix = may_change_time_of(db, access, user_id)
+    lead_fixing = may_fix and user_id != access.user_id and sub is not None and sub.status == "pending"
     return t.TimesheetOut(
         user=s.UserOut.model_validate(user),
         period_start=first,
@@ -383,7 +388,7 @@ def timesheet(
         approvals_enabled=settings.approvals_enabled,
         submission=submission_out(db, access, sub) if sub else None,
         locked=locked,
-        can_edit=(user_id == access.user_id or is_admin) and (not locked or is_admin),
+        can_edit=may_fix and (not locked or is_admin or lead_fixing),
     )
 
 
@@ -401,6 +406,15 @@ def _may_track(db: Session, access: Access, task: Task) -> bool:
     return level is not None and level.at_least(PermissionLevel.edit)
 
 
+def _may_track_for(db: Session, access: Access, user_id: str, task: Task) -> bool:
+    """May hours be recorded for `user_id` on this task? Asked of the person whose time it is: a
+    Manager fixing a team member's week needs to see the task, not to be able to track on it."""
+    if user_id == access.user_id:
+        return _may_track(db, access, task)
+    member = _member(db, access, user_id)
+    return _may_track(db, Access(db, user_id, access.workspace_id, member.role), task)
+
+
 def set_cell(db: Session, access: Access, data: t.CellIn) -> None:
     """Make one task's tracked time on one day equal `seconds`."""
     user_id = data.user_id or access.user_id
@@ -409,10 +423,10 @@ def set_cell(db: Session, access: Access, data: t.CellIn) -> None:
     opened = open_task(db, access.user_id, data.task_id, PermissionLevel.view)
     if opened.access.workspace_id != access.workspace_id:
         raise NotFound("Task not found")
-    if not _may_track(db, access, opened.obj):
+    if not _may_track_for(db, access, user_id, opened.obj):
         raise Forbidden("You need edit access to a task to track time on it")
     day_start, day_end = _at(data.day, tz), _at(data.day + DAY, tz)
-    ensure_unlocked(db, access.workspace_id, user_id, day_start, access.role)
+    ensure_unlocked(db, access.workspace_id, user_id, day_start, access.role, reviewer=user_id != access.user_id)
     today = datetime.now(timezone.utc).astimezone(tz).date()
     cell = list(
         db.scalars(
@@ -451,6 +465,8 @@ def set_cell(db: Session, access: Access, data: t.CellIn) -> None:
                 entry.ended_at = entry.started_at + timedelta(seconds=entry.duration_seconds)
                 remove = 0
     db.flush()
+    if data.seconds != current:
+        tell_time_owner(db, access, user_id, data.task_id, "changed", data.day.isoformat(), data.seconds, current)
 
 
 
@@ -483,7 +499,7 @@ def add_row(db: Session, access: Access, data: t.RowIn) -> None:
     opened = open_task(db, access.user_id, data.task_id, PermissionLevel.view)
     if opened.access.workspace_id != access.workspace_id:
         raise NotFound("Task not found")
-    if not _may_track(db, access, opened.obj):
+    if not _may_track_for(db, access, user_id, opened.obj):
         raise Forbidden("You need edit access to a task to track time on it")
     first, _ = period_of(db, access.workspace_id, data.start)
     if db.get(TimesheetRow, (user_id, data.task_id, first)) is None:
@@ -497,7 +513,7 @@ def delete_row(db: Session, access: Access, data: t.RowIn) -> int:
     _require_edit(db, access, user_id)
     tz = zone(data.tz)
     first, last = period_of(db, access.workspace_id, data.start)
-    ensure_unlocked(db, access.workspace_id, user_id, _at(first, tz), access.role)
+    ensure_unlocked(db, access.workspace_id, user_id, _at(first, tz), access.role, reviewer=user_id != access.user_id)
     entries = list(
         db.scalars(
             select(TimeEntry).where(
@@ -515,6 +531,9 @@ def delete_row(db: Session, access: Access, data: t.RowIn) -> int:
     if pin is not None:
         db.delete(pin)
     db.flush()
+    if entries:
+        tell_time_owner(db, access, user_id, data.task_id, "deleted", first.isoformat(), 0,
+                        sum(e.duration_seconds or 0 for e in entries))
     return len(entries)
 
 
@@ -562,7 +581,7 @@ def pickable_tasks(db: Session, access: Access, query: str, limit: int = 20) -> 
 def all_timesheets(db: Session, access: Access, any_day: date, tz: ZoneInfo, team_id: Optional[uuid.UUID] = None) -> t.AllTimesheetsOut:
     visible = time_visible_people(db, access)
     if visible is not None and visible <= {access.user_id}:
-        raise Forbidden("Only owners, admins and Team leads can see other people's timesheets")
+        raise Forbidden("Only admins and Managers can see other people's timesheets")
     first, last = period_of(db, access.workspace_id, any_day)
     days = [first + i * DAY for i in range(7)]
     start, end = _at(first, tz), _at(last + DAY, tz)
