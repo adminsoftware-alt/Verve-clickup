@@ -42,7 +42,7 @@ from app.services.work.access import Access, chain_for_task, open_task, tracking
 from app.services.work.errors import Forbidden, Invalid, NotFound
 from app.services.work.permissions import can_manage_workspace
 from app.services.work.timelocks import LOCKED, ensure_unlocked
-from app.services.work.timetracking import tags_for, time_visible_people
+from app.services.work.timetracking import ensure_not_future, tags_for, time_visible_people
 
 DEFAULT_CAPACITY = [8 * 3600] * 5 + [0, 0]  # Monday first
 DAY = timedelta(days=1)
@@ -413,6 +413,7 @@ def set_cell(db: Session, access: Access, data: t.CellIn) -> None:
         raise Forbidden("You need edit access to a task to track time on it")
     day_start, day_end = _at(data.day, tz), _at(data.day + DAY, tz)
     ensure_unlocked(db, access.workspace_id, user_id, day_start, access.role)
+    today = datetime.now(timezone.utc).astimezone(tz).date()
     cell = list(
         db.scalars(
             select(TimeEntry).where(
@@ -426,8 +427,12 @@ def set_cell(db: Session, access: Access, data: t.CellIn) -> None:
     )
     current = sum(e.duration_seconds or 0 for e in cell)
     if data.seconds > current:
+        # Taking time off a day ahead is tidying up; adding to one is recording work not yet done.
+        if data.day > today:
+            raise Invalid("Time can only be logged for days that have already started")
         extra = data.seconds - current
         begin = _new_entry_start(data.day, tz, extra, day_start, day_end)
+        ensure_not_future(begin + timedelta(seconds=extra))
         db.add(TimeEntry(
             task_id=data.task_id, user_id=user_id, started_at=begin, ended_at=begin + timedelta(seconds=extra),
             duration_seconds=extra, created_by=access.user_id,
@@ -462,7 +467,11 @@ def _new_entry_start(day: date, tz: ZoneInfo, seconds: int, day_start: datetime,
     The one thing it cannot do is run past midnight, so an entry long enough to overflow the day
     is pulled back until it fits.
     """
-    here = datetime.now(timezone.utc).astimezone(tz)
+    now = datetime.now(timezone.utc)
+    here = now.astimezone(tz)
+    if day == here.date():
+        # Today the hour just typed is the hour just worked: it ends now, not an hour from now.
+        return max(now.replace(second=0, microsecond=0) - timedelta(seconds=seconds), day_start)
     begin = datetime.combine(day, time(here.hour, here.minute), tz).astimezone(timezone.utc)
     if seconds >= (day_end - day_start).total_seconds():
         return day_start
@@ -519,7 +528,22 @@ def pickable_tasks(db: Session, access: Access, query: str, limit: int = 20) -> 
     )
     if query.strip():
         q = q.where(Task.name.ilike(f"%{query.strip()}%"))
-    candidates = list(db.scalars(q.order_by(Task.updated_at.desc()).limit(200)))
+    # Your own open work first, then other open work, then anything finished: the task you are
+    # about to log time on is almost always one of yours that is still going, and a list led by
+    # last week's closed tasks from somebody else's List buried it.
+    from sqlalchemy import case
+
+    from app.db.models import StatusGroup, TaskAssignee
+
+    mine = (
+        select(TaskAssignee.task_id)
+        .where(TaskAssignee.task_id == Task.id, TaskAssignee.user_id == access.user_id)
+        .exists()
+    )
+    finished = Status.group.in_([StatusGroup.done, StatusGroup.closed])
+    rank = case((~finished & mine, 0), (~finished, 1), (mine, 2), else_=3)
+    q = q.join(Status, Status.id == Task.status_id)
+    candidates = list(db.scalars(q.order_by(rank, Task.updated_at.desc()).limit(200)))
     statuses = {st.id: st for st in db.scalars(select(Status).where(Status.id.in_({x.status_id for x in candidates})))} if candidates else {}
     locate = _Locator(db)
     out = []

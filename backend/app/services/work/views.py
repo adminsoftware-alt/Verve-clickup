@@ -65,6 +65,21 @@ def add_required_views(db: Session, owner: Owner, user_id: str, existing: Sequen
         )
 
 
+def add_default_views(db: Session, owner: Owner, space: Space, user_id: str) -> None:
+    """The Space's chosen default views, after the required ones, on a new Space or Folder.
+
+    Never on a List: a List shows its List view and nothing else (the firm's call, 2026-10-16).
+    """
+    if isinstance(owner, TaskList):
+        return
+    required = set(_required_types(owner))
+    for position, name in enumerate(space.default_views or []):
+        view_type = ViewType(name)
+        if view_type in required:
+            continue
+        db.add(View(type=view_type, name=DEFAULT_NAMES[view_type], orderindex=float(position), created_by=user_id,
+                    **{_parent_column(owner).key: owner.id}))
+
 
 def list_views(db: Session, opened: Opened) -> List[View]:
     """The views here, without other people's private views; the default view comes first."""
@@ -78,15 +93,24 @@ def list_views(db: Session, opened: Opened) -> List[View]:
         db.flush()
         views = list(db.scalars(query))
     mine = [v for v in views if v.private_to is None or v.private_to == opened.access.user_id]
+    if isinstance(opened.obj, TaskList):
+        # A List's only tab is its List view.
+        mine = [v for v in mine if v.type == ViewType.list]
     return sorted(mine, key=lambda v: not v.is_default)
 
 
-def create_view(db: Session, opened: Opened, data: s.ViewCreate) -> View:
+def create_view(db: Session, opened: Opened, data: s.ViewCreate, *, system: bool = False) -> View:
     # As in ClickUp, anyone who can see a location may add a private view for themselves.
     if not data.private and not opened.level.at_least(PermissionLevel.edit):
         raise Forbidden("You need edit access to add views here")
     if data.type == ViewType.overview:
         raise Invalid("Every Space and Folder already has its Overview")
+    # A List is one view: its List. Boards, tables, calendars and the rest belong to the Space or
+    # Folder above it, where they show every List at once.
+    # (`system`: the induction questionnaire, a Form the app keeps on the Induction List. It is
+    # opened from its link and never shown as a tab.)
+    if isinstance(opened.obj, TaskList) and not system:
+        raise Invalid("A List shows only its List view. Add other views to its Space or Folder.")
     if data.type == ViewType.form and not isinstance(opened.obj, TaskList):
         raise Invalid("Forms create tasks in one List, so add them to a List")
     column = _parent_column(opened.obj)

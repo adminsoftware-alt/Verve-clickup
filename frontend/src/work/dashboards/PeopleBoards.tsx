@@ -15,7 +15,11 @@ import { DashboardPage } from './DashboardPage';
 
 const nameOf = (p: PersonBoard) => p.user.display_name || p.user.email;
 
-type Sort = 'name' | 'overdue' | 'open';
+type Sort = 'name' | 'overdue' | 'open' | 'today';
+type Show = 'all' | 'overdue' | 'today';
+
+const SORTS: [Sort, string][] = [['name', 'Name'], ['overdue', 'Most overdue'], ['open', 'Most open'], ['today', 'Due today']];
+const SHOWS: [Show, string][] = [['all', 'Everyone'], ['overdue', 'Only people with overdue work'], ['today', 'Only people with work due today']];
 
 /** How someone is doing, in one calm word -- coloured only when it needs attention. */
 function standing(p: PersonBoard): { label: string; cls: string } {
@@ -39,6 +43,99 @@ function usePeople() {
   return { people, error };
 }
 
+// --- the filter ------------------------------------------------------------------------------
+
+/**
+ * Order, who to show, and which Team, behind one button. Three separate controls in the toolbar
+ * said the same thing three times; this is the same "Filter" button as every list in the app,
+ * with a count when anything differs from the plain alphabetical list of everyone.
+ */
+const PeopleFilter: React.FC<{
+  teams: string[];
+  team: string;
+  sort: Sort;
+  show: Show;
+  onTeam: (t: string) => void;
+  onSort: (s: Sort) => void;
+  onShow: (s: Show) => void;
+  onReset: () => void;
+}> = ({ teams, team, sort, show, onTeam, onSort, onShow, onReset }) => {
+  const [box, setBox] = useState<{ top: number; left: number } | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const open = box !== null;
+  const count = (sort !== 'name' ? 1 : 0) + (show !== 'all' ? 1 : 0) + (team ? 1 : 0);
+  const WIDTH = 264;
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => { if (!panel.current?.contains(e.target as Node) && !button.current?.contains(e.target as Node)) setBox(null); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setBox(null); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+  }, [open]);
+
+  const toggle = () => {
+    const r = button.current?.getBoundingClientRect();
+    if (open || !r) { setBox(null); return; }
+    setBox({ top: r.bottom + 6, left: Math.max(8, Math.min(r.right - WIDTH, window.innerWidth - WIDTH - 8)) });
+  };
+
+  const row = (on: boolean, label: string, pick: () => void) => (
+    <button key={label} type="button" role="menuitemradio" aria-checked={on} onClick={pick}
+      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-gray-50 ${on ? 'font-medium text-gray-900' : 'text-gray-600'}`}>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {on && <Check size={14} className="shrink-0 text-teal-600" />}
+    </button>
+  );
+  const heading = (text: string) => (
+    <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">{text}</p>
+  );
+
+  return (
+    <>
+      <button ref={button} type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open}
+        className={`flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm shadow-sm ${
+          count ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}>
+        Filter
+        {count > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-semibold leading-none text-white">{count}</span>}
+        <ChevronDown size={13} className={`transition-transform ${open ? 'rotate-180' : ''} ${count ? 'text-teal-500' : 'text-gray-400'}`} />
+      </button>
+      {box && (
+        <Portal>
+          <div ref={panel} role="menu" aria-label="Filter people"
+            style={{ position: 'fixed', top: box.top, left: box.left, width: WIDTH }}
+            className="admin-pop z-[130] max-h-[70vh] overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-2xl">
+            {heading('Sort by')}
+            {SORTS.map(([v, l]) => row(sort === v, l, () => onSort(v)))}
+            <div className="my-1 border-t border-gray-100" />
+            {heading('Show')}
+            {SHOWS.map(([v, l]) => row(show === v, l, () => onShow(v)))}
+            {teams.length > 0 && (
+              <>
+                <div className="my-1 border-t border-gray-100" />
+                {heading('Team')}
+                {row(!team, 'All teams', () => onTeam(''))}
+                {teams.map((t) => row(team === t, t, () => onTeam(t)))}
+              </>
+            )}
+            {count > 0 && (
+              <>
+                <div className="my-1 border-t border-gray-100" />
+                <button type="button" role="menuitem" onClick={onReset}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-gray-500 hover:bg-gray-50 hover:text-gray-800">
+                  <X size={13} /> Reset
+                </button>
+              </>
+            )}
+          </div>
+        </Portal>
+      )}
+    </>
+  );
+};
+
 // --- the grid --------------------------------------------------------------------------------
 
 export const PeopleBoards: React.FC = () => {
@@ -47,18 +144,22 @@ export const PeopleBoards: React.FC = () => {
   const [q, setQ] = useState('');
   const [team, setTeam] = useState('');
   const [sort, setSort] = useState<Sort>('name');
+  const [show, setShow] = useState<Show>('all');
 
   const teams = useMemo(() => [...new Set((people ?? []).flatMap((p) => p.teams))].sort(), [people]);
   const shown = useMemo(() => {
     const text = q.trim().toLowerCase();
     const rows = (people ?? []).filter((p) => (
       (!team || p.teams.includes(team))
+      && (show !== 'overdue' || p.overdue > 0)
+      && (show !== 'today' || p.due_today > 0)
       && (!text || nameOf(p).toLowerCase().includes(text) || (p.designation ?? '').toLowerCase().includes(text) || p.user.email.toLowerCase().includes(text))
     ));
     if (sort === 'overdue') return [...rows].sort((a, b) => b.overdue - a.overdue || b.open - a.open);
     if (sort === 'open') return [...rows].sort((a, b) => b.open - a.open || b.overdue - a.overdue);
+    if (sort === 'today') return [...rows].sort((a, b) => b.due_today - a.due_today || b.overdue - a.overdue);
     return rows;
-  }, [people, q, team, sort]);
+  }, [people, q, team, sort, show]);
 
   if (error) return <p className="mt-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>;
 
@@ -72,20 +173,12 @@ export const PeopleBoards: React.FC = () => {
             className="w-full bg-transparent text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none" />
           {q && <button type="button" aria-label="Clear search" onClick={() => setQ('')} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>}
         </label>
-        {teams.length > 1 && (
-          <select value={team} onChange={(e) => setTeam(e.target.value)} aria-label="Team"
-            className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-500/10">
-            <option value="">All teams</option>
-            {teams.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-        )}
-        <div className="ml-auto flex rounded-lg border border-gray-200 bg-gray-50 p-0.5" role="radiogroup" aria-label="Sort people">
-          {([['name', 'Name'], ['overdue', 'Most overdue'], ['open', 'Most open']] as [Sort, string][]).map(([v, l]) => (
-            <button key={v} type="button" role="radio" aria-checked={sort === v} onClick={() => setSort(v)}
-              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${sort === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}>
-              {l}
-            </button>
-          ))}
+        <div className="ml-auto">
+          <PeopleFilter
+            teams={teams} team={team} sort={sort} show={show}
+            onTeam={setTeam} onSort={setSort} onShow={setShow}
+            onReset={() => { setTeam(''); setSort('name'); setShow('all'); }}
+          />
         </div>
       </div>
 

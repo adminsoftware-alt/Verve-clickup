@@ -16,9 +16,11 @@
 // nothing it says so instead of picking. And it will not delete by description alone -- the caller
 // has to show which task it found and wait, because there is no undo for the wrong one.
 
+import type { Recurrence } from '../api';
 import { parseTypedDate } from '../dates';
-import { parseDuration } from '../ui';
 import { matchPerson, type Person } from './parseCommand';
+import { readRepeat } from './recurrence';
+import { readDuration } from './tidy';
 
 /** One change to make. `says` is the words it came from, for showing the working. */
 export type Change =
@@ -27,7 +29,18 @@ export type Change =
   | { field: 'priority'; value: number | null; says: string }
   | { field: 'name'; value: string; says: string }
   | { field: 'estimate'; value: number | null; says: string }
+  /** Everybody on it, replaced: "reassign", "give", "hand over", "change the assignee". */
   | { field: 'assignees'; value: string[]; says: string }
+  /** Somebody added, keeping whoever is on it already: "assign X to Laxmi". */
+  | { field: 'add_assignees'; value: string[]; says: string }
+  /** Somebody taken off, leaving the rest: "unassign Aarti from X". */
+  | { field: 'remove_assignees'; value: string[]; says: string }
+  /** Tags by name. A name the Space does not have yet is made, as it is from the task's own tag box. */
+  | { field: 'add_tags'; value: string[]; says: string }
+  | { field: 'remove_tags'; value: string[]; says: string }
+  | { field: 'archived'; value: boolean; says: string }
+  /** How it repeats; null stops it. A weekly or monthly rule takes its day from the task's due date. */
+  | { field: 'recurrence'; value: Recurrence | null; says: string }
   /** A move to another List. The name is resolved against the tree by the caller. */
   | { field: 'list'; said: string; says: string }
   /** A status, by name. Each List has its own, so the caller resolves it against the task's. */
@@ -74,7 +87,7 @@ const FIELDS: { field: Change['field']; pattern: RegExp }[] = [
 const PLACE_WORD = /\b(?:lists?|folders?|spaces?|sections?|boards?|projects?)\b/i;
 
 /** Verbs that open an instruction to change something. */
-const VERB = /^(?:please\s+)?(?:can you\s+)?(?:change|update|edit|modify|rename|re-?assign|assign|reschedule|postpone|push(?:\s+back)?|move|shift|set|clear|remove|delete|unset|mark|put)\s+/i;
+const VERB = /^(?:please\s+)?(?:can you\s+)?(?:change|update|edit|modify|rename|re-?assign|assign|reschedule|postpone|push(?:\s+back)?|move|shift|set|clear|remove|delete|unset|mark|put|make)\s+/i;
 
 /**
  * The status names people say, whatever a List actually calls them. Only these are read as a
@@ -89,7 +102,7 @@ const STATUS_AT_END = new RegExp(`\\s+(?:as\\s+)?(${STATUS_WORDS})\\s*$`, 'i');
  * Further changes said after the first: "... to friday and make it high priority". Each one is
  * read as its own short instruction about the same task.
  */
-const MORE = /\s*,?\s+and\s+(?:also\s+)?(?=(?:make|set|change|mark|move|push|reschedule|re-?assign|assign|give)\s+(?:it|its|the)\b)/i;
+const MORE = /\s*,?\s+and\s+(?:also\s+)?(?=(?:make|set|change|mark|move|push|reschedule|re-?assign|assign|give|tag)\s+(?:it|its|the)\b)/i;
 
 /**
  * Verbs that name the field by themselves.
@@ -123,17 +136,138 @@ const EMPTY = /^(?:nothing|none|no\s+\w+|empty|blank|unset|clear(?:ed)?|nobody)$
  * @param me the signed-in person's id, so "assign it to me" has somebody to mean.
  */
 export function readEdit(input: string, people: Person[], me?: string, now = new Date()): EditRead {
-  const [first, ...more] = squash(input).split(MORE);
-  const read = readOne(first, people, me, now);
+  const [first, ...more] = squash(input).replace(/[\s.!?,;]+$/, '').split(MORE);
+  const read = readShape(first, people, me, now) ?? readOne(first, people, me, now);
   for (const clause of more) {
     // "make it high priority" says nothing a "set it to" would not, and "set it to" is a shape
     // the reader already knows.
-    const said = clause.replace(/^(?:make|give)\s+it\s+(?:an?\s+)?/i, 'set it to ');
-    const extra = readOne(said, people, me, now);
+    const said = /^make\s+it\s+(?:repeat|recur)/i.test(clause) ? clause : clause.replace(/^(?:make|give)\s+it\s+(?:an?\s+)?/i, 'set it to ');
+    const extra = readShape(said, people, me, now) ?? readOne(said, people, me, now);
     read.changes.push(...extra.changes);
     read.unknown.push(...extra.unknown.filter((u) => u !== 'which task did you mean?'));
   }
   return read;
+}
+
+/** "Aarti", "Aarti and Laxmi", "me" -- everybody named, or null if any of them is nobody here. */
+function everyone(said: string, people: Person[], me?: string): string[] | null {
+  const names = said.split(/\s*(?:,|\band\b|&)\s*/i).map((w) => w.trim()).filter(Boolean);
+  if (!names.length) return null;
+  const ids: string[] = [];
+  for (const n of names) {
+    const hit = matchPerson(n, people);
+    if (!hit) return null;
+    ids.push(hit === 'me' ? me ?? '' : hit.id);
+  }
+  return ids;
+}
+
+/** How a task was referred to, with the words around it that only pointed at it. */
+export function taskWords(said: string): string {
+  return squash(said
+    .replace(/^\s*(?:of|for|on|to)\s+/i, '')
+    .replace(/^\s*(?:the|this|that|my)\s+/i, '')
+    .replace(/^\s*task\s+(?:called\s+|named\s+)?/i, '')
+    .replace(/\s*\btask\s*$/i, '')
+    .replace(/^["“']|["”']$/g, ''));
+}
+
+const PRIORITY_LEVEL = '(urgent|critical|asap|top|high|important|normal|medium|low|minor)';
+const DURATION = '(\\d+(?:[.:]\\d+)?\\s*(?:h|hr|hrs|hours?|m|mins?|minutes?)?)';
+
+/**
+ * Instructions with a shape of their own, read whole rather than field by field.
+ *
+ * "Assign the GST return to Laxmi" and "unassign Aarti from the GST return" put the task and the
+ * person the other way round from each other, and "add tag X to Y" puts the value first -- none of
+ * which the field-then-value reading below expects. Each is one pattern, tried in turn.
+ */
+export function readShape(input: string, people: Person[], me?: string, now = new Date()): EditRead | null {
+  const text = squash(input).replace(/^(?:please\s+)?(?:can you\s+)?/i, '');
+  const made = (which: string, change: Change): EditRead => {
+    const w = taskWords(which);
+    const it = /^(?:it|that|this|them)$/i.test(w);
+    return { which: it ? '' : w, changes: [change], unknown: [] };
+  };
+  let m: RegExpMatchArray | null;
+
+  // Archiving. The task stays, out of the way, and can be brought back.
+  if ((m = text.match(/^(un-?archive|restore)\s+(.+)$/i))) return made(m[2], { field: 'archived', value: false, says: m[1] });
+  if ((m = text.match(/^archive\s+(.+)$/i))) return made(m[1], { field: 'archived', value: true, says: 'archive' });
+
+  // Tags: "add tag urgent-client to X", "tag X as urgent", "remove tag Y from X", "untag Y from X".
+  const tags = (s: string) => s.split(/\s*(?:,|\band\b)\s*/i).map((t) => t.trim().replace(/^#/, '').replace(/^["“']|["”']$/g, '')).filter(Boolean);
+  if ((m = text.match(/^(?:add|put)\s+(?:the\s+|a\s+)?tags?\s+(.+?)\s+(?:to|on)\s+(.+)$/i))) return made(m[2], { field: 'add_tags', value: tags(m[1]), says: m[1] });
+  if ((m = text.match(/^tag\s+(.+?)\s+(?:as|with)\s+(.+)$/i))) return made(m[1], { field: 'add_tags', value: tags(m[2]), says: m[2] });
+  if ((m = text.match(/^(?:remove|delete|take\s+off|drop)\s+(?:the\s+)?tags?\s+(.+?)\s+(?:from|off)\s+(.+)$/i))) return made(m[2], { field: 'remove_tags', value: tags(m[1]), says: m[1] });
+  if ((m = text.match(/^untag\s+(.+?)\s+from\s+(.+)$/i))) return made(m[2], { field: 'remove_tags', value: tags(m[1]), says: m[1] });
+
+  // An estimate added: "add estimate 2h to X", "add an estimate of 90 minutes to X", "add 2h estimate to X".
+  if ((m = text.match(new RegExp(`^(?:add|put|give)\\s+(?:an?\\s+)?(?:time\\s+)?estimate\\s+(?:of\\s+)?${DURATION}\\s+(?:to|on|for)\\s+(.+)$`, 'i')))
+    || (m = text.match(new RegExp(`^(?:add|put|give)\\s+(?:an?\\s+)?${DURATION}\\s+(?:time\\s+)?estimate\\s+(?:to|on|for)\\s+(.+)$`, 'i')))) {
+    const seconds = readDuration(m[1]);
+    if (seconds) return made(m[2], { field: 'estimate', value: seconds, says: m[1] });
+  }
+  if ((m = text.match(new RegExp(`^estimate\\s+(.+?)\\s+(?:at|as|to be)\\s+${DURATION}$`, 'i')))) {
+    const seconds = readDuration(m[2]);
+    if (seconds) return made(m[1], { field: 'estimate', value: seconds, says: m[2] });
+  }
+
+  // Taking somebody off: "unassign Aarti from X", "remove Aarti from X", "take Aarti off X".
+  if ((m = text.match(/^(?:un-?assign|remove|take)\s+(.+?)\s+(?:from|off(?:\s+of)?)\s+(.+)$/i))) {
+    const ids = everyone(m[1].replace(/^(?:the\s+)?(?:assignees?|owner)\s*/i, ''), people, me);
+    if (ids) return made(m[2], { field: 'remove_assignees', value: ids, says: m[1] });
+  }
+  // Taking everybody off: "unassign X", "remove the assignee of X", "remove everyone from X".
+  if ((m = text.match(/^un-?assign\s+(?:everyone\s+from\s+|everybody\s+from\s+)?(.+)$/i))
+    || (m = text.match(/^(?:remove|clear)\s+(?:the\s+|all\s+(?:the\s+)?)?(?:assignees?|owners?)\s+(?:of|from|on)\s+(.+)$/i))
+    || (m = text.match(/^(?:remove|take)\s+(?:everyone|everybody)\s+(?:from|off)\s+(.+)$/i))) {
+    return made(m[1], { field: 'assignees', value: [], says: 'nobody' });
+  }
+
+  // Handing it over: "give X to Asmita", "hand over X to Asmita", "hand X over to Asmita".
+  if ((m = text.match(/^(?:give|hand\s+over|hand|pass)\s+(.+?)\s+(?:over\s+)?to\s+(.+)$/i))) {
+    const ids = everyone(m[2], people, me);
+    if (ids) return made(m[1], { field: 'assignees', value: ids, says: m[2] });
+  }
+  // "make me the assignee of X", which the speech tidy-up has already made "assign to me of X".
+  if ((m = text.match(/^assign\s+to\s+(.+?)\s+(?:of|on|for)\s+(.+)$/i))) {
+    const ids = everyone(m[1], people, me);
+    if (ids) return made(m[2], { field: 'add_assignees', value: ids, says: m[1] });
+  }
+  // "Assign it to me", which the speech tidy-up has already made "assign to me": the task is the
+  // one last touched.
+  if ((m = text.match(/^assign\s+to\s+(.+)$/i))) {
+    const ids = everyone(m[1], people, me);
+    if (ids) return { which: '', changes: [{ field: 'add_assignees', value: ids, says: m[1] }], unknown: [] };
+  }
+  // Adding somebody: "assign X to Laxmi". Not "reassign", which replaces, and is read below.
+  if ((m = text.match(/^assign\s+(?!to\b)(.+)\s+to\s+(.+)$/i))) {
+    const ids = everyone(m[2], people, me);
+    if (ids) return made(m[1], { field: 'add_assignees', value: ids, says: m[2] });
+  }
+
+  // "make X high priority", "make it urgent", "make X a low priority".
+  if ((m = text.match(new RegExp(`^make\\s+(.+?)\\s+(?:an?\\s+)?${PRIORITY_LEVEL}(?:\\s+priority)?$`, 'i')))) {
+    const level = PRIORITY_WORDS.find(([p]) => p.test(m![2]))?.[1];
+    if (level !== undefined) return made(m[1], { field: 'priority', value: level || null, says: m[2] });
+  }
+
+  // Repeats: "make X repeat every monday", "set X to repeat monthly", "repeat X every 2 weeks",
+  // "stop repeating X".
+  if ((m = text.match(/^(?:stop\s+repeating|don'?t\s+repeat|do\s+not\s+repeat|stop\s+the\s+repeat\s+(?:of|on))\s+(.+)$/i))
+    || (m = text.match(/^(?:stop|end)\s+(.+?)\s+(?:from\s+)?(?:repeating|recurring)$/i))) {
+    return made(m[1], { field: 'recurrence', value: null, says: 'stop repeating' });
+  }
+  if ((m = text.match(/^(?:make|set)\s+(.+?)\s+(?:to\s+)?(?:repeat|recur)s?\s+(.+)$/i))
+    || (m = text.match(/^(?:repeat|recur)\s+(.+?)\s+((?:every|each|daily|weekly|monthly|yearly|annually|fortnightly|quarterly|on\s+week).*)$/i))
+    || (m = text.match(/^(.+?)\s+(?:should\s+)?(?:repeats?|recurs?)\s+(.+)$/i))) {
+    const repeat = readRepeat(m[2], now);
+    // Left unsettled: a weekly or monthly rule takes its day from the task's own due date, which
+    // only the caller knows once it has found the task.
+    if (repeat) return made(m[1], { field: 'recurrence', value: repeat.rule, says: repeat.from });
+  }
+  return null;
 }
 
 function readOne(input: string, people: Person[], me?: string, now = new Date()): EditRead {
@@ -197,7 +331,7 @@ function readOne(input: string, people: Person[], me?: string, now = new Date())
     ? said.split(/\s*(?:,|and)\s*/i).map((w) => matchPerson(w.trim(), people)).filter(Boolean)
     : [];
   const everyoneNamed = asPeople.length > 0 && asPeople.length === said.split(/\s*(?:,|and)\s*/i).filter(Boolean).length;
-  const asDuration = said ? parseDuration(said) : null;
+  const asDuration = said ? readDuration(said) : null;
   // "Clear the due date of the audit" names no new value, and the verb is the whole instruction.
   const emptied = (said !== '' && EMPTY.test(said)) || (said === '' && CLEARING.test(verbWord));
 
@@ -273,7 +407,10 @@ const BIN = /^(?:please\s+)?(?:can you\s+)?(?:delete|remove|bin|discard|drop|get
 export function readDelete(input: string): string | null {
   const text = squash(input);
   if (!BIN.test(text)) return null;
-  if (FIELDS.some((f) => f.pattern.test(text))) return null;
+  // A field straight after the verb -- "remove the due date of X". Anywhere else the field words
+  // are the task's own name: "delete task Update due date sheet" is a task that gets deleted.
+  const after = text.replace(BIN, '').replace(/^(?:the|its)\s+/i, '');
+  if (FIELDS.some((f) => after.search(f.pattern) === 0)) return null;
   const which = squash(text.replace(BIN, '')
     .replace(/^\s*(?:the|this|that|my)\s+/i, '')
     .replace(/^\s*tasks?\s+(?:called\s+|named\s+)?/i, '')

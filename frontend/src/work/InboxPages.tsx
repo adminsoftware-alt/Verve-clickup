@@ -216,7 +216,7 @@ export const InboxPage: React.FC = () => {
           <button type="button" title="Clear all" aria-label="Clear all" onClick={() => collabApi.clearAll(workspace.id, tab).then(load).then(inboxChanged)} className="tap flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><Archive size={14} /> <span className="hidden sm:inline">Clear all</span></button>
         </>
       )}
-      <button type="button" title="Notification settings" onClick={() => setSettings(true)} className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><Settings size={16} /></button>
+      <button aria-label="Notification settings" type="button" title="Notification settings" onClick={() => setSettings(true)} className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><Settings size={16} /></button>
     </>}>
       <nav className="scroll-x flex gap-5 border-b border-gray-200 bg-white px-4 sm:px-6" aria-label="Inbox tabs">
         {TABS.map((t) => (
@@ -287,9 +287,9 @@ export const InboxPage: React.FC = () => {
                 />
               ) : (
                 <span className="flex shrink-0 items-center gap-0.5 opacity-60 group-hover:opacity-100">
-                  <button type="button" title={item.read ? 'Mark unread' : 'Mark read'} onClick={() => act(item.id, { read: !item.read })} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Check size={14} /></button>
-                  {tab !== 'cleared' && <button type="button" title="Snooze" onClick={() => setSnoozing(snoozing === item.id ? null : item.id)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Clock size={14} /></button>}
-                  {tab === 'later' && item.snoozed_until && <button type="button" title="Wake now" onClick={() => act(item.id, { unsnooze: true })} className="rounded p-1 text-gray-500 hover:bg-gray-100"><BellOff size={14} /></button>}
+                  <button aria-label={item.read ? 'Mark unread' : 'Mark read'} type="button" title={item.read ? 'Mark unread' : 'Mark read'} onClick={() => act(item.id, { read: !item.read })} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Check size={14} /></button>
+                  {tab !== 'cleared' && <button aria-label="Snooze" type="button" title="Snooze" onClick={() => setSnoozing(snoozing === item.id ? null : item.id)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Clock size={14} /></button>}
+                  {tab === 'later' && item.snoozed_until && <button aria-label="Wake now" type="button" title="Wake now" onClick={() => act(item.id, { unsnooze: true })} className="rounded p-1 text-gray-500 hover:bg-gray-100"><BellOff size={14} /></button>}
                   <button type="button" title={item.cleared ? 'Restore' : 'Clear'} onClick={() => act(item.id, { cleared: !item.cleared })} className="rounded p-1 text-gray-500 hover:bg-gray-100">{item.cleared ? <InboxIcon size={14} /> : <X size={14} />}</button>
                 </span>
               )}
@@ -322,7 +322,7 @@ const NotificationSettings: React.FC<{ onClose: () => void }> = ({ onClose }) =>
         <div role="dialog" aria-label="Notification settings" onMouseDown={(e) => e.stopPropagation()} className="max-h-[90vh] w-[30rem] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl bg-white p-5 shadow-xl">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="font-semibold text-gray-900">Notification settings</h3>
-            <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </div>
           <DeliverySettings />
           <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-gray-400">What reaches your Inbox</p>

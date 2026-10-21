@@ -90,7 +90,7 @@ export const Approvals: React.FC<{ settings: SheetSettings | null }> = ({ settin
                   <td className="px-3 py-2.5"><span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_CLASS[sub.status]}`}>{STATUS_LABEL[sub.status]}</span></td>
                   <td className="px-3 py-2.5 text-right">
                     {sub.can_review && sub.status === 'pending' && (
-                      <button type="button" title="Approve" onClick={(e) => { e.stopPropagation(); approve(sub); }} className="rounded p-1 text-emerald-600 hover:bg-emerald-50"><Check size={16} /></button>
+                      <button aria-label="Approve" type="button" title="Approve" onClick={(e) => { e.stopPropagation(); approve(sub); }} className="rounded p-1 text-emerald-600 hover:bg-emerald-50"><Check size={16} /></button>
                     )}
                   </td>
                 </tr>
@@ -118,7 +118,7 @@ const ApproversDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         <div role="dialog" aria-label="Approvers" onMouseDown={(e) => e.stopPropagation()} className="flex max-h-[85vh] w-[44rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white shadow-xl">
           <header className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
             <h3 className="font-semibold text-gray-900">Who approves whose timesheet</h3>
-            <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
           </header>
           <p className="px-5 pt-3 text-xs text-gray-500">By default a person's Team leads approve their timesheet. Pick approvers here to override that. Owners and admins can always approve.</p>
           {error && <p className="mx-5 mt-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}

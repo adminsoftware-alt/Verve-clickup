@@ -22,6 +22,7 @@
 import type { FolderNode, Hierarchy, ListNode } from '../api';
 import { distance } from './fuzzy';
 import { isHindi, romanise } from './hindi';
+import { IMPERATIVE } from './verbs';
 
 /** A List a task can go in, with enough of the tree around it to tell it from its namesakes. */
 export interface Where {
@@ -232,12 +233,17 @@ export function readWhere(input: string, hierarchy: Hierarchy | null): WhereRead
       ? [asContainer(said), asList(said)]
       : [asList(said), asContainer(said)];
 
+    // A "place" that opens with a verb is the task itself. "Add a task to update the client list"
+    // has the shape "to <name> list", and believing it took every word of the task away, leaving
+    // nothing to call it -- so it is only a destination if it is the exact name of one.
+    const trusted = attempt.trusted && !IMPERATIVE.test(said);
+
     // An untrusted "in X" is only a destination when X names something exactly. Otherwise "call
     // the auditor in the morning" files a task in whichever List is nearest to "morning".
     //
     // Both trees, not just the first. This only looked at Lists, so "having a holiday under
     // holidays" found nothing -- Holidays is a Space -- and the words stayed in the task's name.
-    if (!attempt.trusted && !order.some((hit) => hit.points >= 100)) continue;
+    if (!trusted && !order.some((hit) => hit.points >= 100)) continue;
 
     for (const hit of order) {
       if (hit.top.length === 1 && hit.points >= 45) {
@@ -250,7 +256,7 @@ export function readWhere(input: string, hierarchy: Hierarchy | null): WhereRead
       }
     }
 
-    if (attempt.trusted) {
+    if (trusted) {
       return { list: null, options: [], from: attempt.from, missed: said };
     }
   }

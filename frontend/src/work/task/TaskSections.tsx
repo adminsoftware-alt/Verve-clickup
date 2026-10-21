@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  CheckSquare, Download, FileStack, FileText, FolderUp, MoreHorizontal, Paperclip, Pencil, Plus, RefreshCw,
+  Check, CheckSquare, ChevronDown, Download, FileStack, FileText, FolderUp, MoreHorizontal, Paperclip, Plus, RefreshCw,
   Save, Square, Trash2, Upload, UserMinus, UserPlus,
 } from 'lucide-react';
 import { useWork } from '../WorkContext';
-import { collabApi, openAttachment, type Attachment, type Checklist, type ChecklistTemplate } from '../collabApi';
+import { collabApi, openAttachment, type Attachment, type Checklist, type ChecklistItem, type ChecklistTemplate } from '../collabApi';
 import { Avatar, Menu, type MenuItem } from '../ui';
 import { ask } from '../../components/ask';
 import { notify } from '../../components/notify';
@@ -21,8 +21,8 @@ const Heading: React.FC<{ icon: React.ReactNode; title: string; extra?: React.Re
 
 // --- checklists -------------------------------------------------------------------------------
 
-/** Pick one person, for the whole checklist at once. */
-const PersonPick: React.FC<{ title: string; onClose: () => void; onPick: (userId: string) => void }> = ({ title, onClose, onPick }) => {
+/** Pick one person: for one item, or for the whole checklist at once. */
+const PersonPick: React.FC<{ title: string; onClose: () => void; onPick: (userId: string) => void; onClear?: () => void }> = ({ title, onClose, onPick, onClear }) => {
   const { members } = useWork();
   const [query, setQuery] = useState('');
   const shown = members.filter((m) => {
@@ -50,7 +50,8 @@ const PersonPick: React.FC<{ title: string; onClose: () => void; onPick: (userId
           ))}
           {shown.length === 0 && <p className="px-2 py-1 text-sm text-gray-500">Nobody matches that.</p>}
         </div>
-        <footer className="flex justify-end border-t border-gray-100 px-3 py-2">
+        <footer className="flex justify-between border-t border-gray-100 px-3 py-2">
+          {onClear ? <button type="button" onClick={onClear} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Unassign</button> : <span />}
           <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
         </footer>
       </div>
@@ -58,21 +59,58 @@ const PersonPick: React.FC<{ title: string; onClose: () => void; onPick: (userId
   );
 };
 
+/** The round tick ClickUp uses: an outline until done, then filled with a check. */
+const Tick: React.FC<{ on: boolean; disabled?: boolean; label: string; onChange: (on: boolean) => void }> = ({ on, disabled, label, onChange }) => (
+  <button type="button" role="checkbox" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)}
+    className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border transition-colors disabled:cursor-default ${
+      on ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-gray-300 bg-white hover:border-emerald-500'}`}>
+    {on && <Check size={11} strokeWidth={3} />}
+  </button>
+);
+
+/** Text that turns into a box when clicked, and saves on Enter or when the box is left. */
+const InlineText: React.FC<{ value: string; label: string; editable: boolean; className?: string; onSave: (text: string) => void }> = ({ value, label, editable, className = '', onSave }) => {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(value);
+  useEffect(() => { if (!editing) setText(value); }, [value, editing]);
+  const finish = () => { setEditing(false); const t = text.trim(); if (t && t !== value) onSave(t); else setText(value); };
+  if (!editable || !editing) {
+    return (
+      <span role={editable ? 'button' : undefined} tabIndex={editable ? 0 : undefined} title={editable ? 'Click to rename' : undefined}
+        onClick={() => editable && setEditing(true)} onKeyDown={(e) => { if (editable && e.key === 'Enter') setEditing(true); }}
+        className={`min-w-0 flex-1 truncate ${editable ? 'cursor-text' : ''} ${className}`}>{value}</span>
+    );
+  }
+  return (
+    <input autoFocus aria-label={label} value={text} onChange={(e) => setText(e.target.value)} onBlur={finish}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); finish(); } if (e.key === 'Escape') { setText(value); setEditing(false); } }}
+      className={`min-w-0 flex-1 rounded border border-brand-300 bg-white px-1.5 py-0.5 focus:outline-none ${className}`} />
+  );
+};
+
 export const Checklists: React.FC<{ taskId: string; editable: boolean; me?: string; onChanged: () => void }> = ({ taskId, editable, me, onChanged }) => {
-  const { members, workspace } = useWork();
+  const { workspace } = useWork();
   const [lists, setLists] = useState<Checklist[]>([]);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState(true);
+  // The checklist whose "Add item" box is open. Enter adds and keeps it open for the next one.
+  const [adding, setAdding] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
-  // Which checklist's "add an item" box should take the caret, after "Add item" on its menu.
-  const [focusOn, setFocusOn] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [assigningAll, setAssigningAll] = useState<Checklist | null>(null);
+  const [assigningItem, setAssigningItem] = useState<ChecklistItem | null>(null);
   const [overwriting, setOverwriting] = useState<Checklist | null>(null);
   const load = useCallback(() => collabApi.checklists(taskId).then(setLists).catch((e) => setError(e.message)), [taskId]);
   useEffect(() => { load(); }, [load]);
-  const run = async (action: () => Promise<unknown>) => {
-    try { setError(null); const out = await action(); if (Array.isArray(out)) setLists(out as Checklist[]); else await load(); onChanged(); }
-    catch (e) { setError((e as Error).message); }
+  const run = async (action: () => Promise<unknown>): Promise<Checklist[] | null> => {
+    try {
+      setError(null);
+      const out = await action();
+      const next = Array.isArray(out) ? (out as Checklist[]) : await collabApi.checklists(taskId);
+      setLists(next);
+      onChanged();
+      return next;
+    } catch (e) { setError((e as Error).message); return null; }
   };
   /** Several item changes at once, reloaded once at the end rather than after each one. */
   const runAll = async (jobs: Promise<unknown>[]) => {
@@ -83,9 +121,21 @@ export const Checklists: React.FC<{ taskId: string; editable: boolean; me?: stri
   const total = lists.reduce((n, l) => n + l.items.length, 0);
   const done = lists.reduce((n, l) => n + l.items.filter((i) => i.resolved).length, 0);
 
+  /** A new checklist opens straight into "Add item", as in ClickUp: nobody wants an empty one. */
+  const newChecklist = async (name = 'Checklist', items: string[] = []) => {
+    const next = await run(() => collabApi.addChecklist(taskId, name, items));
+    const made = next?.reduce<Checklist | null>((a, b) => (!a || b.orderindex > a.orderindex ? b : a), null);
+    if (made) { setOpen(true); setDraft(''); setAdding(made.id); }
+  };
   const addFromTemplate = async (template: ChecklistTemplate) => {
     setPicking(false);
-    await run(() => collabApi.addChecklist(taskId, template.name, template.items));
+    await newChecklist(template.name, template.items);
+  };
+  const addItem = async (cl: Checklist) => {
+    const text = draft.trim();
+    if (!text) { setAdding(null); return; }
+    setDraft('');
+    await run(() => collabApi.addItem(cl.id, text));
   };
 
   const saveAsTemplate = async (cl: Checklist) => {
@@ -103,13 +153,7 @@ export const Checklists: React.FC<{ taskId: string; editable: boolean; me?: stri
     const unticked = cl.items.filter((i) => !i.resolved);
     const ticked = cl.items.filter((i) => i.resolved);
     return [
-      { label: 'Add item', icon: <Plus size={14} />, onClick: () => setFocusOn(cl.id) },
-      {
-        label: 'Rename checklist', icon: <Pencil size={14} />, onClick: async () => {
-          const name = await ask.prompt({ title: 'Rename checklist', label: 'Name', initial: cl.name, confirmLabel: 'Rename' });
-          if (name?.trim() && name.trim() !== cl.name) run(() => collabApi.updateChecklist(cl.id, { name: name.trim() }));
-        },
-      },
+      { label: 'Add item', icon: <Plus size={14} />, onClick: () => { setDraft(''); setAdding(cl.id); } },
       { label: 'Assign all to…', icon: <UserPlus size={14} />, onClick: () => setAssigningAll(cl) },
       { label: 'Unassign all', icon: <UserMinus size={14} />, onClick: () => runAll(cl.items.filter((i) => i.assignee).map((i) => collabApi.updateItem(i.id, { assignee_id: null }))) },
       { label: 'Check all', icon: <CheckSquare size={14} />, onClick: () => runAll(unticked.map((i) => collabApi.updateItem(i.id, { resolved: true }))) },
@@ -124,78 +168,110 @@ export const Checklists: React.FC<{ taskId: string; editable: boolean; me?: stri
     ];
   };
 
+  const addMenu = (trigger: React.ReactNode) => (
+    <Menu align="right" label="Add a checklist" width={220} items={[
+      { label: 'New checklist', icon: <CheckSquare size={14} />, onClick: () => newChecklist() },
+      { label: 'Checklist from template', icon: <FileStack size={14} />, onClick: () => setPicking(true) },
+    ]} trigger={trigger} />
+  );
+
   return (
     <section className="mt-5" aria-label="Checklists">
-      <Heading icon={<CheckSquare size={15} />} title="Checklists" extra={total > 0 ? <span className="text-xs text-gray-400">{done}/{total}</span> : null}
-        action={editable && (
-          <Menu align="right" label="Add a checklist" width={210} items={[
-            { label: 'Checklist', icon: <CheckSquare size={14} />, onClick: () => run(() => collabApi.addChecklist(taskId, 'Checklist')) },
-            { label: 'Checklist from Template', icon: <FileStack size={14} />, onClick: () => setPicking(true) },
-          ]} trigger={
-            <span className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-brand-600 hover:bg-brand-50"><Plus size={12} /> Checklist</span>
-          } />
-        )} />
-      {error && <p className="mb-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700">{error}</p>}
-      {lists.length === 0 && <p className="text-xs text-gray-400">{editable ? 'Break the work into steps with a checklist, or start from a saved one.' : 'No checklists.'}</p>}
-      {lists.map((cl) => {
-        const ticked = cl.items.filter((i) => i.resolved).length;
-        return (
-          <div key={cl.id} className="mb-3 rounded-lg border border-gray-200">
-            <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-1.5">
-              {editable ? (
-                <input aria-label="Checklist name" defaultValue={cl.name} key={cl.name}
-                  onBlur={(e) => e.target.value.trim() && e.target.value !== cl.name && run(() => collabApi.updateChecklist(cl.id, { name: e.target.value.trim() }))}
-                  className="min-w-0 flex-1 bg-transparent text-sm font-medium text-gray-800 focus:outline-none" />
-              ) : <span className="flex-1 text-sm font-medium text-gray-800">{cl.name}</span>}
-              <span className="text-xs text-gray-400">{ticked}/{cl.items.length}</span>
-              <span className="h-1.5 w-16 overflow-hidden rounded bg-gray-100"><span className="block h-full bg-emerald-500" style={{ width: `${cl.items.length ? (100 * ticked) / cl.items.length : 0}%` }} /></span>
-              {editable && (
-                <Menu align="right" label={`Actions for ${cl.name}`} width={214} items={menuFor(cl)}
-                  trigger={<span className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" title="Checklist actions"><MoreHorizontal size={14} /></span>} />
-              )}
-            </div>
-            <ul>
-              {cl.items.map((item) => {
-                const canTick = editable || item.assignee?.id === me;
-                return (
-                  <li key={item.id} className="group flex items-center gap-2 px-3 py-1 text-sm">
-                    <input type="checkbox" aria-label={item.name} checked={item.resolved} disabled={!canTick} onChange={(e) => {
-                      const resolved = e.target.checked;
-                      setLists((ls) => ls.map((l) => ({ ...l, items: l.items.map((i) => (i.id === item.id ? { ...i, resolved } : i)) })));
-                      run(() => collabApi.updateItem(item.id, { resolved }));
-                    }} />
-                    <span className={`min-w-0 flex-1 truncate ${item.resolved ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{item.name}</span>
-                    {editable ? (
-                      <select aria-label={`Assignee of ${item.name}`} value={item.assignee?.id ?? ''} onChange={(e) => run(() => collabApi.updateItem(item.id, { assignee_id: e.target.value || null }))}
-                        className="max-w-28 rounded border border-transparent bg-transparent px-1 text-xs text-gray-500 hover:border-gray-200">
-                        <option value="">Unassigned</option>
-                        {members.map((m) => <option key={m.user.id} value={m.user.id}>{m.user.display_name || m.user.email}</option>)}
-                      </select>
-                    ) : item.assignee ? <Avatar user={item.assignee} size={18} /> : null}
-                    {editable && <button type="button" title="Delete item" onClick={() => run(() => collabApi.deleteItem(item.id))} className="invisible text-gray-300 hover:text-red-600 group-hover:visible"><Trash2 size={12} /></button>}
-                  </li>
-                );
-              })}
-            </ul>
-            {editable && (
-              <form className="flex items-center gap-2 px-3 py-1.5" onSubmit={(e) => {
-                e.preventDefault();
-                const text = (drafts[cl.id] ?? '').trim();
-                if (text) run(() => collabApi.addItem(cl.id, text)).then(() => setDrafts((d) => ({ ...d, [cl.id]: '' })));
-              }}>
-                <Plus size={13} className="text-gray-400" />
-                <input
-                  aria-label="New checklist item"
-                  ref={(el) => { if (el && focusOn === cl.id) { el.focus(); setFocusOn(null); } }}
-                  value={drafts[cl.id] ?? ''} onChange={(e) => setDrafts((d) => ({ ...d, [cl.id]: e.target.value }))}
-                  placeholder="Add an item" className="flex-1 text-sm focus:outline-none" />
-              </form>
-            )}
-          </div>
-        );
-      })}
+      {/* ClickUp's header: a grey bar that folds the section, with the count and a + on it. */}
+      <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-2 py-1.5">
+        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+          <ChevronDown size={15} className={`shrink-0 text-gray-500 transition-transform ${open ? '' : '-rotate-90'}`} />
+          <span className="text-sm font-semibold text-gray-800">Checklists</span>
+          {total > 0 && <span className="text-xs text-gray-500">{done}/{total}</span>}
+        </button>
+        {editable && addMenu(
+          <span title="Add a checklist" className="flex h-6 w-6 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100"><Plus size={14} /></span>,
+        )}
+      </div>
+      {error && <p className="mt-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700">{error}</p>}
+
+      {open && (
+        <div className="mt-2 space-y-2 pl-1">
+          {lists.length === 0 && !editable && <p className="px-2 text-xs text-gray-400">No checklists. You can tick items assigned to you; adding them needs edit access to the task.</p>}
+          {lists.map((cl) => {
+            const ticked = cl.items.filter((i) => i.resolved).length;
+            const pct = cl.items.length ? (100 * ticked) / cl.items.length : 0;
+            return (
+              <div key={cl.id} className="rounded-xl border border-gray-200 bg-white">
+                <div className="flex items-center gap-2 px-3 pb-1 pt-2">
+                  <InlineText value={cl.name} label="Checklist name" editable={editable} className="text-sm font-semibold text-gray-800"
+                    onSave={(name) => run(() => collabApi.updateChecklist(cl.id, { name }))} />
+                  <span className="text-xs tabular-nums text-gray-400">{ticked}/{cl.items.length}</span>
+                  <span className="h-1.5 w-16 overflow-hidden rounded-full bg-gray-100" aria-hidden>
+                    <span className="block h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+                  </span>
+                  {editable && (
+                    <Menu align="right" label={`Actions for ${cl.name}`} width={214} items={menuFor(cl)}
+                      trigger={<span className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" title="Checklist actions"><MoreHorizontal size={15} /></span>} />
+                  )}
+                </div>
+                <ul className="px-1">
+                  {cl.items.map((item) => {
+                    const canTick = editable || item.assignee?.id === me;
+                    return (
+                      <li key={item.id} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-gray-50">
+                        <Tick on={item.resolved} disabled={!canTick} label={item.name} onChange={(resolved) => {
+                          setLists((ls) => ls.map((l) => ({ ...l, items: l.items.map((i) => (i.id === item.id ? { ...i, resolved } : i)) })));
+                          run(() => collabApi.updateItem(item.id, { resolved }));
+                        }} />
+                        <InlineText value={item.name} label="Item name" editable={editable}
+                          className={item.resolved ? 'text-gray-400 line-through' : 'text-gray-800'}
+                          onSave={(name) => run(() => collabApi.updateItem(item.id, { name }))} />
+                        {editable ? (
+                          <button type="button" onClick={() => setAssigningItem(item)}
+                            title={item.assignee ? `Assigned to ${item.assignee.display_name || item.assignee.email}` : 'Assign this item'}
+                            className={`shrink-0 rounded-full ${item.assignee ? '' : 'invisible p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 group-hover:visible'}`}>
+                            {item.assignee ? <Avatar user={item.assignee} size={20} /> : <UserPlus size={14} />}
+                          </button>
+                        ) : item.assignee ? <Avatar user={item.assignee} size={20} /> : null}
+                        {editable && (
+                          <button type="button" title="Delete item" aria-label={`Delete ${item.name}`} onClick={() => run(() => collabApi.deleteItem(item.id))}
+                            className="invisible shrink-0 rounded p-1 text-gray-300 hover:bg-red-50 hover:text-red-600 group-hover:visible"><Trash2 size={13} /></button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+                {editable && (adding === cl.id ? (
+                  <form className="flex items-center gap-2 px-3 pb-2 pt-1" onSubmit={(e) => { e.preventDefault(); addItem(cl); }}>
+                    <span className="h-[18px] w-[18px] shrink-0 rounded-full border border-dashed border-gray-300" aria-hidden />
+                    <input autoFocus aria-label="New checklist item" value={draft} onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Escape') { setDraft(''); setAdding(null); } }}
+                      placeholder="Item name, then Enter" className="min-w-0 flex-1 rounded-md border border-brand-300 px-2 py-1 text-sm focus:outline-none" />
+                    <button type="submit" className="rounded-md bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-700">Add</button>
+                    <button type="button" onClick={() => { setDraft(''); setAdding(null); }} className="rounded-md px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100">Cancel</button>
+                  </form>
+                ) : (
+                  <button type="button" onClick={() => { setDraft(''); setAdding(cl.id); }}
+                    className="flex w-full items-center gap-2 rounded-b-xl px-3 pb-2 pt-1 text-left text-sm text-gray-500 hover:text-gray-800">
+                    <Plus size={15} /> Add item
+                  </button>
+                ))}
+              </div>
+            );
+          })}
+          {editable && addMenu(
+            <span className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-gray-500 hover:bg-gray-50 hover:text-gray-800">
+              <Plus size={14} /> {lists.length ? 'Add checklist' : 'Add checklist to break the work into steps'}
+            </span>,
+          )}
+        </div>
+      )}
 
       {picking && <TemplatePicker onClose={() => setPicking(false)} onPick={addFromTemplate} />}
+      {assigningItem && (
+        <PersonPick
+          title={`Assign “${assigningItem.name}” to…`}
+          onClose={() => setAssigningItem(null)}
+          onClear={assigningItem.assignee ? () => { const it = assigningItem; setAssigningItem(null); run(() => collabApi.updateItem(it.id, { assignee_id: null })); } : undefined}
+          onPick={(userId) => { const it = assigningItem; setAssigningItem(null); run(() => collabApi.updateItem(it.id, { assignee_id: userId })); }}
+        />
+      )}
       {assigningAll && (
         <PersonPick
           title={`Assign every item in “${assigningAll.name}” to…`}

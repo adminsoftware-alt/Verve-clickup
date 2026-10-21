@@ -11,7 +11,7 @@ export interface Person {
 export interface PersonInput {
   email?: string; name?: string; role?: Role; designation?: string | null; level?: number | null; department?: string | null;
   manager_id?: string | null; phone?: string | null; employee_code?: string | null; date_of_joining?: string | null;
-  location?: string | null; address?: string | null; team_ids?: string[]; send_invite?: boolean;
+  location?: string | null; address?: string | null; team_ids?: string[];
   date_of_birth?: string | null; marriage_anniversary?: string | null; takes_interviews?: boolean; start_joiner_checklist?: boolean;
 }
 export interface ImportRow {
@@ -65,7 +65,6 @@ export interface CostSummary {
   by_category: { category: string; yearly_minor: number }[];
 }
 export interface CostSuggestion { name: string; category: string; why: string; scales: string }
-export interface SignInRules { allowed_email_domains: string[]; allow_outside_guests: boolean; require_google_sign_in: boolean; require_two_step: boolean }
 export interface AuditEvent {
   id: string; action: string; verb: string; actor: UserRef | null; target_kind: string | null; target_id: string | null;
   target_label: string | null; data: Record<string, unknown>; created_at: string;
@@ -92,8 +91,6 @@ export const peopleApi = {
   add: (ws: string, body: PersonInput) =>
     request<{ person: Person; emailed: boolean; email_problem: string | null; link: string }>('POST', `/workspaces/${ws}/people`, clean(body)),
   update: (ws: string, userId: string, body: PersonInput) => request<Person>('PATCH', `/workspaces/${ws}/people/${encodeURIComponent(userId)}`, clean(body)),
-  invite: (ws: string, body: { emails: string[]; role: Role; team_ids: string[]; message?: string }) =>
-    request<{ people: Person[]; emailed: boolean; email_problem: string | null; problems: string[]; link: string }>('POST', `/workspaces/${ws}/invites`, body),
   resend: (ws: string, userId: string, message?: string) =>
     request<{ emailed: boolean; email_problem: string | null; link: string }>('POST', `/workspaces/${ws}/people/${encodeURIComponent(userId)}/invite`, { message }),
   remove: (ws: string, userId: string) => request('DELETE', `/workspaces/${ws}/members/${encodeURIComponent(userId)}`),
@@ -129,10 +126,6 @@ export const peopleApi = {
   runJoiner: (ws: string, userId: string) => request<JoinerStep[]>('POST', `/workspaces/${ws}/people/${encodeURIComponent(userId)}/joiner`),
   joinerPlan: (ws: string) => request<{ plan: JoinerPlan; is_default: boolean }>('GET', `/workspaces/${ws}/joiner-plan`),
   saveJoinerPlan: (ws: string, plan: JoinerPlan | null) => request<{ plan: JoinerPlan; is_default: boolean }>('PUT', `/workspaces/${ws}/joiner-plan`, { plan }),
-  signInRules: (ws: string) => request<{ rules: SignInRules; locked_out: string[] }>('GET', `/workspaces/${ws}/sign-in-rules`),
-  saveSignInRules: (ws: string, rules: SignInRules) => request<{ rules: SignInRules; locked_out: string[] }>('PUT', `/workspaces/${ws}/sign-in-rules`, rules),
-  emailStatus: (ws: string) => request<{ configured: boolean; host: string | null; sender: string | null }>('GET', `/workspaces/${ws}/email-status`),
-  emailTest: (ws: string) => request('POST', `/workspaces/${ws}/email-test`),
   audit: (ws: string, params: { before?: string; action?: string; actor_id?: string; target_id?: string; limit?: number } = {}) =>
     request<AuditEvent[]>('GET', `/workspaces/${ws}/audit`, undefined, params),
   setAvatar: async (ws: string, userId: string, file: File) => {

@@ -55,7 +55,7 @@ def test_team_share_opens_a_private_list_for_its_members(api, workspace, space):
     assert api.get(f"/lists/{private['id']}", "member").status_code == 404
     ok(api.post(f"/lists/{private['id']}/shares", "owner", {"team_id": team["id"], "level": "edit"}), 201)
     assert ok(api.get(f"/lists/{private['id']}", "member"))["permission_level"] == "edit"
-    assert api.get(f"/lists/{private['id']}", "admin").status_code == 404  # not in the Team
+    ok(api.get(f"/lists/{private['id']}", "admin"))  # not in the Team, but admins open private Lists
 
 
 def test_personal_share_beats_team_share_on_the_same_item(api, workspace, folderless_list):
@@ -185,6 +185,39 @@ def test_workload_can_be_narrowed_to_a_team(api, workspace, space, folderless_li
     assert [t["name"] for t in w["rows"][0]["tasks"]] == ["hr"]
 
 
+def test_workload_shows_employees_their_own_week_and_managers_their_teams(api, workspace, space, folderless_list):
+    for uid in ("lead", "peer"):
+        ok(api.get("/workspaces", uid))
+        ok(api.post(f"/workspaces/{workspace['id']}/members", "owner", {"email": f"{uid}@example.com", "role": "member"}), 201)
+    ok(api.post(f"/workspaces/{workspace['id']}/teams", "owner", {"name": "Ops", "member_ids": ["member"], "lead_ids": ["lead"]}), 201)
+    monday = date(2026, 9, 21)
+    for who in ("member", "peer", "lead", "admin"):
+        ok(api.post(f"/lists/{folderless_list['id']}/tasks", "owner", {
+            "name": f"{who}'s", "assignees": [who], "time_estimate_seconds": HOUR, "due_date": at(monday),
+        }), 201)
+    ok(api.post(f"/lists/{folderless_list['id']}/tasks", "owner", {"name": "peer someday", "assignees": ["peer"]}), 201)
+    params = {"start": monday.isoformat(), "days": 7}
+
+    def seen(viewer):
+        w = ok(api.get(f"/spaces/{space['id']}/workload", viewer, params=params))
+        return {r["user"]["id"] if r["user"] else None for r in w["rows"]}, [t["name"] for t in w["unscheduled"]]
+
+    assert seen("member") == ({"member"}, [])  # an employee: their own week only
+    assert seen("lead") == ({"lead", "member"}, [])  # a manager: theirs and their Team's
+    rows, unscheduled = seen("owner")  # an admin: everyone
+    assert {"member", "peer", "lead", "admin"} <= rows and unscheduled == ["peer someday"]
+
+
+def test_employees_see_only_their_own_load_and_hours(api, workspace):
+    ws = workspace["id"]
+    params = {"user_ids": ["member", "admin"], "start": "2026-09-21", "days": 7}
+    assert [r["user_id"] for r in ok(api.get(f"/workspaces/{ws}/people-load", "member", params=params))["rows"]] == ["member"]
+    assert {r["user_id"] for r in ok(api.get(f"/workspaces/{ws}/people-load", "owner", params=params))["rows"]} == {"member", "admin"}
+    assert api.get(f"/workspaces/{ws}/members/admin/capacity", "member").status_code == 404
+    ok(api.get(f"/workspaces/{ws}/members/member/capacity", "member"))
+    ok(api.get(f"/workspaces/{ws}/members/member/capacity", "owner"))
+
+
 def test_workload_uses_the_viewers_timezone(api, space, folderless_list):
     # 23:30 UTC on Monday is already Tuesday in India (UTC+5:30).
     late = datetime(2026, 9, 21, 23, 30, tzinfo=timezone.utc).isoformat()
@@ -205,7 +238,8 @@ def test_workload_works_at_every_level(api, space, level):
         "name": "review", "assignees": ["member"], "time_estimate_seconds": 2 * HOUR, "due_date": at(monday),
     }), 201)
     path = {"space": f"/spaces/{space['id']}", "folder": f"/folders/{folder['id']}", "list": f"/lists/{lst['id']}"}[level]
-    assert ok(api.post(f"{path}/views", "owner", {"type": "workload"}), 201)["name"] == "Workload"
+    if level != "list":  # a List shows only its List view, but its workload still answers
+        assert ok(api.post(f"{path}/views", "owner", {"type": "workload"}), 201)["name"] == "Workload"
     w = ok(api.get(f"{path}/workload", "owner", params={"start": monday.isoformat(), "days": 7}))
     rows = {r["user"]["id"]: r for r in w["rows"] if r["user"]}
     assert rows["member"]["scheduled_seconds"][0] == 2 * HOUR

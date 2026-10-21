@@ -32,6 +32,24 @@ function at(day: string, time: string): Date {
   return new Date(y, m - 1, d, h, min, 0, 0);
 }
 
+/** How far past now an end may be before it reads as work not done yet (the server allows the same). */
+export const FUTURE_SLACK_MS = 5 * 60 * 1000;
+
+/**
+ * The period a typed duration fills on a day.
+ *
+ * Today it ends now -- you are logging what you just did, so "1h 30m" at 5:12 pm is 3:42 to 5:12,
+ * never 5:00 to 6:30. It is clamped to midnight if it is longer than the day so far. On another
+ * day it runs on from the chosen start, as before.
+ */
+export function periodFor(day: string, from: string, seconds: number, now: Date = new Date()): { from: string; to: string } {
+  if (day !== isoDay(now)) return { from, to: hhmm(new Date(at(day, from).getTime() + seconds * 1000)) };
+  const end = new Date(now);
+  end.setSeconds(0, 0);
+  const start = new Date(Math.max(end.getTime() - seconds * 1000, at(day, '00:00').getTime()));
+  return { from: hhmm(start), to: hhmm(end) };
+}
+
 /** "4:45 pm" from "16:45". */
 const spoken = (time: string) =>
   at(isoDay(new Date()), time).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -69,6 +87,8 @@ function monthGrid(month: Date): Date[] {
 // --- a day, picked from a month rather than typed into a browser control ------------------------
 
 const DayPicker: React.FC<{ day: string; onPick: (day: string) => void }> = ({ day, onPick }) => {
+  // Time is logged for work done, so a day that has not happened yet cannot be picked.
+  const latest = isoDay(new Date());
   const chosen = at(day, '00:00');
   const [month, setMonth] = useState(() => new Date(chosen.getFullYear(), chosen.getMonth(), 1));
   const days = useMemo(() => monthGrid(month), [month]);
@@ -89,13 +109,17 @@ const DayPicker: React.FC<{ day: string; onPick: (day: string) => void }> = ({ d
           const outside = d.getMonth() !== month.getMonth();
           const picked = sameDay(d, chosen);
           const isToday = sameDay(d, today);
+          const ahead = isoDay(d) > latest;
           return (
             <button
               key={d.toISOString()}
               type="button"
+              disabled={ahead}
+              title={ahead ? 'Time can only be logged for work already done' : undefined}
               onClick={() => onPick(isoDay(d))}
               className={`h-7 rounded-md text-[13px] tabular-nums transition-colors ${
-                picked ? 'bg-brand-600 font-semibold text-white shadow-sm'
+                ahead ? 'cursor-not-allowed text-gray-200'
+                  : picked ? 'bg-brand-600 font-semibold text-white shadow-sm'
                   : isToday ? 'font-semibold text-brand-700 ring-1 ring-inset ring-brand-300 hover:bg-brand-50'
                   : outside ? 'text-gray-300 hover:bg-gray-50' : 'text-gray-700 hover:bg-gray-100'}`}
             >
@@ -243,7 +267,14 @@ export const TrackTime: React.FC<{
   // --- the two directions -------------------------------------------------------------------------
   const setDuration = (value: number | null) => {
     setSeconds(value);
-    if (value && value > 0) setTo(hhmm(new Date(at(day, from).getTime() + value * 1000)));
+    if (value && value > 0) {
+      const period = periodFor(day, from, value);
+      setFrom(period.from);
+      setTo(period.to);
+      // Longer than today has been so far: what gets logged is what fits, and the box says so.
+      const fits = Math.round((at(day, period.to).getTime() - at(day, period.from).getTime()) / 1000);
+      if (fits > 0 && fits < value) setSeconds(fits);
+    }
   };
   const setPeriod = (nextFrom: string, nextTo: string) => {
     setFrom(nextFrom);
@@ -255,23 +286,40 @@ export const TrackTime: React.FC<{
   const span = Math.round((at(day, to).getTime() - at(day, from).getTime()) / 1000);
   // Equal times are simply an untouched form, not a mistake worth a red sentence.
   const backwards = span < 0;
-  const ready = !!seconds && seconds > 0 && span > 0;
+  // Work that has not happened yet is not time worked; the server refuses it too.
+  const ahead = (f: string, t: string) => at(day, t).getTime() > Date.now() + FUTURE_SLACK_MS || at(day, f).getTime() > Date.now();
+  const future = span > 0 && ahead(from, to);
+  const ready = !!seconds && seconds > 0 && span > 0 && !future;
 
-  const save = async () => {
-    if (!ready || busy) return;
+  /** Save what is in the form; Enter in the duration passes what it just read, ahead of the state. */
+  const save = async (typed?: number | null) => {
+    let length = seconds;
+    let start = from;
+    let end = to;
+    if (typed !== undefined) {
+      if (!typed || typed <= 0) return;
+      const period = periodFor(day, from, typed);
+      length = typed;
+      start = period.from;
+      end = period.to;
+      const typedSpan = Math.round((at(day, end).getTime() - at(day, start).getTime()) / 1000);
+      if (typedSpan <= 0 || ahead(start, end)) return;
+      length = Math.min(typed, typedSpan);
+    } else if (!ready) return;
+    if (busy || !canTrack) return;
     setBusy(true);
     setError(null);
     try {
-      await workApi.logTime(taskId, seconds!, note.trim() || undefined, {
-        started_at: at(day, from).toISOString(),
-        ended_at: at(day, to).toISOString(),
+      await workApi.logTime(taskId, length!, note.trim() || undefined, {
+        started_at: at(day, start).toISOString(),
+        ended_at: at(day, end).toISOString(),
       }, false, chosen, forUserId);
       setSeconds(null);
       setNote('');
       setChosen([]);
       load();
       onChanged();
-      notify.ok(`${formatDuration(seconds!)} logged.`);
+      notify.ok(`${formatDuration(length!)} logged.`);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -329,6 +377,7 @@ export const TrackTime: React.FC<{
               disabled={!canTrack || !!running}
               placeholder="Enter time, e.g. 3h 20m"
               onChange={setDuration}
+              onEnter={(typed) => { void save(typed); }}
               className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-[15px] font-medium tabular-nums text-gray-900 placeholder:font-normal placeholder:text-[14px] placeholder:text-gray-400 transition-colors hover:border-gray-300 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:bg-gray-50"
             />
           </div>
@@ -394,12 +443,19 @@ export const TrackTime: React.FC<{
           </p>
         )}
 
+        {future && (
+          <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[12px] text-amber-900">
+            That period has not happened yet. Time can only be logged for work already done.
+          </p>
+        )}
+
         {/* --- what it was ----------------------------------------------------------------------- */}
         <input
           value={note}
           aria-label="Notes"
           disabled={!canTrack}
           onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void save(); } }}
           placeholder="What you did (optional)"
           className="mt-2.5 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-[13px] text-gray-900 placeholder:text-gray-400 transition-colors hover:border-gray-300 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:bg-gray-50"
         />
@@ -439,7 +495,7 @@ export const TrackTime: React.FC<{
           <button type="button" onClick={onClose} className="rounded-lg px-3 py-1.5 text-[13px] text-gray-600 transition-colors hover:bg-gray-100">Close</button>
           <button
             type="button"
-            onClick={save}
+            onClick={() => { void save(); }}
             disabled={!ready || busy || !canTrack}
             className="btn-accent rounded-lg px-4 py-1.5 text-[13px] font-semibold shadow-sm transition-opacity disabled:opacity-40 disabled:shadow-none"
           >

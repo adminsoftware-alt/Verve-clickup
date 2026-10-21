@@ -1,6 +1,7 @@
 // What the app opens on: your own "My work" Dashboard, drawn by the same engine as every other one.
+// An admin has no board of their own, so for them the front door is the Dashboards hub instead.
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 
 import { useIsAdmin, useWork } from '../WorkContext';
 import { useMyTasks } from '../MyTasksContext';
@@ -25,28 +26,27 @@ function firstName(name: string | null | undefined, email: string): string {
 }
 
 export const HomePage: React.FC = () => {
-  const { workspace, me, allMembers, loading } = useWork();
+  const { workspace, hierarchy, me, allMembers, loading } = useWork();
   const isAdmin = useIsAdmin();
   const [id, setId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Nothing assigned, and we have finished looking: this is somebody's first day, not a blip
   // while the list loads. The tasks are already fetched for the sidebar, so this costs nothing.
   const { tasks, loading: tasksLoading } = useMyTasks();
-  // An admin lands on the Company board, which is not about their own tasks -- a "nothing is
-  // assigned to you yet" welcome above the whole firm's figures would be answering a question
-  // nobody asked.
   const firstRun = !isAdmin && !tasksLoading && tasks.length === 0;
   const [manager, setManager] = useState<UserRef | null>(null);
 
   useEffect(() => {
-    if (!workspace) return;
+    // Wait for the role before asking for a board: an admin is sent on to the hub below, and
+    // fetching first would draw the Company board for a moment on the way there.
+    if (!workspace || !hierarchy || isAdmin) return;
     let current = true;
     setError(null);
     dashApi.home(workspace.id)
       .then((dash) => { if (current) setId(dash.id); })
       .catch((e) => { if (current) setError((e as Error).message); });
     return () => { current = false; };
-  }, [workspace]);
+  }, [workspace, hierarchy, isAdmin]);
 
   // Only looked up when the band will actually show, which is once in someone's working life.
   useEffect(() => {
@@ -63,9 +63,10 @@ export const HomePage: React.FC = () => {
     return () => { live = false; };
   }, [workspace, firstRun, me]);
 
-  // An admin used to be sent to the list of boards from here. The board itself is what they
-  // came for -- dashApi.home already returns the Company one for them -- so this page renders
-  // it, and the list stays one click away under Dashboards.
+  // An admin looks after everyone's work rather than their own, so they start on the list of
+  // boards (Company, Teams, People) and choose, instead of being dropped into one view-only board.
+  if (isAdmin) return <Navigate to="/dashboards" replace />;
+
   const mine = allMembers.find((m) => m.user.id === me);
   const hello = `${greeting(new Date())}, ${firstName(mine?.user.display_name, mine?.user.email ?? '')}`;
 

@@ -54,7 +54,13 @@ def people_load(
     """Planned hours per day for these people, against the hours they have."""
     days = max(1, min(days, MAX_DAYS))
     window = [start + timedelta(days=i) for i in range(days)]
-    wanted = list(dict.fromkeys(user_ids))[:20]
+    # Someone's load and hours are theirs to see, their Team lead's and an admin's -- the same
+    # people whose time and workload they may see. Anyone else is left out, not refused, so the
+    # assignee picker still shows what it may.
+    from app.services.work.timetracking import time_visible_people
+
+    visible = time_visible_people(db, access)
+    wanted = [uid for uid in dict.fromkeys(user_ids) if visible is None or uid in visible][:20]
     planned: Dict[str, List[int]] = {uid: [0] * days for uid in wanted}
     if not wanted:
         return {"days": [d.isoformat() for d in window], "rows": []}

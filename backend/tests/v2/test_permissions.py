@@ -31,8 +31,10 @@ def test_guest_gets_nothing_without_a_share():
     assert resolve_level(chain(), ME, WorkspaceRole.guest, {}) is None
 
 
-def test_private_item_is_hidden_even_from_admins():
-    assert resolve_level(chain(private_list=True), ME, WorkspaceRole.admin, {}) is None
+def test_admins_open_private_places():
+    """So a private List isn't lost when the person who made it leaves."""
+    assert resolve_level(chain(private_list=True), ME, WorkspaceRole.admin, {}) == FULL
+    assert resolve_level(chain(private_list=True), ME, WorkspaceRole.member, {}) is None
 
 
 def test_private_ancestor_hides_public_children():

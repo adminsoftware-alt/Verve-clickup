@@ -316,7 +316,7 @@ def test_email_to_list(api, space, folderless_list, monkeypatch):
 
 def test_doc_view_saves_with_versions(api, space, folderless_list):
     lst = folderless_list["id"]
-    doc = ok(api.post(f"/lists/{lst}/views", "owner", {"type": "doc"}), 201)
+    doc = ok(api.post(f"/spaces/{space['id']}/views", "owner", {"type": "doc"}), 201)
     assert doc["name"] == "Doc"
     assert ok(api.get(f"/views/{doc['id']}/content", "member")) == {"content": {}, "version": 0, "updated_by": None, "updated_at": None}
     saved = ok(api.put(f"/views/{doc['id']}/content", "member", {"content": {"pages": [{"title": "SOP", "body": "<p>Step 1</p>"}]}, "version": 0}))
@@ -325,7 +325,7 @@ def test_doc_view_saves_with_versions(api, space, folderless_list):
     assert api.put(f"/views/{doc['id']}/content", "guest", {"content": {}, "version": 1}).status_code == 404
     lv = ok(api.get(f"/lists/{lst}/views", "owner"))[0]
     assert api.get(f"/views/{lv['id']}/content", "owner").status_code == 400
-    wb = ok(api.post(f"/lists/{lst}/views", "owner", {"type": "whiteboard"}), 201)
+    wb = ok(api.post(f"/spaces/{space['id']}/views", "owner", {"type": "whiteboard"}), 201)
     ok(api.put(f"/views/{wb['id']}/content", "owner", {"content": {"items": [{"kind": "sticky", "text": "Idea"}]}, "version": 0}))
     link = ok(api.post("/public-links", "owner", {"kind": "view", "target_id": doc["id"]}), 201)
     assert api.client.get(f"/api/v2/public/{link['token']}").json()["doc"]["pages"][0]["title"] == "SOP"
@@ -355,7 +355,7 @@ def test_chat_view_messages_mentions_and_tasks(api, workspace, space, folderless
 
 def test_embed_view_and_location_field(api, space, folderless_list):
     lst = folderless_list["id"]
-    emb = ok(api.post(f"/lists/{lst}/views", "owner", {"type": "embed"}), 201)
+    emb = ok(api.post(f"/spaces/{space['id']}/views", "owner", {"type": "embed"}), 201)
     out = ok(api.put(f"/views/{emb['id']}/embed", "owner", {"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}))
     assert out["settings"]["url"] == "https://www.youtube.com/embed/dQw4w9WgXcQ"
     assert api.put(f"/views/{emb['id']}/embed", "owner", {"url": "http://example.com"}).status_code == 422
@@ -367,8 +367,8 @@ def test_embed_view_and_location_field(api, space, folderless_list):
     val = ok(api.put(f"/tasks/{task['id']}/fields/{field['id']}", "owner", {"value": {"address": "Bandra, Mumbai", "lat": 19.0596, "lng": 72.8295}}))
     assert val["value"]["lat"] == 19.0596
     assert api.put(f"/tasks/{task['id']}/fields/{field['id']}", "owner", {"value": {"lat": 200, "lng": 0}}).status_code == 400
-    ok(api.post(f"/lists/{lst}/views", "owner", {"type": "map"}), 201)
-    ok(api.post(f"/lists/{lst}/views", "owner", {"type": "mind_map"}), 201)
+    ok(api.post(f"/spaces/{space['id']}/views", "owner", {"type": "map"}), 201)
+    ok(api.post(f"/spaces/{space['id']}/views", "owner", {"type": "mind_map"}), 201)
 
 
 @pytest.fixture(autouse=True)

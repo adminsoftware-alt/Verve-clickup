@@ -116,14 +116,16 @@ export const DayLift: React.FC = () => {
       {line && (
         <motion.div
           // Bottom right: seen without being stood in front of. A modal for a kind word would
-          // be worse than saying nothing.
+          // be worse than saying nothing. It sits just above the assistant's round button
+          // (48px tall, 24px up on a desktop, above the bottom bar on a phone) so it never
+          // covers it while it is up.
           initial={{ opacity: 0, y: 24, scale: 0.97 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 12, scale: 0.98 }}
           transition={{ type: 'spring', stiffness: 320, damping: 26 }}
           role="status"
           aria-live="polite"
-          className="fixed bottom-6 right-6 z-[120] w-[22rem] max-w-[calc(100vw-3rem)] overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5"
+          className="fixed bottom-[calc(8.25rem+env(safe-area-inset-bottom))] right-4 z-[120] w-[22rem] max-w-[calc(100vw-2rem)] sm:right-6 md:bottom-[5.25rem] overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5"
         >
           <div className={`h-1 w-full bg-gradient-to-r ${skin}`} />
           <div className="flex items-start gap-3 px-4 py-3.5">

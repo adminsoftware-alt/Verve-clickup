@@ -1,16 +1,6 @@
 // Feature flags: toggle modules without removing their code.
 const DEFAULTS = {
-  // Old top-level pages. As in ClickUp, these now live inside Spaces instead:
-  // Calendar, Workload and Dashboard are views; time is tracked on tasks;
-  // teams are managed under People & Teams.
-  legacyTimeTracking: false,
-  legacyCalendar: false,
-  legacyTeams: false,
-  legacyReports: false,
-  legacyWorkload: false,
-  // Sidebar extras: the Settings/Integrations group and the workspace card at the bottom.
-  // Settings stays reachable from the profile menu.
-  sidebarSettings: false,
+  // Sidebar extra: the workspace card at the bottom.
   sidebarWorkspaceCard: false,
   // The header bell's old v1 notification popover. The bell now opens the v2 Inbox.
   legacyNotifications: false,
@@ -215,9 +205,6 @@ const DEFAULTS = {
   //
   archived: false,
   templates: false,
-  // The extra view types. Only Dashboard, Table, Team, Calendar and Workload are offered in "+ View";
-  // every location keeps its built-in List (and a Folder or Space its Overview).
-  extraViewTypes: false,
 
   // The "Blocked addresses" list in Admin, and the "Offboard and block" option it existed to undo.
   // Off: barring an email was a second way of saying somebody had left, and offboarding already

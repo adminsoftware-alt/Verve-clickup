@@ -67,7 +67,8 @@ def test_who_may_change_what(api, workspace):
     assert api.patch(f"/workspaces/{ws}/people/admin", "member", {"phone": "1"}).status_code == 403
     ok(api.patch(f"/workspaces/{ws}/people/member", "owner", {"designation": "Associate", "role": "admin"}))
     assert api.patch(f"/workspaces/{ws}/people/owner", "admin", {"role": "member"}).status_code == 400
-    # Guests don't see others' phone numbers.
+    # Guests don't see others' phone numbers -- even a Team-mate's, whose profile they can see.
+    ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Audit", "member_ids": ["guest", "member"]}), 201)
     assert people(api, ws, "guest")["member@example.com"]["phone"] is None
     assert people(api, ws, "owner")["member@example.com"]["phone"] == "12345"
     # Only admins make admins... and only the owner.
@@ -81,7 +82,8 @@ def test_an_address_is_kept_like_a_phone_number(api, workspace):
     assert got["address"] == "12 MG Road, Pune 411001"
     assert api.patch(f"/workspaces/{ws}/people/admin", "member", {"address": "x"}).status_code == 403
     ok(api.patch(f"/workspaces/{ws}/people/member", "admin", {"address": "14 MG Road, Pune"}))
-    # Everyone inside the firm can see it; guests cannot.
+    # Everyone inside the firm who can see the person can see it; guests cannot.
+    ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Audit", "member_ids": ["guest", "member"]}), 201)
     assert people(api, ws, "owner")["member@example.com"]["address"] == "14 MG Road, Pune"
     assert people(api, ws, "guest")["member@example.com"]["address"] is None
     # Working hours stay with admins, including for the person themselves.
@@ -129,3 +131,31 @@ def test_teams_hub_details_and_overview(api, workspace):
     assert view["team"]["locations"] == [{"kind": "space", "id": space["id"]}]
     assert [x["name"] for x in view["tasks"]] == ["Screen CVs"]  # the private List stays private
     assert {f["kind"] for f in view["feed"]} >= {"created", "priority"} and all(f["task"]["name"] == "Screen CVs" for f in view["feed"])
+
+
+def test_the_directory_shows_admins_the_firm_and_everyone_else_the_people_they_work_with(api, workspace):
+    ws = workspace["id"]
+    for uid in ("lead", "emp", "sub", "other"):
+        ok(api.get("/workspaces", uid))
+        ok(api.post(f"/workspaces/{ws}/members", "owner", {"email": f"{uid}@example.com", "role": "member"}), 201)
+    audit = ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Audit", "member_ids": ["emp"], "lead_ids": ["lead"]}), 201)
+    ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Audit North", "member_ids": ["sub"], "parent_team_id": audit["id"]}), 201)
+    ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Tax", "member_ids": ["other"]}), 201)
+    ok(api.patch(f"/workspaces/{ws}/people/emp", "owner", {"manager_id": "owner"}))
+
+    def seen(who):
+        return {p["user"]["id"] for p in ok(api.get(f"/workspaces/{ws}/people", who))}
+
+    # A Manager: their Team and its sub-teams, nobody from Tax and no admin they have no line to.
+    assert seen("lead") == {"lead", "emp", "sub"}
+    # An Employee: themselves, their Team-mates and their own reporting manager.
+    assert seen("emp") == {"emp", "lead", "owner"}
+    assert seen("other") == {"other"}
+    # Admins see the firm.
+    assert {"lead", "emp", "sub", "other", "member", "guest", "admin", "owner"} <= seen("admin")
+    # A profile out of reach is not there at all, for the org chart or anything else.
+    assert api.get(f"/workspaces/{ws}/people/other", "lead").status_code == 404
+    assert api.get(f"/workspaces/{ws}/people/emp", "other").status_code == 404
+    assert ok(api.get(f"/workspaces/{ws}/people/sub", "lead"))["team_ids"]
+    # Who you can give a task to is a different list, and stays whole.
+    assert "other" in {m["user"]["id"] for m in ok(api.get(f"/workspaces/{ws}/members", "lead"))}

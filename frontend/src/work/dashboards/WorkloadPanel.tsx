@@ -123,6 +123,7 @@ export const WorkloadPanel: React.FC<{
           {onSetFilters && (
             <CardFilterMenu
               value={card.config.filters ?? {}}
+                          base={card.config.base_filters}
               disabled={!canEdit}
               time={{
                 value: preset ?? 'this_week',

@@ -26,8 +26,12 @@ const RULES: [RegExp, string][] = [
   [/\bme\s+as\s+(?:an?\s+|the\s+)?(?:assign(?:ing|ee)|owner)\b/gi, 'assign to me'],
   [/\b(?:make|set|keep|put)\s+([a-z]+)\s+as\s+(?:an?\s+|the\s+)?(?:assign(?:ing|ee)|owner)\b/gi, 'assign to $1'],
   [/\bassign(?:ing|ed)?\s+(?:it\s+)?(?:to\s+)?me\b/gi, 'assign to me'],
-  [/\bassignee\s+(?:is\s+|as\s+|:\s*)?/gi, 'assign to '],
-  [/\bassign\s+(?!to\b|it\b)/gi, 'assign to '],
+  // Not after "the", "change", "remove" and the like: there "assignee" names the field being
+  // changed, and "remove the assignee of X" read as "remove the assign to of X" became a deletion.
+  [/(?<!\b(?:the|its|change|remove|clear|unset|set|new|no)\s+)\bassignee\s+(?:is\s+|as\s+|:\s*)?(?!of\b|for\b|on\b|to\b)/gi, 'assign to '],
+  // "assign aarti" means "assign to aarti" -- but not "assign the GST return to Laxmi", where the
+  // "to" comes later and the words in between are the task.
+  [/\bassign\s+(?!to\b|it\b)(?!.*\bto\b)/gi, 'assign to '],
 
   // "make started as today", "keep it due friday": a verb in front of a field, mid-sentence. Not at
   // the start, where "set the priority of X to high" is an instruction to change a task.

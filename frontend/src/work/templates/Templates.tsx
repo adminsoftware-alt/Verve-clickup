@@ -20,7 +20,7 @@ const Shell: React.FC<{ title: string; wide?: boolean; onClose: () => void; chil
         <div className="mb-3 flex items-center gap-2">
           <LayoutTemplate size={17} className="text-brand-600" />
           <h3 className="font-semibold text-gray-900">{title}</h3>
-          <button type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+          <button aria-label="Close" type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
         </div>
         {children}
       </div>
@@ -221,7 +221,7 @@ export const TemplateCenter: React.FC<{ kind?: TemplateKind; target?: string; on
                         {t.use_count ? ` · used ${t.use_count}×` : ''}
                       </span>
                     </span>
-                    <button type="button" title={`Rename ${t.name}`} onClick={() => rename(t)} className="rounded p-1 text-gray-300 opacity-0 hover:text-gray-700 group-hover:opacity-100"><Pencil size={13} /></button>
+                    <button aria-label={`Rename ${t.name}`} type="button" title={`Rename ${t.name}`} onClick={() => rename(t)} className="rounded p-1 text-gray-300 opacity-0 hover:text-gray-700 group-hover:opacity-100"><Pencil size={13} /></button>
                     <button type="button" title={`Delete ${t.name}`} onClick={() => remove(t)} className="rounded p-1 text-gray-300 opacity-0 hover:text-red-600 group-hover:opacity-100"><Trash2 size={13} /></button>
                   </div>
                   {t.description && <p className="mt-1 line-clamp-2 text-xs text-gray-500">{t.description}</p>}

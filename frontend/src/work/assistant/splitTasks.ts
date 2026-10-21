@@ -116,6 +116,7 @@ export function splitTasks(input: string, people: Person[], me?: string, now = n
         start_date: t.start_date ?? shared.start_date,
         priority: t.priority ?? shared.priority,
         assignees: t.assignees.length ? t.assignees : shared.assignees,
+        recurrence: t.recurrence ?? shared.recurrence,
       }
       : t));
 

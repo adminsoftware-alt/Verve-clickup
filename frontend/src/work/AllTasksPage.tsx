@@ -34,7 +34,7 @@ const SCROLLS_ITSELF: Layout[] = ['planner'];
 const endOfToday = () => { const d = new Date(); d.setHours(23, 59, 59, 999); return d; };
 
 /** What the page is showing: your own work, what needs doing now, or everything you can open. */
-type Scope = 'mine' | 'now' | 'all';
+type Scope = 'mine' | 'now' | 'all' | 'team';
 // The scope labels, from when this page had a tab strip. My Tasks and All Tasks are one page
 // now and the scope comes from the route, so nothing renders these -- kept for reference.
 // const SCOPES: [Scope, string, string][] = [
@@ -48,7 +48,7 @@ type Scope = 'mine' | 'now' | 'all';
  * with the same filters, columns, grouping, layouts and export across all three.
  */
 export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope = 'all' }) => {
-  const { workspace, members, locate, listName } = useWork();
+  const { workspace, members, locate, listName, teams } = useWork();
   const me = useMe();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[] | null>(null);
@@ -84,6 +84,8 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
   const update = <K extends keyof ViewSettings>(k: K, v: ViewSettings[K]) => setSettings((s) => ({ ...s, [k]: v }));
   const people = useMemo(() => members.map((m) => m.user), [members]);
   const where = useCallback((listId: string) => locate('list', listId)?.path.map((c) => c.name).join(' / ') ?? listName(listId), [locate, listName]);
+  // A manager's Team: everyone in the Teams they lead, themselves left out ("Mine" is next to it).
+  const myPeople = useMemo(() => new Set(teams.filter((t) => t.lead_ids.includes(me)).flatMap((t) => t.members.map((u) => u.id)).filter((id) => id !== me)), [teams, me]);
   const filtered = useMemo(() => {
     const mine = (t: Task) => t.assignees.some((a) => a.id === me);
     const soon = (t: Task) => !!t.due_date && new Date(t.due_date) <= endOfToday();
@@ -97,10 +99,11 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
     const found = (tasks ?? [])
       .filter((t) => (states.length ? states.includes(progressOf(t)) : layout === 'board' || openOnly(t)))
       .filter((t) => (scope === 'mine' ? mine(t) : true))
+      .filter((t) => (scope === 'team' ? t.assignees.some((a) => myPeople.has(a.id)) : true))
       .filter((t) => (scope === 'now' ? mine(t) && soon(t) && t.status.group !== 'closed' && t.status.group !== 'done' : true))
       ;
     return sortTasks(applyFilters(found, settings.filters, me, meMode), settings.sort);
-  }, [tasks, settings.filters, settings.sort, me, meMode, scope, layout]);
+  }, [tasks, settings.filters, settings.sort, me, meMode, scope, layout, myPeople]);
   // Whether an empty list means "nothing is yours" or "your filters hide it" -- a different
   // sentence belongs on each, and only this page knows which.
   const hasFilters = Object.values(settings.filters).some((v) => (Array.isArray(v) ? v.length > 0 : !!v));
@@ -139,7 +142,7 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
     <div className="flex h-full min-h-0 flex-col bg-white">
       <header className="border-b border-gray-200 px-6 pb-2 pt-4">
         <h1 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
-          <Layers size={18} className="text-brand-600" /> {scope === 'all' ? 'All Tasks' : 'My Tasks'}
+          <Layers size={18} className="text-brand-600" /> {scope === 'all' ? 'All Tasks' : scope === 'team' ? 'My Team’s Tasks' : 'My Tasks'}
           {/* The Mine / Everyone switch used to sit here. Two controls were saying the same thing:
               the line underneath already gives both numbers, and narrowing to your own work is
               what Filter -> Assignee is for. One list, and the subtitle says what is in it. */}

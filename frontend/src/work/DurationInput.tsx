@@ -64,7 +64,9 @@ export const DurationInput: React.FC<{
   className?: string;
   /** Cleared after a successful entry, for logging rather than setting. */
   clearOnCommit?: boolean;
-}> = ({ value, onChange, disabled, placeholder = 'e.g. 2h 30m', label, className, clearOnCommit }) => {
+  /** Enter commits what is typed and then calls this with it, so a form can save on Enter. */
+  onEnter?: (seconds: number | null) => void;
+}> = ({ value, onChange, disabled, placeholder = 'e.g. 2h 30m', label, className, clearOnCommit, onEnter }) => {
   const [draft, setDraft] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const blurTimer = useRef<number | undefined>(undefined);
@@ -103,6 +105,16 @@ export const DurationInput: React.FC<{
           }, 140);
         }}
         onKeyDown={(e) => {
+          if (e.key === 'Enter' && onEnter) {
+            // Commit now rather than on the deferred blur, so the form saves what was just typed.
+            e.preventDefault();
+            const typed = (draft ?? '').trim();
+            const seconds = draft === null ? value : typed ? readingsOf(typed)[0]?.seconds ?? null : null;
+            if (draft !== null && typed && seconds === null) { setDraft(null); return; }
+            if (draft !== null) commit(seconds);
+            onEnter(seconds);
+            return;
+          }
           if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
           if (e.key === 'Escape') { setDraft(null); setPicking(false); }
         }}

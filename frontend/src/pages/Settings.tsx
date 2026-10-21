@@ -8,12 +8,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Briefcase, Building2, Cake, Calendar, Camera, Clock, Hash, Lock, Mail, MapPin, Pencil, Phone,
-  ShieldAlert, Sparkles, Trash2, User, Users,
+  Sparkles, Trash2, User, Users,
 } from 'lucide-react';
 
-import { useAuth } from '../components/AuthContext';
-import { UserManagementTab } from '../components/settings/UserManagementTab';
 import { ask } from '../components/ask';
+import { StatusSelector } from '../components/StatusSelector';
+import { AddressField } from '../work/teams/AddressField';
 import { useIsAdmin, useWork } from '../work/WorkContext';
 import { Avatar } from '../work/ui';
 import { peopleApi, personName, type Person } from '../work/teams/peopleApi';
@@ -153,6 +153,10 @@ const ProfileTab: React.FC = () => {
             <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">{accessOf(person.role, person.user.id, teams)}</span>
             <span className="truncate text-xs text-gray-500">{person.user.email}</span>
           </div>
+          <div className="mt-3 flex items-center justify-center gap-2 sm:justify-start">
+            <span className="text-xs text-gray-500">Status</span>
+            <StatusSelector align="left" />
+          </div>
         </div>
         <div className="flex shrink-0 gap-2">
           <button type="button" onClick={() => file.current?.click()} disabled={busy}
@@ -187,12 +191,11 @@ const ProfileTab: React.FC = () => {
             <label className="text-xs font-medium text-gray-600">Phone
               <input className={`${input} mt-1`} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
             </label>
-            <label className="text-xs font-medium text-gray-600">Location
-              <input className={`${input} mt-1`} value={form.location} placeholder="e.g. Pune" onChange={(e) => setForm({ ...form, location: e.target.value })} />
-            </label>
-            <label className="text-xs font-medium text-gray-600 sm:col-span-2">Address
-              <textarea className={`${input} mt-1`} rows={3} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-            </label>
+            <div className="text-xs font-medium text-gray-600 sm:col-span-2">Address
+              <div className="mt-1">
+                <AddressField value={form.address} onChange={(address, city) => setForm((f) => ({ ...f, address, location: city }))} />
+              </div>
+            </div>
             <div className="flex justify-end gap-2 sm:col-span-2">
               <button type="button" onClick={() => setEditing(false)} className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
               <button type="button" onClick={saveDetails} disabled={busy || !form.name.trim()}
@@ -204,7 +207,6 @@ const ProfileTab: React.FC = () => {
             <Row icon={<User size={15} />} label="Name">{personName(person)}</Row>
             <Row icon={<Mail size={15} />} label="Email">{person.user.email}</Row>
             <Row icon={<Phone size={15} />} label="Phone">{person.phone}</Row>
-            <Row icon={<MapPin size={15} />} label="Location">{person.location}</Row>
             <Row icon={<MapPin size={15} />} label="Address">{person.address && <span className="whitespace-pre-line">{person.address}</span>}</Row>
           </div>
         )}
@@ -267,44 +269,10 @@ const ProfileTab: React.FC = () => {
 
 // --- the page -----------------------------------------------------------------------------------
 
-export const Settings: React.FC = () => {
-  const { hasRole } = useAuth();
-  const isAdmin = hasRole(['Admin']);
-  const [tab, setTab] = useState<'profile' | 'users'>('profile');
-  const [message, setMessage] = useState<string | null>(null);
-
-  // Left from the browser-only version of the app, where tasks and timers lived in local storage.
-  const resetLocalData = async () => {
-    if (await ask.confirm('Clear everything this browser has stored for the app -- saved views, drafts and settings? Your work on the server is not touched.')) {
-      localStorage.clear();
-      setMessage('This browser’s stored data is cleared. Refreshing…');
-      setTimeout(() => window.location.reload(), 1500);
-    }
-  };
-
-  const tabCls = (on: boolean) => `flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${on ? 'border-blue-600 font-semibold text-blue-700' : 'border-transparent font-medium text-gray-500 hover:text-gray-700'}`;
-
-  return (
-    <div className="mx-auto max-w-3xl pb-10">
-      <h1 className="mb-4 text-xl font-semibold text-gray-900">Settings</h1>
-      <div className="mb-6 flex gap-2 border-b border-gray-200">
-        <button type="button" onClick={() => setTab('profile')} className={tabCls(tab === 'profile')}><User size={16} /> My Profile</button>
-        {isAdmin && <button type="button" onClick={() => setTab('users')} className={tabCls(tab === 'users')}><Users size={16} /> User Management</button>}
-      </div>
-
-      {tab === 'users' && isAdmin ? <UserManagementTab /> : (
-        <div className="space-y-5">
-          <ProfileTab />
-          <section className="rounded-2xl border border-red-100 bg-red-50/50 p-5">
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-red-800"><ShieldAlert size={16} /> This browser</h3>
-            <p className="mt-1 text-xs text-red-900/80">Clears what this browser keeps for the app. Nothing on the server changes.</p>
-            {message && <p className="mt-2 text-xs text-emerald-700">{message}</p>}
-            <button type="button" onClick={resetLocalData} className="mt-3 flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50">
-              <Trash2 size={14} /> Clear this browser’s data
-            </button>
-          </section>
-        </div>
-      )}
-    </div>
-  );
-};
+// Who people are, and who may do what, live in Admin (/admin). This page is only your own profile.
+export const Settings: React.FC = () => (
+  <div className="mx-auto max-w-3xl pb-10">
+    <h1 className="mb-6 text-xl font-semibold text-gray-900">Settings</h1>
+    <ProfileTab />
+  </div>
+);

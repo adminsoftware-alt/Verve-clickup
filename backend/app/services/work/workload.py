@@ -244,6 +244,14 @@ def workload(
         from app.services.work import team_tree
 
         team_members = team_tree.people(db, [team.id])  # sub-teams count too
+    # Whose week the viewer may see (as for tracked time): an employee their own, a manager
+    # theirs and their Teams' people, an admin everyone.
+    if not can_manage_workspace(opened.access.role):
+        from app.services.work.dashboards.access import Standing
+
+        mine = Standing.load(db, opened.access).led_people | {opened.access.user_id}
+        team_members = mine if team_members is None else team_members & mine
+    if team_members is not None:
         people = [p for p in people if p.id in team_members]
     rows: Dict[Optional[str], Tuple[Optional[User], List[int], List[s.WorkloadTask]]] = {
         p.id: (p, [0] * days, []) for p in people

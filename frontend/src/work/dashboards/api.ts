@@ -79,27 +79,40 @@ export interface PersonBoard {
 /** One task named in a highlight. */
 export interface InsightTask {
   id: string; name: string; list_id: string; priority: number | null; due_date: string | null; assignees: UserRef[];
-  days_late?: number; days_idle?: number;
+  days_late?: number; days_idle?: number; tracked?: number; estimate?: number; waiting_on?: string;
 }
 export interface InsightSection { count: number; tasks: InsightTask[] }
-/** What needs attention on a board, worked out from the same tasks as its cards. */
+/**
+ * What needs attention on a board, worked out from the same tasks as its cards. What a card
+ * already says -- due today, overdue, hours this week, finished work -- is not repeated here.
+ */
 export interface Insights {
-  open: number;
-  overdue: InsightSection; due_today: InsightSection; stuck: InsightSection; urgent_soon: InsightSection;
-  no_due_date: number; no_estimate: number; unassigned: number;
-  people_behind: { user: UserRef; overdue: number }[];
-  done_this_week: number;
-  done_yesterday: number;
-  due_this_week: number;
-  urgent_today: number;
   /** Whose board: the viewer's own, one other person's, a Team's, or the whole company. */
   who: 'me' | 'person' | 'team' | 'everyone';
   who_name: string | null;
+  open: number;
+  // Your day.
+  starts_today: InsightSection; late_start: InsightSection; over_estimate: InsightSection;
+  recurring_this_week: InsightSection; stuck: InsightSection; urgent_soon: InsightSection;
+  blocked_by_late: InsightSection;
+  next_week: { count: number; estimate: number } | null;
+  running_timers: { user: UserRef; task_id: string; task_name: string; list_id: string; since: string }[];
+  mentions_unread: number;
+  reminders_today: { title: string; at: string; task_id: string | null }[];
+  no_due_date: number; no_estimate: number; unassigned: number;
   logged_yesterday: number;
-  logged_this_week: number;
-  /** Hours there were to work, for the people the board is about; null on a company board. */
   capacity_yesterday: number | null;
-  capacity_week: number | null;
+  // Your Team (empty on a board about one person).
+  people_behind: { user: UserRef; overdue: number }[];
+  overloaded: { user: UserRef; planned: number; capacity: number }[];
+  no_time_yesterday: UserRef[]; no_time_yesterday_count?: number;
+  timesheets_waiting: { user: UserRef; period_start: string; period_end: string }[];
+  timesheets_missing: UserRef[]; timesheets_missing_count?: number;
+  // The firm.
+  birthdays: UserRef[];
+  anniversaries: { user: UserRef; years: number }[];
+  holidays_this_week: { name: string; day: string }[];
+  goals_behind: { id: string; name: string; progress: number; expected: number }[];
 }
 
 export interface Segment { key: string; label: string; color: string; value: number }

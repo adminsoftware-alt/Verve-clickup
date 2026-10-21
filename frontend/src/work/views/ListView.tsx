@@ -390,6 +390,7 @@ export const ListView: React.FC<{
                       <StatusDot status={group.status} />
                       <input
                         autoFocus
+                        aria-label="New task name"
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
                         onBlur={() => !draft && setAdding(null)}

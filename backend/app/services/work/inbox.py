@@ -241,7 +241,19 @@ def list_reminders(db: Session, access: Access, state: str) -> List[c.ReminderOu
     return [_reminder_out(db, access, r) for r in db.scalars(q.limit(300))]
 
 
+# A reminder set "now" from a slow form lands a moment in the past; one for 2020 is a mistake.
+REMINDER_SLACK = timedelta(minutes=5)
+
+
+def _ensure_ahead(when: datetime) -> None:
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    if when < _now() - REMINDER_SLACK:
+        raise Invalid("A reminder has to be for a time that has not passed yet")
+
+
 def create_reminder(db: Session, access: Access, data: c.ReminderIn) -> c.ReminderOut:
+    _ensure_ahead(data.remind_at)
     target = data.user_id or access.user_id
     member = db.get(WorkspaceMember, (access.workspace_id, target))
     if member is None:
@@ -275,6 +287,7 @@ def update_reminder(db: Session, access: Access, reminder_id: uuid.UUID, data: c
     if data.title is not None:
         r.title = data.title
     if data.remind_at is not None:
+        _ensure_ahead(data.remind_at)
         r.remind_at = data.remind_at
         r.notified_at = None
     if data.done is not None:

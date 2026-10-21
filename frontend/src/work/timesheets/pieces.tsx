@@ -9,6 +9,8 @@ export const hours = (seconds: number) => formatDuration(seconds) || '0h';
 
 export function rangeLabel(start: string, end: string): string {
   const a = parseDay(start), b = parseDay(end);
+  // A week the server never sent (a refused request, a mangled ?week=) is not "Invalid Date NaN".
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return '…';
   const month = (d: Date) => d.toLocaleDateString(undefined, { month: 'short' });
   return a.getMonth() === b.getMonth()
     ? `${month(a)} ${a.getDate()} - ${b.getDate()}`
@@ -106,8 +108,8 @@ export const WeekNav: React.FC<{ start: string | null; end: string | null; onGo:
   ];
   return (
     <div className="flex items-center gap-1 sm:gap-2">
-      <button type="button" title="Previous week" onClick={() => shift(-7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
-      <button type="button" title="Next week" onClick={() => shift(7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
+      <button aria-label="Previous week" type="button" title="Previous week" onClick={() => shift(-7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
+      <button aria-label="Next week" type="button" title="Next week" onClick={() => shift(7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
       <button
         type="button"
         onClick={() => picker.current?.showPicker?.()}
@@ -163,7 +165,7 @@ export const TaskPicker: React.FC<{ onPick: (task: PickTask) => void; exclude?: 
     <div>
       <div className="mb-1 flex items-center gap-2 rounded-md border border-gray-200 px-2 py-1">
         <Search size={13} className="text-gray-400" />
-        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} className="w-full text-sm focus:outline-none" />
+        <input autoFocus aria-label={placeholder} value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} className="w-full text-sm focus:outline-none" />
       </div>
       <ul className="max-h-64 overflow-y-auto" role="listbox" aria-label="Tasks">
         {items === null ? <li className="px-2 py-2 text-xs text-gray-400">Loading…</li> : shown.length === 0 ? <li className="px-2 py-2 text-xs text-gray-400">No tasks found</li> : shown.map((task) => (

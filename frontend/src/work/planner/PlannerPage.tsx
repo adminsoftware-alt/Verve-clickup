@@ -8,7 +8,7 @@ import type { Task } from '../api';
 import { planningApi, type CalendarEvent, type Planner, type TimeBlock } from '../planningApi';
 import { FilterPanel } from '../views/FilterPanel';
 import { EMPTY_FILTERS, applyFilters, type ViewFilters } from '../views/viewSettings';
-import { usePhone } from '../useBreakpoint';
+import { useBelow, usePhone } from '../useBreakpoint';
 
 const HOUR_PX = 48;
 const SNAP_MIN = 15;
@@ -154,10 +154,15 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
   const { workspace, members, listName, refresh: refreshTree } = useWork();
   const me = useMe();
   const phone = usePhone();
+  // Below a laptop's width the tasks-to-plan panel (18rem) beside the app's own sidebar left the
+  // calendar a thin strip, so there it opens as a sheet from a "To plan" button, as on a phone.
+  const compact = useBelow('lg');
   const { tasks, refresh: refreshMine } = useMyTasks();
-  // A phone shows one day unless someone chose otherwise: seven columns do not fit 390px.
+  // A phone shows one day unless someone chose otherwise *on the phone*: seven columns do not fit
+  // 390px, and a Week picked on a wide window used to follow the browser down to a narrow one.
+  const modeKey = phone ? `${KEY}.phone` : KEY;
   const [mode, setMode] = useState<Mode>(() => {
-    try { return (localStorage.getItem(KEY) as Mode) || (window.innerWidth < 768 ? 'day' : 'week'); } catch { return 'week'; }
+    try { return (localStorage.getItem(modeKey) as Mode) || (phone ? 'day' : 'week'); } catch { return phone ? 'day' : 'week'; }
   });
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
   const [data, setData] = useState<Planner | null>(null);
@@ -179,7 +184,7 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
   const gridRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 60_000); return () => clearInterval(t); }, []);
-  useEffect(() => { try { localStorage.setItem(KEY, mode); } catch { /* ignore */ } }, [mode]);
+  useEffect(() => { try { localStorage.setItem(modeKey, mode); } catch { /* ignore */ } }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // D, W and M switch the period, as the menu says -- unless someone is typing.
   useEffect(() => {
@@ -380,7 +385,7 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
         <span className="min-w-0 truncate text-sm font-semibold text-gray-800" aria-live="polite">{title}</span>
         <span className="ml-auto flex items-center gap-1.5">
           <FilterPanel filters={filters} onChange={setFilters} tasks={tasks} statuses={null} people={people} />
-          {phone && (
+          {compact && (
             <button type="button" onClick={() => setTrayOpen(true)}
               className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white">
               <ListTodo size={15} /> To plan{unplanned ? <span className="rounded-full bg-white/25 px-1.5 text-xs">{unplanned}</span> : null}
@@ -390,7 +395,7 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
       </header>
       {error && <div className="mx-3 mt-2 rounded-md bg-amber-50 px-3 py-1.5 text-sm text-amber-800 sm:mx-6">{error}</div>}
       <div className="flex min-h-0 flex-1">
-        {!phone && (
+        {!compact && (
           <aside className="flex w-72 shrink-0 flex-col border-r border-gray-200 bg-gray-50/60" aria-label="Tasks to plan">
             {trayHead}
             {trayList}
@@ -487,12 +492,12 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
         )}
       </div>
 
-      {/* On a phone the tasks to plan come up as a sheet from the bottom. */}
-      {phone && trayOpen && (
+      {/* On a phone or a narrow window the tasks to plan come up as a sheet from the bottom. */}
+      {compact && trayOpen && (
         <Portal>
           <div className="fixed inset-0 z-[110] flex items-end bg-black/30" onMouseDown={() => setTrayOpen(false)}>
             <div role="dialog" aria-label="Tasks to plan" onMouseDown={(e) => e.stopPropagation()}
-              className="safe-bottom flex max-h-[80dvh] w-full flex-col rounded-t-2xl bg-gray-50">
+              className="safe-bottom mx-auto flex max-h-[80dvh] w-full max-w-xl flex-col rounded-t-2xl bg-gray-50">
               <div className="flex items-center justify-between px-4 pt-3">
                 <span className="mx-auto h-1 w-10 rounded-full bg-gray-300" aria-hidden />
               </div>

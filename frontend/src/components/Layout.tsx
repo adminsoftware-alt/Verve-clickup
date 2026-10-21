@@ -3,12 +3,7 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { useTimer } from '../context/TimerContext';
 import { useNotifications } from '../context/NotificationContext';
-import {
-  LayoutDashboard, Calendar, Clock,
-  BarChart2, Settings as SettingsIcon,
-  Bell, ChevronDown,
-  Activity, Briefcase, X, Users
-} from 'lucide-react';
+import { LayoutDashboard, Bell, ChevronDown, X } from 'lucide-react';
 import { SpacesSidebar } from '../work/SpacesSidebar';
 import { MyTasksNav } from '../work/MyTasksNav';
 import { FavoritesNav } from '../work/Favorites';
@@ -22,6 +17,7 @@ import { ProfileChip } from './HeaderBits';
 import { useIsAdmin, useWork } from '../work/WorkContext';
 import type { UserPresence } from '../services/presenceService';
 import { BottomNav } from './BottomNav';
+import { MobileScopeBar } from './MobileScope';
 import { usePhone } from '../work/useBreakpoint';
 
 /** What the content pane shows while a page's own chunk is still on the way. */
@@ -53,9 +49,8 @@ export const Layout: React.FC = () => {
   const isWorkspaceAdmin = useIsAdmin();
   const workspaceName = workspace?.name ?? 'Verve Workflow';
   const [onlineUsers, setOnlineUsers] = useState<UserPresence[]>([]);
-  // On a phone the sidebar is a drawer. On anything wider it is always there and this is ignored.
+  // On a phone there is no sidebar: the four tabs across the bottom and the Spaces tab replace it.
   const phone = usePhone();
-  const [drawer, setDrawer] = useState(false);
 
   useEffect(() => {
     // Presence runs on Firestore, and Firestore is 114 KB gzipped. This was the only door it came
@@ -97,15 +92,6 @@ export const Layout: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside, true);
     return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, []);
-  // Following a link puts the drawer away; so does Escape, and growing past a phone.
-  useEffect(() => { setDrawer(false); }, [location.pathname]);
-  useEffect(() => { if (!phone) setDrawer(false); }, [phone]);
-  useEffect(() => {
-    if (!drawer) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDrawer(false); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [drawer]);
 
 
   const runningTimers = Object.entries(timers).filter(([_, t]) => t.startTime !== null);
@@ -121,22 +107,12 @@ export const Layout: React.FC = () => {
     // An admin has no personal board -- the Company one is theirs, and it is the first row of
     // Dashboards -- so the rail would otherwise carry two routes to the same place.
     ...(isWorkspaceAdmin ? [] : [{ name: 'Dashboard', path: '/', icon: <LayoutDashboard size={16} /> }]),
-    ...(FEATURES.legacyTimeTracking ? [{ name: 'Time Tracking', path: '/time-entries', icon: <Clock size={16} /> }] : []),
-    ...(FEATURES.legacyCalendar ? [{ name: 'Calendar', path: '/calendar', icon: <Calendar size={16} /> }] : []),
-    ...(FEATURES.legacyTeams ? [{ name: hasRole(['Admin']) ? 'Teams' : 'My Team', path: '/teams', icon: <Users size={16} /> }] : []),
-    ...(FEATURES.legacyReports ? [{ name: 'Reports', path: '/reports', icon: <BarChart2 size={16} /> }] : []),
-    ...(FEATURES.legacyWorkload ? [{ name: 'Workload', path: '/workload', icon: <Activity size={16} /> }] : []),
   ];
 
   const adminManagerNavItems: any[] = [
   ];
 
   const mainNavItems = hasRole(['Admin', 'Manager']) ? [...baseNavItems, ...adminManagerNavItems] : baseNavItems;
-
-  const settingsItems = [
-    { name: 'Settings', path: '/settings', icon: <SettingsIcon size={16} /> },
-    { name: 'Integrations', path: '/integrations', icon: <Briefcase size={16} /> },
-  ];
 
   const renderNavGroup = (items: typeof mainNavItems) => (
     <nav style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -165,19 +141,10 @@ export const Layout: React.FC = () => {
       className="flex h-[100dvh] overflow-hidden"
       style={{ background: 'linear-gradient(135deg, #FAFBFB 0%, #EEF2F1 100%)' }}
     >
-      {/* The dimmed page behind an open drawer. Tapping it is how most people close one. */}
-      {phone && drawer && (
-        <div className="fixed inset-0 z-[55] bg-black/40 md:hidden" onClick={() => setDrawer(false)} aria-hidden />
-      )}
-
-      {/* Sidebar: a column on a desktop, a drawer over the page on a phone. */}
+      {/* Sidebar: a desktop column. On a phone the bottom tabs and the Spaces tab take its place. */}
       <aside
-        className={`glass-panel app-sidebar no-print z-10 flex w-60 shrink-0 flex-col overflow-y-auto px-3 py-5 transition-transform duration-200
-          max-md:z-[56] max-md:pb-nav
-          max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:w-[17rem] max-md:shadow-2xl
-          ${phone && !drawer ? 'max-md:-translate-x-full' : 'max-md:translate-x-0'}`}
+        className="glass-panel app-sidebar no-print z-10 flex w-60 shrink-0 flex-col overflow-y-auto px-3 py-5 max-md:hidden"
         style={{ borderRight: '1px solid rgba(255,255,255,0.4)' }}
-        aria-hidden={phone && !drawer}
       >
         {/* Logo Area */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '0 6px', marginBottom: '20px' }}>
@@ -198,14 +165,6 @@ export const Layout: React.FC = () => {
 
           <SpacesSidebar />
 
-          {FEATURES.sidebarSettings && (
-            <div>
-              <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-sidebar-text)', letterSpacing: '0.05em', marginBottom: '8px', paddingLeft: '14px' }}>
-                Settings
-              </div>
-              {renderNavGroup(settingsItems)}
-            </div>
-          )}
         </div>
 
         {/* Bottom Sidebar Actions */}
@@ -240,7 +199,7 @@ export const Layout: React.FC = () => {
         {/* Top Header */}
         {/* Three columns -- who you work for, search, and you -- so the search sits in the middle
             of the bar whatever the two sides hold. The menu button, "Recent" and the help menu
-            came off: the drawer opens from "More" in the bottom bar on a phone, the sidebar
+            came off: on a phone the bottom tabs replace the sidebar, the sidebar
             already lists where you've been, and the shortcuts are in the search box itself. */}
         <header
           className="glass-panel no-print z-[5] grid h-14 shrink-0 grid-cols-[minmax(7rem,1fr)_minmax(0,36rem)_minmax(max-content,1fr)] items-center gap-2 px-3 sm:h-16 sm:gap-4 sm:px-6"
@@ -544,6 +503,9 @@ export const Layout: React.FC = () => {
           </div>
         </header>
 
+        {/* Phone: whose Dashboard / Tasks / Timesheet this is (Mine, Team, Company, Person). */}
+        <MobileScopeBar />
+
         {/* Page Content: Space/Folder/List pages fill the pane and scroll internally.
             On a phone `pb-nav` keeps the last row clear of the tab bar across the bottom. */}
         <div
@@ -560,7 +522,7 @@ export const Layout: React.FC = () => {
         </div>
       </main>
 
-      <BottomNav onMore={() => setDrawer(true)} moreOpen={drawer} />
+      <BottomNav />
       <AssistantButton />
     </div>
   );

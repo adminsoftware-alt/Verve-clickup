@@ -2,7 +2,7 @@
 // and moving/duplicating/archiving locations and tasks (/api/v2).
 import { auth } from '../core/firebase';
 import type { CopyParts } from './task/CopyParts';
-import { API_V2, ApiError, request, type LocationKind, type Status, type StatusGroup, type TaskDetail, type TeamRef, type UserRef, type ListNode, type Hierarchy } from './api';
+import { API_V2, ApiError, request, upload as sendForm, type LocationKind, type Status, type StatusGroup, type TaskDetail, type TeamRef, type UserRef, type ListNode, type Hierarchy } from './api';
 
 export interface Reaction { emoji: string; count: number; mine: boolean; users: string[] }
 export interface Comment {
@@ -41,17 +41,16 @@ export interface Reminder { id: string; title: string; task: TaskRef | null; rem
 
 const seg = (kind: LocationKind) => (kind === 'space' ? 'spaces' : kind === 'folder' ? 'folders' : 'lists');
 
+/**
+ * One file, through the shared multipart sender.
+ *
+ * This used to fetch with the Firebase token itself, so under a local testing sign-in -- which has
+ * no Firebase user -- every attachment failed with "Not signed in" while everything else worked.
+ */
 async function upload<T>(path: string, file: File): Promise<T> {
-  const user = auth.currentUser;
-  if (!user) throw new ApiError(401, 'Not signed in');
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`${API_V2}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${await user.getIdToken()}` }, body: form });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, (typeof data.detail === 'string' && data.detail) || `Upload failed (${res.status})`);
-  }
-  return res.json();
+  return sendForm<T>('POST', path, form);
 }
 
 /** Download an attachment with the user's token, then open or save it. */

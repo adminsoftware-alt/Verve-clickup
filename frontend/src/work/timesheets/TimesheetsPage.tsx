@@ -88,7 +88,9 @@ export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
         )}
       </header>
       <main className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
-        {tab === 'all' ? <AllTimesheets /> : tab === 'approvals' ? <Approvals settings={settings} /> : isAdmin ? <AllTimesheets /> : <SheetPage />}
+        {/* An admin keeps no week of their own, so "My timesheet" is everyone's for them; one
+            person's sheet (/timesheets/people/:id) is that person's for everybody. */}
+        {tab === 'all' ? <AllTimesheets /> : tab === 'approvals' ? <Approvals settings={settings} /> : tab === 'mine' && isAdmin ? <AllTimesheets /> : <SheetPage />}
       </main>
       {showSettings && settings && isAdmin && <SettingsDialog settings={settings} onClose={() => setShowSettings(false)} onSaved={loadSettings} />}
     </div>
@@ -346,7 +348,7 @@ const DecisionDialog: React.FC<{ kind: keyof typeof DIALOG_TEXT; summary: string
         <h3 className="font-semibold text-gray-900">{text.title}</h3>
         <p className="mt-1 text-sm text-gray-600">{summary}</p>
         <p className="mt-1 text-xs text-gray-500">{text.hint}</p>
-        <textarea autoFocus value={comment} onChange={(e) => setComment(e.target.value)} rows={3} placeholder={text.required ? 'Reason (required)' : 'Comment (optional)'} className="mt-3 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
+        <textarea autoFocus aria-label={text.required ? 'Reason (required)' : 'Comment (optional)'} value={comment} onChange={(e) => setComment(e.target.value)} rows={3} placeholder={text.required ? 'Reason (required)' : 'Comment (optional)'} className="mt-3 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
         <div className="mt-3 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
           <button type="button" disabled={busy || (text.required && !comment.trim())} onClick={async () => { setBusy(true); try { await onConfirm(comment.trim()); } finally { setBusy(false); } }} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">{text.button}</button>

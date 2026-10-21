@@ -594,11 +594,21 @@ export const DashboardPage: React.FC<{
             {summary.length > 0 && (
               <span className="text-gray-500" title="Applied to every card on this Dashboard">{summary.join(' · ')}</span>
             )}
-            <button type="button" onClick={clearAllFilters} disabled={!filtered}
-              title={filtered ? 'Take every filter off: the board’s and each card’s' : 'No filters are on'}
-              className="flex items-center gap-1 rounded-md px-2 py-1 font-medium text-brand-700 transition-colors hover:bg-brand-50 disabled:cursor-default disabled:text-gray-400 disabled:hover:bg-transparent">
-              <FilterX size={13} /> Clear all filters
-            </button>
+            {/* aria-disabled rather than disabled: a disabled button gets no hover in most
+                browsers, so "No filters added" was never seen when it was most needed. */}
+            <span className="group relative">
+              <button type="button" onClick={() => filtered && clearAllFilters()} aria-disabled={!filtered}
+                aria-label={filtered ? 'Clear all filters' : 'Clear all filters (no filters added)'}
+                className={`flex items-center gap-1 rounded-md px-2 py-1 font-medium transition-colors ${filtered
+                  ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-200 hover:bg-brand-100'
+                  : 'cursor-not-allowed text-gray-400'}`}>
+                <FilterX size={13} /> Clear all filters
+              </button>
+              <span role="tooltip"
+                className="pointer-events-none absolute left-1/2 top-full z-30 mt-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow transition-opacity group-hover:opacity-100">
+                {filtered ? 'Take off every filter: the board’s and each card’s' : 'No filters added'}
+              </span>
+            </span>
             </>}
             {!viewing && RELATION_NOTE[dash.relation] && <span className="text-gray-400">{RELATION_NOTE[dash.relation]}</span>}
           </div>
@@ -680,6 +690,7 @@ export const DashboardPage: React.FC<{
                       <span className="no-print">
                         <CardFilterMenu
                           value={card.config.filters ?? {}}
+                          base={card.config.base_filters}
                           disabled={!canEdit}
                           compact
                           hideDue
@@ -756,6 +767,7 @@ export const DashboardPage: React.FC<{
                   {FILTERABLE.includes(card.type) && (
                     <CardFilterMenu
                       value={card.config.filters ?? {}}
+                          base={card.config.base_filters}
                       disabled={!canEdit}
                       hideDue={CAN_DROP_PERIOD.includes(card.type)}
                       peopleOnly={PEOPLE_ONLY_FILTERS.includes(card.type)}

@@ -29,14 +29,6 @@ import { FavoritesProvider } from './work/Favorites';
 // page nobody opens costs nothing, and a page behind a flag that is off is never asked for at all.
 const HomePage = lazy(() => import('./work/dashboards/HomePage').then((m) => ({ default: m.HomePage })));
 const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m.Settings })));
-const TimeEntries = lazy(() => import('./pages/TimeEntries').then((m) => ({ default: m.TimeEntries })));
-const Reports = lazy(() => import('./pages/Reports').then((m) => ({ default: m.Reports })));
-const Calendar = lazy(() => import('./pages/Calendar').then((m) => ({ default: m.Calendar })));
-const Workload = lazy(() => import('./pages/Workload').then((m) => ({ default: m.Workload })));
-const SpaceView = lazy(() => import('./pages/SpaceView').then((m) => ({ default: m.SpaceView })));
-const Teams = lazy(() => import('./pages/Teams').then((m) => ({ default: m.Teams })));
-const TeamDetails = lazy(() => import('./pages/TeamDetails').then((m) => ({ default: m.TeamDetails })));
-const Projects = lazy(() => import('./pages/Projects').then((m) => ({ default: m.Projects })));
 const LocationPage = lazy(() => import('./work/LocationPage').then((m) => ({ default: m.LocationPage })));
 const PeopleDirectory = lazy(() => import('./work/teams/TeamsHub').then((m) => ({ default: m.PeopleDirectory })));
 const TeamsHub = lazy(() => import('./work/teams/TeamsHub').then((m) => ({ default: m.TeamsHub })));
@@ -61,6 +53,7 @@ const PersonDashboardPage = lazy(() => import('./work/dashboards/PeopleBoards').
 const PreviewPage = lazy(() => import('./work/dashboards/PreviewPage').then((m) => ({ default: m.PreviewPage })));
 const TimesheetsPage = lazy(() => import('./work/timesheets/TimesheetsPage').then((m) => ({ default: m.TimesheetsPage })));
 const PublicPage = lazy(() => import('./work/PublicPage').then((m) => ({ default: m.PublicPage })));
+const SpacesPage = lazy(() => import('./work/SpacesPage').then((m) => ({ default: m.SpacesPage })));
 const AllSpacesPage = lazy(() => import('./work/AllSpacesPage').then((m) => ({ default: m.AllSpacesPage })));
 const GoalsPage = lazy(() => import('./work/goals/GoalsPage').then((m) => ({ default: m.GoalsPage })));
 
@@ -73,13 +66,6 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   
   return <>{children}</>;
 };
-
-const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (
-  <div style={{ padding: 'var(--spacing-8)', textAlign: 'center', marginTop: '10vh' }}>
-    <h1 style={{ fontSize: '2rem', marginBottom: 'var(--spacing-4)', color: 'var(--color-text-primary)' }}>{title}</h1>
-    <p style={{ color: 'var(--color-text-secondary)' }}>This module is currently under construction and will be available in the next phase.</p>
-  </div>
-);
 
 /** For a page that renders with no shell around it -- a public link, or the sign-in screen. */
 // Both of these reach for framer-motion, which is 40 KB gzipped of animation library. Neither is
@@ -123,20 +109,11 @@ const AppContent: React.FC = () => {
       
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<HomePage />} />
-        <Route path="time-entries" element={<TimeEntries />} />
         <Route path="settings" element={<Settings />} />
-        
-        <Route path="calendar" element={<Calendar />} />
-        <Route path="workload" element={<Workload />} />
-        <Route path="reports" element={<Reports />} />
-        <Route path="projects" element={<Projects />} />
-        <Route path="clients" element={<PlaceholderPage title="Clients" />} />
-        <Route path="team" element={<Teams />} />
-        <Route path="teams" element={<Teams />} />
-        <Route path="teams/:id" element={<TeamDetails />} />
-        <Route path="capacity" element={<PlaceholderPage title="Capacity" />} />
-        <Route path="integrations" element={<PlaceholderPage title="Integrations" />} />
-        
+        {/* The old practice pages (/projects, /teams, /time-entries, /calendar, /workload,
+            /reports, and the v1 /spaces, /folders and /lists) are gone; their addresses fall
+            through to the catch-all below, which goes home. */}
+
         {/* Work hierarchy: Space, Folder and List pages with their views */}
         <Route path="s/:id" element={<LocationPage />} />
         <Route path="f/:id" element={<LocationPage />} />
@@ -158,6 +135,9 @@ const AppContent: React.FC = () => {
         <Route path="my-tasks/assigned" element={<AllTasksPage initialScope="mine" />} />
         <Route path="my-tasks/today" element={<AllTasksPage initialScope="now" />} />
         <Route path="all-tasks" element={<AllTasksPage />} />
+        {/* A manager's Team: tasks given to the people in the Teams they lead (the phone's Tasks › Team). */}
+        <Route path="team-tasks" element={<AllTasksPage initialScope="team" />} />
+        <Route path="spaces" element={<SpacesPage />} />
         <Route path="planner" element={<PlannerPage />} />
         <Route path="team-week" element={<TeamWeekPage />} />
         <Route path="compliance" element={<CompliancePage />} />
@@ -179,9 +159,6 @@ const AppContent: React.FC = () => {
         <Route path="timesheets/approvals" element={<TimesheetsPage tab="approvals" />} />
         <Route path="timesheets/people/:userId" element={<TimesheetsPage tab="person" />} />
 
-        <Route path="spaces/:spaceId" element={<SpaceView type="space" />} />
-        <Route path="folders/:folderId" element={<SpaceView type="folder" />} />
-        <Route path="lists/:listId" element={<SpaceView type="list" />} />
       </Route>
       
       {/* Catch-all redirect */}

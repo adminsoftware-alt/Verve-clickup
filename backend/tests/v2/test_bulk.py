@@ -76,10 +76,11 @@ def test_bulk_respects_each_tasks_permissions(api, org):
     # Payroll becomes private; the member may only view it.
     ok(api.patch(f"/lists/{org['payroll']['id']}", "owner", {"is_private": True}))
     ok(api.post(f"/lists/{org['payroll']['id']}/shares", "owner", {"user_id": "member", "level": "view"}), 201)
-    # And Audit is shared with them at edit, so the half of this that is meant to succeed can.
-    # Without it the member is read-and-comment on both -- an employee's standing on work that is
-    # not theirs -- and the test would pass for the wrong reason, with nothing updated at all.
-    ok(api.post(f"/lists/{org['audit']['id']}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
+    # And the Audit task is shared with them at edit, so the half of this that is meant to succeed
+    # can. Without it the member is read-and-comment on both -- an employee's standing on work that
+    # is not theirs, which a share on the List does not lift -- and the test would pass for the
+    # wrong reason, with nothing updated at all.
+    ok(api.post(f"/tasks/{org['c']['id']}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
     out = ok(api.post("/tasks/bulk", "member", {"task_ids": [org["a"]["id"], org["c"]["id"]], "priority": 2}))
     assert out["updated"] == [org["c"]["id"]]
     assert out["skipped"][0]["reason"] == "You need edit access to change this task"
@@ -104,5 +105,8 @@ def test_search_finds_only_tasks_you_can_open(api, org):
 
 
 def test_team_view_can_be_added(api, org):
-    view = ok(api.post(f"/lists/{org['payroll']['id']}/views", "owner", {"type": "team"}), 201)
+    # To the Space: a List shows only its List view.
+    assert api.post(f"/lists/{org['payroll']['id']}/views", "owner", {"type": "team"}).status_code == 400
+    space = ok(api.get(f"/lists/{org['payroll']['id']}", "owner"))["space_id"]
+    view = ok(api.post(f"/spaces/{space}/views", "owner", {"type": "team"}), 201)
     assert (view["type"], view["name"]) == ("team", "Team")

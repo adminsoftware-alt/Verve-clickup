@@ -473,7 +473,7 @@ def induction_quiz(db: Session, access: Access, create: bool = False) -> Optiona
         config={"options": [{"name": "Ready to go"}, {"name": "Mostly, a few questions"}, {"name": "I need another session"}]}))
     fields.append({"key": f"cf:{confidence.id}", "required": True})
     fields.append({"key": "description", "label": "Questions or anything unclear", "required": False})
-    view = views.create_view(db, opened, s.ViewCreate(type=ViewType.form, name=QUIZ_NAME))
+    view = views.create_view(db, opened, s.ViewCreate(type=ViewType.form, name=QUIZ_NAME), system=True)
     view.settings = {"form": {
         "title": QUIZ_NAME, "active": True, "fields": fields, "assignee_ids": _hr_ids(db, access.workspace_id, plan),
         "description": "Tick what you can do after your ClickUp induction. The ClickUp team reviews your answers.",

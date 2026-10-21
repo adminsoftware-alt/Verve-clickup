@@ -11,6 +11,9 @@ class Settings(BaseSettings):
 
     # PostgreSQL, used by the v2 work hierarchy. Optional so v1 still boots without it.
     DATABASE_URL: Optional[str] = None
+    # Where the v2 tests run (they empty every table). Set it whenever DATABASE_URL is a shared
+    # database such as Supabase, so the tests stay on a local server.
+    TEST_DATABASE_URL: Optional[str] = None
 
     # Scheduled Dashboard email reports. Without SMTP_HOST, reports are still built
     # and kept for preview, but not sent.
@@ -84,6 +87,11 @@ class Settings(BaseSettings):
     OAUTH_REDIRECT_BASE: str = "http://localhost:8000"
     # Encrypts stored calendar tokens (any long random string). Without it, a key is derived from the OAuth secrets.
     CALENDAR_TOKEN_KEY: Optional[str] = None
+    # The assistant's AI fallback (services/work/ai_assistant.py): any OpenAI-compatible chat API.
+    # Without AI_API_KEY the assistant keeps to its phrase rules.
+    AI_BASE_URL: str = "https://openrouter.ai/api/v1"
+    AI_MODEL: Optional[str] = None
+    AI_API_KEY: Optional[str] = None
     
     class Config:
         env_file = ".env"

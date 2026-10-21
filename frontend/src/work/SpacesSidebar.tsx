@@ -21,6 +21,7 @@ import { Menu, NameDialog, type MenuItem } from './ui';
 import { FEATURES } from '../config/features';
 import { ShareLocationDialog } from './ShareLocationDialog';
 import { AssignListDialog } from './AssignListDialog';
+import { CreateSpaceDialog } from './CreateSpace';
 import { notify } from '../components/notify';
 import { ask } from '../components/ask';
 
@@ -143,8 +144,7 @@ export const SpacesSidebar: React.FC = () => {
       return;
     }
     let created: { id: string };
-    if (dialog.what === 'space') created = await workApi.createSpace(workspace.id, name, isPrivate);
-    else if (dialog.what === 'folder') created = await workApi.createFolder(dialog.parent!, name, isPrivate);
+    if (dialog.what === 'folder') created = await workApi.createFolder(dialog.parent!, name, isPrivate);
     else created = await workApi.createList(dialog.parent!, name, isPrivate, assignees);
     if (dialog.parent) open(dialog.parent.id);
     await refresh();
@@ -239,9 +239,8 @@ export const SpacesSidebar: React.FC = () => {
   ];
 
   const createItems = (parent: { kind: 'space' | 'folder'; id: string }, allowFolder: boolean): MenuItem[] => [
-    ...(isManager
-      ? [{ label: 'List', icon: <ListIcon size={14} />, onClick: () => setDialog({ type: 'create', what: 'list' as const, parent }) }]
-      : []),
+    // A List: anyone with full edit here (the menu only opens for them). A Folder: managers and admins.
+    { label: 'List', icon: <ListIcon size={14} />, onClick: () => setDialog({ type: 'create', what: 'list' as const, parent }) },
     ...(allowFolder && isManager
       ? [{ label: parent.kind === 'space' ? 'Folder' : 'Subfolder', icon: <Folder size={14} />, onClick: () => setDialog({ type: 'create', what: 'folder' as const, parent }) }]
       : []),
@@ -282,7 +281,7 @@ export const SpacesSidebar: React.FC = () => {
           isPrivate={folder.is_private}
           onToggle={() => toggle(folder.id)}
           isOpen={isOpen}
-          createItems={isManager && canManage(folder.permission_level) ? createItems({ kind: 'folder', id: folder.id }, !isSub) : undefined}
+          createItems={canManage(folder.permission_level) ? createItems({ kind: 'folder', id: folder.id }, !isSub) : undefined}
           actions={rowActions('folder', folder)}
         />
         {isOpen && (
@@ -315,7 +314,7 @@ export const SpacesSidebar: React.FC = () => {
           isPrivate={space.is_private}
           onToggle={() => toggle(space.id)}
           isOpen={isOpen}
-          createItems={isManager && canManage(space.permission_level) ? createItems({ kind: 'space', id: space.id }, true) : undefined}
+          createItems={canManage(space.permission_level) ? createItems({ kind: 'space', id: space.id }, true) : undefined}
           actions={rowActions('space', space)}
         />
         {isOpen && (
@@ -323,7 +322,7 @@ export const SpacesSidebar: React.FC = () => {
             {space.folders.map((f) => renderFolder(f, 1, false))}
             {space.lists.map((l) => renderList(l, 1))}
             {space.folders.length === 0 && space.lists.length === 0 && (
-              <div className="py-1 pl-10 text-xs text-gray-400">Empty — use + to add a List</div>
+              <div className="py-1 pl-10 text-xs text-gray-400">{canManage(space.permission_level) ? 'Empty — use + to add a List' : 'No Lists yet'}</div>
             )}
           </>
         )}
@@ -345,7 +344,7 @@ export const SpacesSidebar: React.FC = () => {
       <div className="mb-1 flex items-center justify-between pl-2.5 pr-1">
         <span className="side-head text-gray-400">Spaces</span>
         {workspace && canAddSpace && (
-          <button
+          <button aria-label="New Space"
             type="button"
             title="New Space"
             onClick={() => setDialog({ type: 'create', what: 'space' })}
@@ -532,7 +531,12 @@ export const SpacesSidebar: React.FC = () => {
       {dialog?.type === 'sprints' && <SprintSettingsDialog folderId={dialog.id} name={dialog.name} onClose={() => setDialog(null)} onSaved={refresh} />}
       {FEATURES.listEmail && dialog?.type === 'list-email' && <ListEmailDialog listId={dialog.id} name={dialog.name} onClose={() => setDialog(null)} />}
 
-      {(dialog?.type === 'create' || dialog?.type === 'rename') && (
+      {dialog?.type === 'create' && dialog.what === 'space' && workspace && (
+        <CreateSpaceDialog workspaceId={workspace.id} onClose={() => setDialog(null)}
+          onUseTemplates={() => setDialog({ type: 'templates', kind: 'space' })}
+          onCreated={(id) => { setDialog(null); refresh().then(() => navigate(pathFor('space', id))); }} />
+      )}
+      {((dialog?.type === 'create' && dialog.what !== 'space') || dialog?.type === 'rename') && (
         <NameDialog
           title={dialog.type === 'rename' ? 'Rename' : `New ${dialog.what === 'space' ? 'Space' : dialog.what === 'folder' ? 'Folder' : 'List'}`}
           initial={dialog.type === 'rename' ? dialog.name : ''}
@@ -553,6 +557,28 @@ export const SpacesSidebar: React.FC = () => {
 };
 
 // --- one row of the tree -----------------------------------------------------
+
+/**
+ * A long name loses its middle, not its end. Eleven Lists called "Variant Task List - …" all
+ * looked the same when the part that tells them apart was the part cut off, so the last piece
+ * (after the final " - ", or the last few characters) always stays; the full name is the tooltip.
+ */
+function splitName(name: string): [string, string] {
+  if (name.length <= 24) return [name, ''];
+  const cut = name.lastIndexOf(' - ');
+  const tail = cut > 0 && name.length - cut <= 22 ? name.slice(cut) : name.slice(-10);
+  return [name.slice(0, name.length - tail.length), tail];
+}
+
+const RowName: React.FC<{ name: string; className: string }> = ({ name, className }) => {
+  const [head, tail] = splitName(name);
+  return (
+    <span className={`flex min-w-0 flex-1 ${className}`} title={name}>
+      <span className="min-w-0 truncate">{head}</span>
+      {tail && <span className="min-w-0 max-w-[65%] shrink-0 truncate whitespace-pre">{tail}</span>}
+    </span>
+  );
+};
 
 const Row: React.FC<{
   to?: string;
@@ -584,7 +610,7 @@ const Row: React.FC<{
         )}
       </span>
       <span className="flex shrink-0 items-center">{icon}</span>
-      <span className={`min-w-0 flex-1 truncate ${bold ? 'font-medium text-gray-800' : 'text-gray-700'}`}>{name}</span>
+      <RowName name={name} className={bold ? 'font-medium text-gray-800' : 'text-gray-700'} />
       {isPrivate && <Lock size={12} className="shrink-0 text-gray-400" />}
       <span className="flex shrink-0 items-center gap-0.5">
         {/* Hover actions stay visible while one of their menus is open. */}

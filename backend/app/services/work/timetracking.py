@@ -35,6 +35,20 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# How far past now a logged entry may end: clocks drift, and a form filled in at 5:12 rounds up.
+FUTURE_SLACK = timedelta(minutes=5)
+
+
+def ensure_not_future(ended: datetime, now: Optional[datetime] = None) -> None:
+    """Refuse time that has not happened yet. A running timer has no end, so it never comes here.
+
+    An entry is an instant range, so this is the same in every timezone; days that have not
+    started yet locally are caught by the timesheet, which knows the person's zone.
+    """
+    if ended > (now or _now()) + FUTURE_SLACK:
+        raise Invalid("Time can only be logged for work already done, not for later today or days ahead")
+
+
 def _require_tracking(opened: Opened[Task]) -> None:
     # Edit, but measured before the employee cap.
     #
@@ -216,6 +230,7 @@ def add_entry(db: Session, opened: Opened[Task], data: s.TimeEntryCreate) -> Tim
             ended = _now()
             started = ended - timedelta(seconds=data.duration_seconds)
 
+    ensure_not_future(ended)
     ensure_unlocked(db, access.workspace_id, user_id, started, access.role)
     entry = TimeEntry(
         task_id=opened.obj.id,
@@ -271,6 +286,8 @@ def update_entry(db: Session, user_id: str, entry_id: uuid.UUID, data: s.TimeEnt
         entry.duration_seconds = data.duration_seconds
         entry.ended_at = entry.started_at + timedelta(seconds=data.duration_seconds)
     if timing:
+        assert entry.ended_at is not None
+        ensure_not_future(entry.ended_at)
         ensure_unlocked(db, access.workspace_id, entry.user_id, entry.started_at, access.role)
     if "task_id" in fields and data.task_id is not None and data.task_id != entry.task_id:
         # Opened at view, then held to the tracking bar: moving an entry onto a task is recording

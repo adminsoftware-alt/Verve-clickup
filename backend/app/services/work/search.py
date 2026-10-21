@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Folder, Space, Task, TaskList
 from app.schemas import work as s
-from app.services.work.access import Access, chain_for_task
+from app.services.work.access import Access, cap_levels, chain_for_task
 from app.services.work.tasks import serialise_tasks
 
 CANDIDATES = 300
@@ -75,4 +75,5 @@ def search_tasks(db: Session, user_id: str, workspace_id: uuid.UUID, query: str,
         levels[task.id] = level
         if len(found) >= limit:
             break
+    cap_levels(db, access, found, levels)
     return serialise_tasks(db, found, levels)

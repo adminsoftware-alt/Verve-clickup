@@ -168,7 +168,10 @@ export const CardFilterMenu: React.FC<{
     onCustom: () => void;
   };
   onApply: (filters: Filters) => void;
-}> = ({ value, disabled, triggerLabel = 'Filter', title = 'Filter this card', compact, hideDue, peopleOnly, time, onApply }) => {
+  /** What the card was built to filter by. Those are part of what the card is, not filters
+   *  someone added -- "Clear all filters" keeps them -- so they are not counted on the badge. */
+  base?: Filters | null;
+}> = ({ value, disabled, triggerLabel = 'Filter', title = 'Filter this card', compact, hideDue, peopleOnly, time, onApply, base }) => {
   const { members, teams, hierarchy } = useWork();
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const [draft, setDraft] = useState<Filters>(value);
@@ -228,9 +231,12 @@ export const CardFilterMenu: React.FC<{
     [fields, draft],
   );
   const activeCount = useMemo(
-    () => fields.filter((f) => chipText(f, value, personName) !== null).length,
+    () => fields.filter((f) => {
+      const now = chipText(f, value, personName);
+      return now !== null && (!base || now !== chipText(f, base, personName));
+    }).length,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fields, value],
+    [fields, value, base],
   );
 
   // A run of ticks is one save rather than one per click, so the card is re-read once.

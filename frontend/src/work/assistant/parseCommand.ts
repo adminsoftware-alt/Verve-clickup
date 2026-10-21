@@ -10,10 +10,12 @@
 // -- two tasks in one sentence, a name it does not recognise, a clause in the middle of another
 // -- it says so, and `confidence` is what the caller shows the person before anything is created.
 
+import type { Recurrence } from '../api';
 import { parseTypedDate } from '../dates';
-import { parseDuration } from '../ui';
 import { close } from './fuzzy';
 import { isHindi, romanise } from './hindi';
+import { readRepeat, settle } from './recurrence';
+import { readDuration } from './tidy';
 
 export interface Person {
   id: string;
@@ -28,6 +30,8 @@ export interface ParsedCommand {
   due_date: string | null;
   time_estimate_seconds: number | null;
   assignees: string[];
+  /** How it repeats, when the sentence said so: "every monday", "monthly". */
+  recurrence: Recurrence | null;
   /** The words each field came from, so the preview can show its working. */
   found: { field: string; from: string }[];
   /** Anything that looked like an instruction but matched nobody and nothing. */
@@ -50,31 +54,95 @@ const LEAD_IN = /^(?:please\s+)?(?:can you\s+)?(?:\b(?:add|create|make|new|remin
 
 const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
 
+/** A date said in full -- a whole day name or a number -- as opposed to "sun" or "sat". */
+const FULL_DATE = /^(?:(?:next|this|coming)\s+)?(?:today|tomorrow|tmrw|monday|tuesday|wednesday|thursday|friday|saturday|sunday|week|month|weekend)$|\d/i;
+
+/**
+ * Words that are never somebody's name, in English and in Hinglish.
+ *
+ * "What is due today" was answered about Harish ("is") and "what am I working on" about Satyam
+ * ("am"). Names are matched as whole words now, but a list of the words a question is built from is
+ * the second fence: none of these can stand for a person, however the workspace's names are spelt.
+ */
+export const NOT_A_NAME = new RegExp('^(?:'
+  + 'i|me|my|mine|myself|we|us|our|you|your|he|she|it|its|they|them|their|his|her|'
+  + 'is|am|are|was|were|be|been|being|do|does|did|done|doing|have|has|had|can|could|will|would|shall|should|may|might|must|'
+  + 'a|an|the|this|that|these|those|and|or|but|not|no|yes|so|if|then|than|'
+  + 'on|in|at|to|of|for|by|from|with|about|into|onto|off|up|out|over|under|till|until|via|per|'
+  + 'what|whats|which|who|whom|whose|when|where|why|how|any|anything|all|some|every|each|many|much|'
+  + 'due|today|tomorrow|tmrw|yesterday|now|week|month|day|next|last|this|eod|eow|'
+  + 'working|work|task|tasks|todo|open|pending|overdue|late|left|assigned|plate|time|hours?|log|logged|show|list|find|'
+  + 'hai|hain|ho|hoon|hu|tha|thi|ka|ki|ke|ko|se|pe|par|mein|me|mera|meri|mere|mujhe|main|kya|kaun|kab|kitne|kitna|aaj|kal|tak|aur|bhi|ye|yeh|wo|woh|wala|wali'
+  + ')$', 'i');
+
+/** How sure a name has to be before it counts as a person. */
+export interface MatchOptions {
+  /**
+   * 'any' lets a surname alone find somebody ("assign to yadav"); 'first' wants the first name or
+   * the whole name, for places where a surname is far more likely to be a client ("for Sharma and
+   * Co" is a client, not Aditya Sharma).
+   */
+  parts?: 'any' | 'first';
+  /** Allow a letter or two of slip, for dictation and Devanagari. Off where a guess would mislead. */
+  fuzzy?: boolean;
+}
+
 /**
  * Someone's first name, their full name, or their email -- whichever was said.
  *
  * Exported because editing a task needs exactly the same answer as creating one: "reassign it to
  * aarti" and "assign to aarti" must find the same Aarti, or the two halves of the assistant
  * disagree about who works here.
+ *
+ * Whole words only. It used to accept any piece of a name, so "do" found Sayam Doshi and the "MIS"
+ * in "prepare MIS" found Pushpadevi Mishra -- and a question about your own tasks was answered
+ * about somebody else's.
  */
-export function matchPerson(word: string, people: Person[]): Person | 'me' | null {
-  const needle = word.trim().toLowerCase();
+export function matchPerson(word: string, people: Person[], options: MatchOptions = {}): Person | 'me' | null {
+  const { parts = 'any', fuzzy = true } = options;
+  const needle = word.trim().toLowerCase().replace(/^@/, '').replace(/[,.;:!?]+$/, '').replace(/[’']s$/, '');
   if (!needle) return null;
-  if (needle === 'me' || needle === 'myself' || needle === 'my') return 'me';
+  if (/^(?:me|myself|my|mine|mera|meri|mere|mujhe)$/.test(needle)) return 'me';
+  if (needle.length < 2) return null;
+  // "is", "am", "on", "hai": the small words every sentence is made of are never anybody's name,
+  // whoever happens to be called Isha, Aman or Satyam. Checked word by word, so "aarti is" is not
+  // one person either.
+  if (needle.split(/\s+/).some((w) => NOT_A_NAME.test(w))) return null;
   const named = (p: Person) => (p.display_name || p.email).toLowerCase();
-  const exact = people.find((p) => named(p) === needle || p.email.toLowerCase() === needle);
-  if (exact) return exact;
+  const exact = people.filter((p) => named(p) === needle || p.email.toLowerCase() === needle
+    || p.email.toLowerCase().split('@')[0] === needle);
+  if (exact.length === 1) return exact[0];
   // A first name, which is how people actually speak. Only when it picks out one person: two
   // Priyas and a guess is worse than asking.
   const byFirst = people.filter((p) => named(p).split(/\s+/)[0] === needle);
   if (byFirst.length === 1) return byFirst[0];
-  const contains = people.filter((p) => named(p).includes(needle));
-  if (contains.length === 1) return contains[0];
+  if (byFirst.length > 1) return null;
+  // Below three letters only an exact first name will do ("Om"): a two-letter surname or a
+  // two-letter near miss is a guess.
+  if (needle.replace(/\s+/g, '').length < 3) return null;
+  if (parts === 'any') {
+    // Any whole word of the name: a surname, or first and last said together.
+    const words = needle.split(/\s+/);
+    const byWords = people.filter((p) => {
+      const theirs = named(p).split(/\s+/);
+      return words.every((w) => theirs.includes(w));
+    });
+    if (byWords.length === 1) return byWords[0];
+    if (byWords.length > 1) return null;
+  }
+  if (!fuzzy) return null;
   // Said in Devanagari, or misheard. "आरती" spells out as "aartee" and the person is saved as
   // "Aarti Yadav", so the last resort is a first name that is a letter or two away -- and only when
   // exactly one person is that close, because two near-misses is a guess.
+  //
+  // A stronger test than "close": four letters at least, and the same first letter. "amit" is not
+  // a slip for "aman", and "satya" said mid-sentence is not Satyam unless nothing else fits.
   const spelled = isHindi(needle) ? romanise(needle).toLowerCase() : needle;
-  const nearly = people.filter((p) => close(spelled, named(p).split(/\s+/)[0]));
+  if (spelled.length < 4 || /\s/.test(spelled)) return null;
+  const nearly = people.filter((p) => {
+    const first = named(p).split(/\s+/)[0];
+    return first[0] === spelled[0] && close(spelled, first);
+  });
   return nearly.length === 1 ? nearly[0] : null;
 }
 
@@ -92,7 +160,8 @@ const iso = (d: Date) => {
 export function parseCommand(input: string, people: Person[], me?: string, now = new Date()): ParsedCommand {
   const found: ParsedCommand['found'] = [];
   const unknown: string[] = [];
-  let rest = squash(input);
+  // Trailing punctuation is tone: "call the auditor tomorrow!!" is the same task.
+  let rest = squash(input).replace(/[\s.!?,;]+$/, '');
 
   // Take each clause out of the sentence as it is understood. Whatever survives is the name,
   // which is why the order matters: the longest and most distinctive patterns go first.
@@ -101,6 +170,41 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
     if (!m) return;
     if (onMatch(m) !== false) rest = squash(rest.replace(m[0], ' '));
   };
+
+  // "Remind me tomorrow to call the bank": the day sits between the lead-in and the work. Put it
+  // at the end, where every other date is read from.
+  const early = rest.match(/^((?:please\s+)?remind me)\s+((?:on\s+|by\s+)?\S+(?:\s+\S+)?)\s+to\s+(.+)$/i);
+  if (early && parseTypedDate(early[2].replace(/^(?:on|by)\s+/i, ''), now)) rest = `${early[1]} to ${early[3]} ${early[2]}`;
+
+  // "Add a task for Aarti to call the bank", "add a task for me to ...": who it is for, then the work.
+  const forWhom = rest.match(/^((?:please\s+)?(?:add|create|make|new)\s+(?:an?\s+)?(?:task|todo|to-do|reminder)\s+)for\s+(\S+(?:\s+\S+)?)\s+to\s+(.+)$/i);
+  if (forWhom) {
+    const pair = matchPerson(forWhom[2], people, { parts: 'first', fuzzy: false });
+    const one = pair ? null : matchPerson(forWhom[2].split(/\s+/)[0], people, { parts: 'first', fuzzy: false });
+    const hit = pair ?? one;
+    if (hit && (pair || forWhom[2].split(/\s+/).length === 1)) {
+      rest = `${forWhom[1]}${forWhom[3]} assign to ${hit === 'me' ? 'me' : forWhom[2]}`;
+    }
+  }
+
+  // --- how often ------------------------------------------------------------------------------
+  // First, because "every monday" holds a weekday the date rules below would take for a due date.
+  const repeat = readRepeat(rest, now);
+  if (repeat) {
+    rest = squash(rest.replace(repeat.from, ' '));
+    found.push({ field: 'Repeats', from: repeat.from });
+  }
+
+  // --- a priority said before the word "task" --------------------------------------------------
+  // "add an urgent task fix the server": the level sits where the article would, ahead of the
+  // name, and the lead-in that strips "add a task" would otherwise leave "Urgent task fix...".
+  let leadPriority: number | null = null;
+  const lead = rest.match(/^((?:please\s+)?(?:add|create|make|new)\s+)(?:an?\s+)?(urgent|critical|important|high[\s-]priority|low[\s-]priority|normal[\s-]priority|high|low)\s+(task|todo|to-do|reminder)\b/i);
+  if (lead) {
+    leadPriority = PRIORITY_WORDS.find(([p]) => p.test(lead[2].replace('-', ' ')))?.[1] ?? null;
+    found.push({ field: 'Priority', from: lead[2] });
+    rest = squash(rest.replace(lead[0], `${lead[1]}${lead[3]}`));
+  }
 
   // --- who ------------------------------------------------------------------------------------
   //
@@ -143,11 +247,38 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
     }
   }
 
+  // "@aarti", as a chat app writes it. The @ says it is a person, so any part of the name will do.
+  for (const m of rest.matchAll(/(?:^|\s)@([a-z][\w.-]*)/gi)) {
+    const hit = matchPerson(m[1], people, { fuzzy: false });
+    if (!hit) { unknown.push(`nobody here is called "${m[1]}"`); continue; }
+    assignees.push(hit === 'me' ? (me ?? '') : hit.id);
+    found.push({ field: 'Assignee', from: `@${m[1]}` });
+    rest = squash(rest.replace(m[0], ' '));
+  }
+
+  // "For Aarti": a person after "for", where a clause ends. Only a first name or a whole name --
+  // "for Sharma and Co" is a client, and this firm also has an Aditya Sharma.
+  if (!assignees.length) {
+    for (const m of rest.matchAll(/\bfor\s+(\S+)(?:\s+(\S+))?/gi)) {
+      const pair = m[2] ? matchPerson(`${m[1]} ${m[2]}`, people, { parts: 'first', fuzzy: false }) : null;
+      const hit = pair ?? matchPerson(m[1], people, { parts: 'first', fuzzy: false });
+      if (!hit) continue;
+      const said = pair ? `${m[1]} ${m[2]}` : m[1];
+      // `rest` is squashed, so the name sits one space after "for" and its words one space apart.
+      const after = rest.slice((m.index ?? 0) + m[0].indexOf(m[1]) + said.length);
+      if (!/^\s*(?:$|[,.;]|\b(?:and|due|by|on|from|starting|start|priority|estimate|today|tomorrow|next|this|in|with)\b)/i.test(after)) continue;
+      assignees.push(hit === 'me' ? (me ?? '') : hit.id);
+      found.push({ field: 'Assignee', from: said });
+      rest = squash(rest.replace(new RegExp(`\\bfor\\s+${said.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i'), ' '));
+      break;
+    }
+  }
+
   // --- how long -------------------------------------------------------------------------------
   let estimate: number | null = null;
   // "estimate 2h", and just as often "estimate is 1 hour" or "estimate: 90m".
-  take(/\b(?:(?:time\s+)?estimate[ds]?(?:\s+(?:is|as|of|at)\b)?\s*[:=]?|should take|takes|about|roughly)\s*(\d+(?:[.:]\d+)?\s*(?:h|hr|hrs|hour|hours|m|min|mins|minute|minutes)?)\b/i, (m) => {
-    const seconds = parseDuration(m[1]);
+  take(/\b(?:(?:time\s+)?(?:estimate[ds]?|est\b\.?)(?:\s+(?:is|as|of|at)\b)?\s*[:=]?|should take|takes|about|roughly)\s*(\d+(?:[.:]\d+)?\s*(?:h|hr|hrs|hour|hours|m|min|mins|minute|minutes)?)\b/i, (m) => {
+    const seconds = readDuration(m[1]);
     if (seconds === null) return false;
     estimate = seconds;
     found.push({ field: 'Estimate', from: m[1] });
@@ -190,6 +321,12 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
       }
     }
     if (!picked) return null;
+    // Only the date goes, not the words after it. "due friday high priority" reaches as far as
+    // "high" before the clause stops, and taking all of it lost the priority and left the word
+    // "priority" stranded in the name.
+    if (whole === m[0] && m[0].endsWith(m[1]) && m[1].toLowerCase().startsWith(pickedFrom.toLowerCase())) {
+      whole = m[0].slice(0, m[0].length - m[1].length) + m[1].slice(0, pickedFrom.length);
+    }
     found.push({ field: label, from: pickedFrom });
     rest = squash(rest.replace(whole, ' '));
     return picked;
@@ -242,16 +379,34 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
   }
 
   if (!due) {
-    take(/\b(?:due|by|before|on|for)\s+([a-z0-9/\- ]+?)(?=\s+(?:and|assign|as|with|priority|estimate)\b|$)/i, (m) => {
-      const d = parseTypedDate(m[1], now);
-      if (!d) return false;
-      due = d;
-      found.push({ field: 'Due', from: m[1].trim() });
-    });
+    // "By friday 2h", "by 20 Oct for the client": the date is the first word or three after "by",
+    // not everything up to the end -- which, read whole, was no date at all and left "by friday"
+    // in the task's name. Longest first, so "next friday" beats "next".
+    for (const m of rest.matchAll(/\b(?:due|by|before|on|for)\s+([a-z0-9/\- ]+?)(?=\s+(?:and|assign|as|with|priority|estimate)\b|$)/gi)) {
+      const words_ = m[1].trim().split(/\s+/);
+      let hit: { d: Date; said: string } | null = null;
+      // Shorter than everything after the word only after "by", "due" or "before", and only for a
+      // date said in full: "for Sun Pharma" is a client, not a Sunday, and "on 2 clients" is work.
+      const firm = /^(?:by|due|before)\s/i.test(m[0]);
+      for (let n = words_.length > 3 ? 3 : words_.length; n >= 1 && !hit; n -= 1) {
+        const said_ = words_.slice(0, n).join(' ');
+        if (n < words_.length && !(firm && FULL_DATE.test(said_))) continue;
+        const d = parseTypedDate(said_, now);
+        if (d) hit = { d, said: said_ };
+      }
+      if (!hit) continue;
+      due = hit.d;
+      found.push({ field: 'Due', from: hit.said });
+      const lead = m[0].slice(0, m[0].length - m[1].length);
+      rest = squash(rest.replace(`${lead}${hit.said}`, ' '));
+      break;
+    }
   }
   if (!start && !due) {
     // A bare day at the end: "call the auditor tomorrow".
-    take(/(?:^|\s)(today|tomorrow|tmrw|yesterday|next week|next month|end of month|eom|eow|(?:next\s+)?(?:mon|tues?|wed(?:nes)?|thurs?|fri|sat(?:ur)?|sun)(?:day)?)\s*$/i, (m) => {
+    // "In 3 days" and "the day after tomorrow" too, which are just as often how a deadline is said.
+    take(/(?:^|\s)((?:the\s+)?day after tomorrow|in \d{1,3} (?:days?|weeks?|months?)|(?:this |next )?weekend|end of (?:the )?(?:week|month)|today|tomorrow|tmrw|yesterday|next week|next month|eom|eow|(?:next\s+)?(?:mon|tues?|wed(?:nes)?|thurs?|fri|sat(?:ur)?|sun)(?:day)?)\s*$/i, (m) => {
+      m[1] = m[1].replace(/^the\s+/i, '').replace(/^end of the /i, 'end of ');
       const d = parseTypedDate(m[1], now);
       if (!d) return false;
       due = d;
@@ -286,6 +441,21 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
     // "With normal priority" can still leave a lone "priority" where a clause used to be.
     rest = squash(rest.replace(/^\s*priority\b/i, ' ').replace(/\bpriority\s*(?=[,.]|$)/i, ' '));
   }
+  if (priority === null) priority = leadPriority;
+
+  // A length with its unit at the very end, and nothing introducing it: "draft memo 2h". Only
+  // with the unit, so "call 2 clients" keeps its number.
+  if (estimate === null) {
+    take(/(?:^|\s)(\d+(?:[.:]\d+)?\s*(?:h|hr|hrs|hours?|m|mins?|minutes?))$/i, (m) => {
+      const seconds = readDuration(m[1]);
+      if (seconds === null) return false;
+      estimate = seconds;
+      found.push({ field: 'Estimate', from: m[1] });
+    });
+  }
+
+  // A repeat on a fixed day says when the first one is due, if nothing else did.
+  if (repeat?.first && !due) due = repeat.first;
 
   // --- what is left is the name ---------------------------------------------------------------
   // "assign to me and file the TDS return" leaves "and file the TDS return" once the names are
@@ -330,6 +500,7 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
     due_date: due ? iso(due) : null,
     time_estimate_seconds: estimate,
     assignees: [...new Set(assignees)],
+    recurrence: repeat ? settle(repeat.rule, due ? iso(due) : null, now) : null,
     found,
     unknown,
     confidence: unknown.length === 0 && name.length > 0 ? 'high' : 'low',

@@ -266,12 +266,18 @@ def _copy_task_tree(
     return copy
 
 
+def _require_copyable(opened: Opened[Task]) -> None:
+    """Copying a task takes edit on it. With comment access (a colleague's task, see
+    access.employee_cap) a copy would be a way round the cap: their work, now yours to change."""
+    if not opened.level.at_least(PermissionLevel.edit):
+        raise Forbidden("You can only comment on this task, so you can't make a copy of it")
+
+
 def duplicate_task(
     db: Session, opened: Opened[Task], target: Opened[TaskList], name: Optional[str], include_subtasks: bool,
     parts: Optional[s.CopyParts] = None,
 ) -> Task:
-    if not opened.level.at_least(PermissionLevel.view):
-        raise Forbidden("You can't see this task")
+    _require_copyable(opened)
     _require_full(target, "create tasks in that List")
     task = opened.obj
     return _copy_task_tree(
@@ -297,8 +303,7 @@ def duplicate_to_people(
     from app.services.work.permissions import can_manage_workspace
 
     access = opened.access
-    if not opened.level.at_least(PermissionLevel.view):
-        raise Forbidden("You can't see this task")
+    _require_copyable(opened)
     others = [uid for uid in dict.fromkeys(user_ids) if uid != access.user_id]
     # A Personal List is private to its owner; putting work there is an admin's doing.
     if others and not can_manage_workspace(access.role):

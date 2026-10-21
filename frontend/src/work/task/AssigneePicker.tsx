@@ -1,7 +1,7 @@
 // Who is on this task. Everyone in the workspace is offered, plus the Teams, the way ClickUp does
 // it: search, tick people, and anyone who cannot open the List yet is shared in as you pick them.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Lock, Plus, Search, Users, X } from 'lucide-react';
+import { Lock, Plus, Search, Users, X } from 'lucide-react';
 
 import { useWork, useMe } from '../WorkContext';
 import { workApi, type PersonLoadRow, type UserRef } from '../api';
@@ -34,32 +34,42 @@ export const AssigneePicker: React.FC<Props> = ({
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const panel = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [at, setAt] = useState<{ top: number; left: number }>({ top: 96, left: 0 });
+  const openPanel = () => {
+    const r = trigger.current?.getBoundingClientRect();
+    if (r) {
+      const width = 320;
+      const below = r.bottom + 6;
+      const height = 400;
+      setAt({
+        top: below + height > window.innerHeight - 8 ? Math.max(8, r.top - height - 6) : below,
+        left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)),
+      });
+    }
+    setOpen(true);
+  };
   useEscapeToClose(panel, () => setOpen(false));
 
   const chosen = useMemo(() => new Set(assignees.map((a) => a.id)), [assignees]);
   const allowed = useMemo(() => (assignable ? new Set(assignable.map((u) => u.id)) : null), [assignable]);
 
-  // Who you may hand work to: an admin sees the firm, a Team lead sees their own people,
-  // anyone else sees whoever can already open this List.
+  // Everyone in the firm is offered, as in ClickUp. It used to be only the people who could already
+  // open the List -- for an employee in the New task dialog that was nobody but themselves.
+  // Someone who cannot open the List yet is marked, and shared in when picked (where allowed).
   const isAdmin = hierarchy?.role === 'owner' || hierarchy?.role === 'admin';
-  const myPeople = useMemo(() => {
-    if (isAdmin) return null;  // null means "everyone"
-    const led = teams.filter((t) => t.lead_ids.includes(meId));
-    if (led.length) return new Set([meId, ...led.flatMap((t) => t.members.map((u) => u.id))]);
-    return allowed ?? new Set([meId]);
-  }, [isAdmin, teams, meId, allowed]);
 
   const people = useMemo(() => {
     const q = query.trim().toLowerCase();
     return members
       .filter((m) => m.role !== 'guest' && !m.deactivated)
-      .filter((m) => !myPeople || myPeople.has(m.user.id))
-      .filter((m) => !q || (m.user.display_name ?? m.user.email).toLowerCase().includes(q))
+      .filter((m) => !q || (m.user.display_name ?? m.user.email).toLowerCase().includes(q)
+        || m.user.email.toLowerCase().includes(q))
       .sort((a, b) => {
         const mine = (x: typeof a) => (x.user.id === meId ? 0 : 1);
         return mine(a) - mine(b) || (a.user.display_name ?? a.user.email).localeCompare(b.user.display_name ?? b.user.email);
       });
-  }, [members, query, meId, myPeople]);
+  }, [members, query, meId]);
 
   const shownTeams = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -137,13 +147,15 @@ export const AssigneePicker: React.FC<Props> = ({
   return (
     <div className="px-2">
       <div className="flex flex-wrap items-center gap-1.5">
+        {/* Photos, or initials where there is none ("HK"), as ClickUp shows them: the name is on
+            hover, and a small × appears there to take someone off. */}
         {assignees.map((user) => (
-          <span key={user.id} className="flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 py-0.5 pl-0.5 pr-1.5 text-xs text-brand-800">
-            <Avatar user={user} size={20} />
-            {user.display_name || user.email}
+          <span key={user.id} title={user.display_name || user.email} className="group/chip relative rounded-full ring-2 ring-white">
+            <Avatar user={user} size={26} />
             {editable && (
-              <button type="button" aria-label={`Remove ${user.display_name || user.email}`} onClick={() => onChange(assignees.filter((a) => a.id !== user.id).map((a) => a.id))} className="rounded-full p-0.5 hover:bg-brand-100">
-                <X size={12} />
+              <button type="button" aria-label={`Remove ${user.display_name || user.email}`} onClick={() => onChange(assignees.filter((a) => a.id !== user.id).map((a) => a.id))}
+                className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-gray-700 text-white shadow group-hover/chip:flex focus:flex">
+                <X size={10} strokeWidth={3} />
               </button>
             )}
           </span>
@@ -151,8 +163,9 @@ export const AssigneePicker: React.FC<Props> = ({
         {assignees.length === 0 && <span className="text-sm text-gray-400">Empty</span>}
         {editable && (
           <button
+            ref={trigger}
             type="button"
-            onClick={() => { setOpen(!open); setNote(null); }}
+            onClick={() => { if (open) setOpen(false); else openPanel(); setNote(null); }}
             aria-expanded={open}
             className="flex items-center gap-1 rounded-full border border-dashed border-gray-300 px-2 py-1 text-xs text-gray-600 hover:border-gray-400 hover:text-gray-800"
           >
@@ -169,17 +182,18 @@ export const AssigneePicker: React.FC<Props> = ({
               role="dialog"
               aria-label="Choose assignees"
               onMouseDown={(e) => e.stopPropagation()}
-              className="absolute left-1/2 top-24 w-80 -translate-x-1/2 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl"
+              style={{ top: at.top, left: at.left }}
+              className="absolute w-80 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl"
             >
               <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2">
                 <Search size={14} className="text-gray-400" />
                 <input
                   autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search people and Teams" aria-label="Search people and Teams"
+                  placeholder="Search or enter email…" aria-label="Search people and Teams"
                   className="w-full text-sm focus:outline-none"
                 />
               </div>
-              <div className="max-h-72 overflow-auto py-1">
+              <div className="max-h-80 overflow-auto py-1">
                 {shownTeams.length > 0 && multiple && (
                   <>
                     <p className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Teams</p>
@@ -192,27 +206,38 @@ export const AssigneePicker: React.FC<Props> = ({
                     ))}
                   </>
                 )}
-                <p className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">People</p>
-                {people.map((m) => {
-                  const on = chosen.has(m.user.id);
-                  const blind = !!allowed && !allowed.has(m.user.id);
-                  const week = weekFor(m.user.id);
+                {(['Assignees', 'People'] as const).map((section) => {
+                  // Who is on it already, first; then everyone else, you at the top.
+                  const shown = people.filter((m) => (section === 'Assignees') === chosen.has(m.user.id));
+                  if (!shown.length) return null;
                   return (
-                    <button key={m.user.id} type="button" className={row} onClick={() => pick(m.user)} disabled={busy === m.user.id}>
-                      <Avatar user={m.user} size={24} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-gray-800">
-                          {m.user.display_name || m.user.email}{m.user.id === meId ? ' (you)' : ''}
-                        </span>
-                        <span className="block truncate text-xs text-gray-400">
-                          {blind
-                            ? (canShare ? 'Not on this List yet — picking them shares it' : "Can't open this List")
-                            : (week ? <span className={week.tone}>{week.text}</span> : m.user.email)}
-                        </span>
-                      </span>
-                      {blind && <Lock size={12} className="shrink-0 text-amber-500" />}
-                      {on && <Check size={15} className="shrink-0 text-brand-600" />}
-                    </button>
+                    <React.Fragment key={section}>
+                      <p className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{section}</p>
+                      {shown.map((m) => {
+                        const on = chosen.has(m.user.id);
+                        const blind = !!allowed && !allowed.has(m.user.id);
+                        const week = weekFor(m.user.id);
+                        return (
+                          <button key={m.user.id} type="button" className={`${row} ${on ? 'bg-brand-50/60' : ''}`} onClick={() => pick(m.user)} disabled={busy === m.user.id}>
+                            <Avatar user={m.user} size={24} />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-gray-800">
+                                {m.user.id === meId ? 'Me' : (m.user.display_name || m.user.email)}
+                              </span>
+                              {(blind || week) && (
+                                <span className="block truncate text-xs text-gray-400">
+                                  {blind
+                                    ? (canShare ? 'Not on this List yet — picking them shares it' : "Can't open this List")
+                                    : week && <span className={week.tone}>{week.text}</span>}
+                                </span>
+                              )}
+                            </span>
+                            {blind && <Lock size={12} className="shrink-0 text-amber-500" />}
+                            {on && <X size={14} className="shrink-0 text-gray-400" aria-label="Remove" />}
+                          </button>
+                        );
+                      })}
+                    </React.Fragment>
                   );
                 })}
                 {people.length === 0 && <p className="px-3 py-4 text-center text-sm text-gray-400">Nobody matches that.</p>}

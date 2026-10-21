@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, CalendarDays, ChevronLeft, ChevronRight, Keyboard } from 'lucide-react';
 import type { Recurrence, Status } from './api';
 import { compactDate, parseTypedDate, shortDate } from './dates';
-import { RecurrencePanel, SetRecurringRow } from './RecurrenceEditor';
+import { OnScreen, RecurrencePanel, SetRecurringRow } from './RecurrenceEditor';
 import { Portal, startOfDay } from './ui';
 
 const WEEKDAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
@@ -99,12 +99,7 @@ const Calendar: React.FC<{
   // The repeat panel takes over the popover rather than opening a second one on top of it.
   if (repeating && onRecurrence) {
     return (
-      <div
-        ref={panelRef}
-        role="dialog" aria-label="Recurring" onMouseDown={(e) => e.stopPropagation()}
-        style={{ position: 'fixed', top: at.top, left: at.left }}
-        className="z-[140] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl"
-      >
+      <OnScreen top={at.top} left={at.left} label="Recurring" panelRef={panelRef} className="z-[140]">
         <RecurrencePanel
           value={recurrence ?? null}
           dueDate={anchorDate ?? value}
@@ -112,7 +107,7 @@ const Calendar: React.FC<{
           onCancel={() => setRepeating(false)}
           onSave={onRecurrence}
         />
-      </div>
+      </OnScreen>
     );
   }
 

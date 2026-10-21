@@ -47,24 +47,34 @@ def test_an_employee_cannot_restructure_the_workspace(api, workspace):
     ws = workspace["id"]
     space, lst = area(api, ws)
     assert api.post(f"/workspaces/{ws}/spaces", "member", {"name": "Mine"}).status_code == 403
-    assert api.post(f"/spaces/{space['id']}/lists", "member", {"name": "Mine"}).status_code == 403
     assert api.post(f"/spaces/{space['id']}/folders", "member", {"name": "Mine"}).status_code == 403
     assert api.patch(f"/spaces/{space['id']}", "member", {"name": "Renamed"}).status_code == 403
     assert api.delete(f"/lists/{lst['id']}", "member").status_code == 403
     assert api.delete(f"/spaces/{space['id']}", "member").status_code == 403
 
 
-def test_only_admins_hand_out_access(api, workspace):
-    """Including to somebody who leads a Team: leading one is not a rank here."""
+def test_who_hands_out_access(api, workspace):
+    """A Space only by an admin; a Folder or a List by an admin or a manager; never by an employee."""
     ws = workspace["id"]
     space, lst = area(api, ws)
+    assert api.post(f"/lists/{lst['id']}/shares", "member", {"user_id": "admin", "level": "edit"}).status_code == 403
     team = ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Audit", "lead_ids": ["member"]}), 201)
     assert "member" in team["lead_ids"]
 
     assert api.post(f"/spaces/{space['id']}/shares", "member", {"user_id": "admin", "level": "edit"}).status_code == 403
-    assert api.post(f"/lists/{lst['id']}/shares", "member", {"user_id": "admin", "level": "edit"}).status_code == 403
-    # The admin may, which is the whole point of the refusals above.
+    ok(api.post(f"/lists/{lst['id']}/shares", "member", {"user_id": "admin", "level": "edit"}), 201)
     ok(api.post(f"/lists/{lst['id']}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
+
+def test_an_employee_adds_lists_where_they_have_full_edit(api, workspace):
+    ws = workspace["id"]
+    space, _ = area(api, ws)
+    ok(api.post(f"/spaces/{space['id']}/lists", "member", {"name": "Mine"}), 201)
+    folder = ok(api.post(f"/spaces/{space['id']}/folders", "owner", {"name": "Monthly"}), 201)
+    ok(api.post(f"/folders/{folder['id']}/lists", "member", {"name": "Mine too"}), 201)
+    # An admin who sets the Space's default permission to Edit keeps employees from adding Lists.
+    ok(api.patch(f"/spaces/{space['id']}", "owner", {"default_permission": "edit"}))
+    assert api.post(f"/spaces/{space['id']}/lists", "member", {"name": "Not now"}).status_code == 403
+    assert api.post(f"/spaces/{space['id']}/lists", "guest", {"name": "Never"}).status_code in (403, 404)
 
 
 # --- what an employee may do ---------------------------------------------------------------------
@@ -107,22 +117,79 @@ def test_an_employee_can_still_read_comment_and_log_hours_on_a_colleagues_task(a
     assert api.patch(f"/tasks/{theirs['id']}", "member", {"name": "nope"}).status_code == 403
 
 
-def test_a_share_lets_one_person_work_in_one_place(api, workspace):
-    """The admin's escape hatch, and the reason the cap is a cap rather than a refusal.
+def test_a_list_share_does_not_lift_the_cap(api, workspace):
+    """Sharing a place is about seeing and working in it, not rewriting other people's tasks there.
 
-    Somebody genuinely needs to work in an area: an admin shares it at edit, and the cap gives way.
-    Without this the only way to let a person edit anything would be to make them an admin.
+    Found in the dev data: Lists and Spaces shared at full (to a person or to their Team) let an
+    employee edit and delete a colleague's task, and List views reported `full` on every task in
+    them. The cap now holds whatever the List or Space says.
     """
+    ws = workspace["id"]
+    space, lst = area(api, ws)
+    theirs = ok(api.post(f"/lists/{lst['id']}/tasks", "owner",
+                         {"name": "Verve year end", "assignees": ["admin"]}), 201)
+
+    ok(api.post(f"/lists/{lst['id']}/shares", "owner", {"user_id": "member", "level": "full"}), 201)
+    team = ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Audit", "member_ids": ["member"]}), 201)
+    ok(api.post(f"/spaces/{space['id']}/shares", "owner", {"team_id": team["id"], "level": "full"}), 201)
+
+    assert ok(api.get(f"/tasks/{theirs['id']}", "member"))["permission_level"] == "comment"
+    listed = ok(api.get(f"/lists/{lst['id']}/tasks", "member"))["tasks"]
+    assert [t["permission_level"] for t in listed if t["id"] == theirs["id"]] == ["comment"]
+    found = ok(api.get(f"/workspaces/{ws}/search/tasks?q=Verve", "member"))
+    assert [t["permission_level"] for t in found if t["id"] == theirs["id"]] == ["comment"]
+
+    assert api.patch(f"/tasks/{theirs['id']}", "member", {"name": "mine now"}).status_code == 403
+    assert api.delete(f"/tasks/{theirs['id']}", "member").status_code == 403
+    bulk = ok(api.post("/tasks/bulk", "member", {"task_ids": [theirs["id"]], "delete": True}))
+    assert bulk["updated"] == []
+    assert ok(api.get(f"/tasks/{theirs['id']}", "owner"))["name"] == "Verve year end"
+
+    # The share still lets them work in the List: raise a task there, and own it fully.
+    mine = ok(api.post(f"/lists/{lst['id']}/tasks", "member", {"name": "My bit"}), 201)
+    ok(api.patch(f"/tasks/{mine['id']}", "member", {"name": "My bit, done"}))
+    assert api.delete(f"/tasks/{mine['id']}", "member").status_code == 204
+
+
+def test_a_share_on_the_task_itself_lets_one_person_work_on_it(api, workspace):
+    """The admin's escape hatch: share the one task that somebody needs to change."""
     ws = workspace["id"]
     _space, lst = area(api, ws)
     theirs = ok(api.post(f"/lists/{lst['id']}/tasks", "owner",
                          {"name": "Verve year end", "assignees": ["admin"]}), 201)
     assert api.patch(f"/tasks/{theirs['id']}", "member", {"name": "before"}).status_code == 403
 
-    ok(api.post(f"/lists/{lst['id']}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
+    ok(api.post(f"/tasks/{theirs['id']}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
     ok(api.patch(f"/tasks/{theirs['id']}", "member", {"name": "after"}))
     # A share at edit is still not a licence to delete: that needs full.
     assert api.delete(f"/tasks/{theirs['id']}", "member").status_code == 403
+
+
+def test_a_manager_may_change_and_delete_their_teams_tasks(api, workspace):
+    """Leading a Team makes you its manager: its people's tasks are yours to change, nobody else's."""
+    ws = workspace["id"]
+    _space, lst = area(api, ws)
+    for uid in ("lead", "outsider2"):
+        ok(api.get("/workspaces", uid))
+        ok(api.post(f"/workspaces/{ws}/members", "owner", {"email": f"{uid}@example.com", "role": "member"}), 201)
+    team = ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Audit", "member_ids": ["lead", "member"]}), 201)
+    ok(api.put(f"/teams/{team['id']}/members", "owner", {"user_ids": ["lead", "member"], "lead_ids": ["lead"]}))
+
+    reports = ok(api.post(f"/lists/{lst['id']}/tasks", "owner",
+                          {"name": "Member's audit", "assignees": ["member"]}), 201)
+    elsewhere = ok(api.post(f"/lists/{lst['id']}/tasks", "owner",
+                            {"name": "Someone else's audit", "assignees": ["outsider2"]}), 201)
+
+    assert ok(api.get(f"/tasks/{reports['id']}", "lead"))["permission_level"] == "full"
+    ok(api.patch(f"/tasks/{reports['id']}", "lead", {"name": "Member's audit (reviewed)"}))
+    assert ok(api.get(f"/tasks/{elsewhere['id']}", "lead"))["permission_level"] == "comment"
+    assert api.patch(f"/tasks/{elsewhere['id']}", "lead", {"name": "nope"}).status_code == 403
+    assert api.delete(f"/tasks/{elsewhere['id']}", "lead").status_code == 403
+    assert api.delete(f"/tasks/{reports['id']}", "lead").status_code == 204
+
+    # Leading a Team does not reach upwards: the member still cannot touch the lead's task.
+    leads = ok(api.post(f"/lists/{lst['id']}/tasks", "owner", {"name": "Lead's audit", "assignees": ["lead"]}), 201)
+    assert api.delete(f"/tasks/{leads['id']}", "member").status_code == 403
 
 
 def test_admins_are_untouched(api, workspace):
@@ -132,4 +199,8 @@ def test_admins_are_untouched(api, workspace):
     ok(api.patch(f"/tasks/{theirs['id']}", "admin", {"name": "Reviewed"}))
     assert api.delete(f"/tasks/{theirs['id']}", "admin").status_code == 204
     ok(api.post(f"/spaces/{space['id']}/lists", "admin", {"name": "Another"}), 201)
+    # Even on a task neither raised by nor assigned to them, and a List shared narrowly.
+    other = ok(api.post(f"/lists/{lst['id']}/tasks", "owner", {"name": "Owner's", "assignees": ["member"]}), 201)
+    assert ok(api.get(f"/tasks/{other['id']}", "admin"))["permission_level"] == "full"
+    assert api.delete(f"/tasks/{other['id']}", "admin").status_code == 204
     assert api.delete(f"/lists/{lst['id']}", "admin").status_code == 204

@@ -29,7 +29,7 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 
 
 def _test_database_url() -> Optional[str]:
-    explicit = os.getenv("TEST_DATABASE_URL")
+    explicit = os.getenv("TEST_DATABASE_URL") or settings.TEST_DATABASE_URL
     if explicit:
         return explicit
     if not settings.DATABASE_URL:

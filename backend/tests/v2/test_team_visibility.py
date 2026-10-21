@@ -89,5 +89,46 @@ def test_highlights_say_whose_board_and_the_hours_logged(api, workspace, space, 
     out = ok(api.get(f"/dashboards/{home['id']}/insights", "member", params={"tz": "UTC"}))
     assert out["who"] == "me"
     assert out["logged_yesterday"] == 7200
-    assert out["capacity_week"] is not None and out["capacity_week"] > 0
-    assert {"due_this_week", "done_yesterday", "urgent_today", "logged_this_week"} <= set(out)
+    assert out["capacity_yesterday"] is not None
+    assert {"starts_today", "over_estimate", "running_timers", "birthdays", "holidays_this_week"} <= set(out)
+
+
+def test_highlights_add_what_no_card_says(api, workspace, folderless_list):
+    """A timer left on, a task past its estimate, work held up by a late task, a birthday, and on a
+    Team board, who logged nothing yesterday -- each said once, in a sentence."""
+    from app.db.models import WorkspaceMember
+    from app.services.work.dashboards.insights import sentences
+
+    ws = workspace["id"]
+    ok(api.get("/workspaces", "lead"))
+    ok(api.post(f"/workspaces/{ws}/members", "owner", {"email": "lead@example.com", "role": "member"}), 201)
+    ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "HR", "member_ids": ["lead", "member"], "lead_ids": ["lead"]}), 201)
+    lst = folderless_list["id"]
+    now = datetime.now(timezone.utc)
+    big = ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Audit", "assignees": ["member"], "time_estimate_seconds": 3600}), 201)
+    blocker = ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Get bank letters", "assignees": ["lead"],
+                                                           "due_date": (now - timedelta(days=2)).isoformat()}), 201)
+    waiting = ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "File return", "assignees": ["member"]}), 201)
+    ok(api.post(f"/tasks/{blocker['id']}/links", "owner", {"other_id": waiting["id"], "kind": "blocking"}), 201)
+    with db_session.new_session() as db:
+        db.add(TimeEntry(task_id=big["id"], user_id="member", started_at=now - timedelta(days=3),
+                         ended_at=now - timedelta(days=3) + timedelta(hours=2), duration_seconds=7200))
+        db.add(TimeEntry(task_id=big["id"], user_id="member", started_at=now - timedelta(days=1, hours=1)))  # left running
+        m = db.get(WorkspaceMember, (ws, "member"))
+        m.date_of_birth = now.date().replace(year=1995)
+        db.commit()
+
+    home = ok(api.get(f"/workspaces/{ws}/dashboards/home", "member"))
+    mine = ok(api.get(f"/dashboards/{home['id']}/insights", "member", params={"tz": "UTC"}))
+    assert [t["name"] for t in mine["over_estimate"]["tasks"]] == ["Audit"]
+    assert [t["task_name"] for t in mine["running_timers"]] == ["Audit"]
+    assert [t["name"] for t in mine["blocked_by_late"]["tasks"]] == ["File return"]
+    assert [p["id"] for p in mine["birthdays"]] == ["member"]
+    assert mine["overloaded"] == [] and mine["no_time_yesterday"] == []  # Team items stay off a personal board
+    said = " ".join(sentences(mine))
+    assert "Your timer on Audit" in said and "birthday today" in said and "waiting on a task that is late" in said
+
+    boards = {x["standard"]: x for x in ok(api.get(f"/workspaces/{ws}/dashboards", "lead"))}
+    team = ok(api.get(f"/dashboards/{boards['team']['id']}/insights", "lead", params={"tz": "UTC"}))
+    assert team["who"] == "team"
+    assert {t["user"]["id"] for t in team["running_timers"]} == {"member"}

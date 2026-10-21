@@ -73,12 +73,12 @@ export const WorkloadView: React.FC<{
         <button type="button" onClick={() => setStart(mondayOf(new Date()))} className="rounded-md border border-gray-200 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50">
           Today
         </button>
-        <button type="button" title="Earlier" onClick={() => setStart(new Date(start.getTime() - 7 * DAY_MS))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
-        <button type="button" title="Later" onClick={() => setStart(new Date(start.getTime() + 7 * DAY_MS))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
+        <button aria-label="Earlier" type="button" title="Earlier" onClick={() => setStart(new Date(start.getTime() - 7 * DAY_MS))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
+        <button aria-label="Later" type="button" title="Later" onClick={() => setStart(new Date(start.getTime() + 7 * DAY_MS))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
         <span className="text-sm font-medium text-gray-700">
           {start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – {new Date(start.getTime() + (days - 1) * DAY_MS).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
         </span>
-        <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-700">
+        <select aria-label="Period length" value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-700">
           <option value={7}>1 week</option>
           <option value={14}>2 weeks</option>
           <option value={28}>4 weeks</option>

@@ -192,7 +192,13 @@ const WORDS: [RegExp, string][] = [
 ];
 
 /** Romanised Hindi, only where the word cannot be mistaken for English or a client's name. */
+const LENGTH = String.raw`\d+(?:\.\d+)?\s*(?:ghant(?:e|a|on)|h|hrs?|hours?|m|mins?|minutes?)`;
 const ROMAN: [RegExp, string][] = [
+  // "2 ghante CWC data fix par" and "CWC data fix pe 2 ghante": hours on a task, said with the
+  // postposition. Put in English order -- the length, then "on" and the task -- before "pe" alone
+  // becomes "on" and leaves "CWC data fix on 2 hours".
+  [new RegExp(String.raw`^(${LENGTH})\s+(.+?)\s+(?:par|pe)\b`, 'i'), '$1 on $2'],
+  [new RegExp(String.raw`^(.+?)\s+(?:par|pe)\s+(${LENGTH})(?=\s|$)`, 'i'), '$2 on $1'],
   // "Ek task create karo" -- "create a task". First, before "banao" becomes "add" below.
   [/\b(?:ek|ik)\s+(?:nay[aie]\s+)?(?:task|kaam)\s+(?:create|add|bana(?:o|ao|na)?|jodo)\b/gi, 'create a task'],
   // "vah task ke liye" -- "for that task": it points at the task being made and names nothing.
@@ -218,10 +224,22 @@ const ROMAN: [RegExp, string][] = [
   [/\b(?:dikhao|batao)\b/gi, 'show'],
   [/\bkitne?\b/gi, 'how many'],
   [/\bmujhe\b/gi, 'me'],
+  [/\b(?:mere|mera|meri)\b/gi, 'my'],
   [/\bchutti\b/gi, 'leave'],
+  [/\b(?:bhejo|bhej\s*do|bhejna)\b/gi, 'send'],
+  [/\bghant(?:e|a|on)\b/gi, 'hours'],
+  [/\bpe\b/gi, 'on'],
+  // The tense markers, once they have done their job of saying which day "kal" was.
+  // Not "gaya" or "diya" alone: Gaya is a city and Diya is somebody's name.
+  [/\s*\b(?:(?:kar|ho)\s+(?:diya|diye|gaya|gayi|gaye)|kiya|kiye|kie|kia|tha|thi|hua|hui|hue|lagaya|lagaye)\b/gi, ' '],
+  [/\s*\b(?:hai|hain|hoon|hu)\b/gi, ' '],
   // Politeness verbs, romanised. "Karo" carries no meaning once the real verb is known, and left in
   // place it sits at the end of the sentence where the real verb needs to be found.
   [/\s*\b(?:karo|karen|kijiye|kar\s*do|kardo|karna)\b/gi, ' '],
+  // "aaj kya due hai", "mera kya pending hai": the question word sits in the middle. Put it in
+  // front, where the English rules look for a question -- otherwise "aaj kya due" read as a new
+  // task called "Today kya".
+  [/^(.+?)\s+kya\s+(.+?)\s*$/i, 'what is $2 $1'],
 ];
 
 export interface Translated {
@@ -266,15 +284,19 @@ function dateToBack(text: string, now: Date): string {
   // Moving its first half to the end turned "from today to friday audit" into "to friday audit
   // from today" -- two dates said, one understood, and the wrong one.
   if (/^from\s+\S+(?:\s+\S+)?\s+to\s+/i.test(text)) return text;
-  const m = text.match(/^(by|from)\s+(\S+(?:\s+\S+)?)\s+(.+)$/i);
+  // Up to three words, for "day after tomorrow" ("parso tak"), and with the verb in front of it
+  // when the verb has already been moved there: "send by day after tomorrow report".
+  const m = text.match(/^((?:[a-z]+\s+)?)(by|from)\s+(\S+(?:\s+\S+){0,2})\s+(.+)$/i);
   if (m) {
-    for (let take = 2; take >= 1; take -= 1) {
-      const candidate = m[2].split(/\s+/).slice(0, take).join(' ');
+    for (let take = 3; take >= 1; take -= 1) {
+      const words = m[3].split(/\s+/);
+      if (words.length < take) continue;
+      const candidate = words.slice(0, take).join(' ');
       if (!parseTypedDate(candidate, now)) continue;
-      const leftover = m[2].split(/\s+/).slice(take).join(' ');
-      return `${leftover} ${m[3]} ${m[1].toLowerCase()} ${candidate}`.replace(/\s+/g, ' ').trim();
+      const leftover = words.slice(take).join(' ');
+      return `${m[1]}${leftover} ${m[4]} ${m[2].toLowerCase()} ${candidate}`.replace(/\s+/g, ' ').trim();
     }
-    return text;
+    if (!m[1]) return text;
   }
   // And a date with no preposition at all, which is the commonest way to say it: "आज बोर्ड पैक
   // बनाओ" becomes "add today board pack", where the date sits between the verb and the task's name
@@ -290,13 +312,35 @@ function dateToBack(text: string, now: Date): string {
   return text;
 }
 
+/**
+ * Said in the past tense, which is what makes "kal" yesterday.
+ *
+ * Hindi has one word for both days either side of today, and only the verb tells them apart: "kal
+ * tak bhejo" is by tomorrow, "kal 2 ghante log kiye" is two hours yesterday. So the tense is looked
+ * for before the word is translated. Not "liye": "ke liye" means "for" and is in every tense.
+ */
+const PAST_ROMAN = /\b(?:kiya|kiye|kie|kia|tha|thi|hua|hui|hue|lagaya|lagaye|bitaya|(?:kar|ho)\s+(?:diya|diye|gaya|gayi|gaye))\b/i;
+const PAST_DEVANAGARI = dev('किया', 'किये', 'किए', 'था', 'थी', 'थे', 'हुआ', 'हुई', 'हुए', 'गया', 'गई', 'गए', 'लगाया', 'लगाए');
+
 export function toEnglish(input: string, now = new Date()): Translated {
   let text = fold(input);
+  // "कल" and "kal" are yesterday when the sentence is about something already done.
+  if (DEVANAGARI.test(input) ? new RegExp(PAST_DEVANAGARI.source).test(text) : PAST_ROMAN.test(text)) {
+    text = text.replace(dev('कल'), 'yesterday').replace(/\bkal\b/gi, 'yesterday');
+  }
   for (const [pattern, into] of REORDER) text = text.replace(pattern, into);
   for (const [pattern, into] of WORDS) text = text.replace(pattern, into);
   // Romanised rewrites only where there was no Devanagari: a Devanagari sentence has been handled,
   // and running these over its output invites collisions with whatever English it contained.
-  if (!DEVANAGARI.test(input)) for (const [pattern, into] of ROMAN) text = text.replace(pattern, into);
+  if (!DEVANAGARI.test(input)) {
+    for (const [pattern, into] of ROMAN) text = text.replace(pattern, into);
+    // "ko", "ka", "ke", "ki" only mark who or whose, and carry nothing the parser needs: "client
+    // ko call karna" is "call the client". Only in a sentence that was Hinglish to begin with --
+    // in English they are nobody's words, but a client called "Ki Mobility" is somebody's.
+    if (text.replace(/\s+/g, ' ').trim() !== input.replace(/\s+/g, ' ').trim()) {
+      text = text.replace(/\s*\b(?:ko|ka|ke|ki)\b/gi, ' ');
+    }
+  }
   text = text.replace(/\s+/g, ' ').trim();
   // Decided before the tidy-up below: only a sentence that was translated has Hindi word order to
   // undo. Tidied English is still in English order.
@@ -304,7 +348,9 @@ export function toEnglish(input: string, now = new Date()): Translated {
   // Spoken filler and mishearings, in either language, once everything is in English words.
   text = tidySpoken(text);
   // Word order, last: both of these read the translated sentence, not the original.
-  if (translated) text = dateToBack(verbToFront(text), now);
+  // Not when it opens with a length: "2 hours on CWC data fix" is already in English order, and
+  // moving its last word ("fix") to the front made it a new task.
+  if (translated && !/^\d+(?:[.:]\d+)?\s*[a-z]*\s+(?:on|for)\s/i.test(text)) text = dateToBack(verbToFront(text), now);
   const same = text.toLowerCase() === input.replace(/\s+/g, ' ').trim().toLowerCase();
   return { text, changed: !same };
 }

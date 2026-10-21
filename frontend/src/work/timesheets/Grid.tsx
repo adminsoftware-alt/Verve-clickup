@@ -290,7 +290,7 @@ export const EntryDetails: React.FC<{ entry: SheetEntry; editable: boolean; acti
   const time = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   return (
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-      <button
+      <button aria-label={entry.billable ? 'Billable' : 'Not billable'}
         type="button"
         title={entry.billable ? 'Billable' : 'Not billable'}
         disabled={!editable || entry.running}
@@ -325,7 +325,7 @@ export const TagPicker: React.FC<{ entry: SheetEntry; actions: EntryActions }> =
   const chosen = new Set(entry.tags.map((t) => t.id));
   const toggle = (id: string) => actions.onUpdate(entry, { tag_ids: chosen.has(id) ? [...chosen].filter((x) => x !== id) : [...chosen, id] });
   return (
-    <Popover width={220} trigger={(open) => <button type="button" title="Tags" onClick={open} className="rounded p-0.5 text-gray-300 hover:text-gray-600"><TagIcon size={12} /></button>}>
+    <Popover width={220} trigger={(open) => <button aria-label="Tags" type="button" title="Tags" onClick={open} className="rounded p-0.5 text-gray-300 hover:text-gray-600"><TagIcon size={12} /></button>}>
       {() => (
         <div>
           <div className="mb-1 text-xs font-medium text-gray-500">Time tags</div>
@@ -340,7 +340,7 @@ export const TagPicker: React.FC<{ entry: SheetEntry; actions: EntryActions }> =
             className="mt-1 flex gap-1 border-t border-gray-100 pt-1.5"
             onSubmit={async (e) => { e.preventDefault(); if (!name.trim()) return; const tag = await actions.onCreateTag(name.trim()); setName(''); await actions.onUpdate(entry, { tag_ids: [...chosen, tag.id] }); }}
           >
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New tag" className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-0.5 text-xs" />
+            <input aria-label="New tag name" value={name} onChange={(e) => setName(e.target.value)} placeholder="New tag" className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-0.5 text-xs" />
             <button type="submit" className="rounded bg-brand-600 px-2 text-xs text-white">Add</button>
           </form>
         </div>

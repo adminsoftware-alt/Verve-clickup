@@ -108,3 +108,28 @@ def test_deleting_a_task_deletes_its_time(api, folderless_list):
     entry = ok(api.post(f"/tasks/{task['id']}/time", "member", {"duration_seconds": HOUR}), 201)
     ok(api.delete(f"/tasks/{task['id']}", "owner"), 204)
     assert api.patch(f"/time/{entry['id']}", "member", {"billable": True}).status_code == 404
+
+
+# --- time that has not happened yet -----------------------------------------------------------
+
+
+def test_a_duration_ends_now_and_time_ahead_is_refused(api, folderless_list):
+    task = new_task(api, folderless_list["id"])
+    entry = ok(api.post(f"/tasks/{task['id']}/time", "member", {"duration_seconds": 90 * 60}), 201)
+    ended = datetime.fromisoformat(entry["ended_at"].replace("Z", "+00:00"))
+    assert ended <= datetime.now(timezone.utc) + timedelta(seconds=5)
+
+    later = datetime.now(timezone.utc) + timedelta(hours=1)
+    r = api.post(f"/tasks/{task['id']}/time", "member", {
+        "started_at": (later - timedelta(minutes=90)).isoformat(), "ended_at": later.isoformat()})
+    assert r.status_code == 400 and "already done" in r.json()["detail"]
+    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+    r = api.post(f"/tasks/{task['id']}/time", "member", {"started_at": tomorrow.isoformat(), "duration_seconds": 3600})
+    assert r.status_code == 400
+    # a couple of minutes of clock drift is fine
+    soon = datetime.now(timezone.utc) + timedelta(minutes=2)
+    ok(api.post(f"/tasks/{task['id']}/time", "member", {
+        "started_at": (soon - timedelta(hours=1)).isoformat(), "ended_at": soon.isoformat()}), 201)
+    # and an entry cannot be stretched into the future afterwards
+    r = api.patch(f"/time/{entry['id']}", "member", {"ended_at": later.isoformat()})
+    assert r.status_code == 400

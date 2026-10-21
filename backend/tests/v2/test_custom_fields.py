@@ -122,5 +122,6 @@ def test_history_watchers_duplicates_and_table_views(api, org):
     assert "custom_field" in {i["kind"] for i in other}
     copy = ok(api.post(f"/tasks/{org['task']['id']}/duplicate", "owner", {}), 201)
     assert copy["custom_fields"][fee["id"]] == 900
-    view = ok(api.post(f"/lists/{org['list']['id']}/views", "owner", {"type": "table"}), 201)
+    space = ok(api.get(f"/lists/{org['list']['id']}", "owner"))["space_id"]
+    view = ok(api.post(f"/spaces/{space}/views", "owner", {"type": "table"}), 201)
     assert view["type"] == "table" and view["name"] == "Table"

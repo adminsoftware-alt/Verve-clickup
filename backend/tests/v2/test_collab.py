@@ -322,5 +322,14 @@ def test_attachments_upload_download_delete(api, org, tmp_path, monkeypatch):
     assert api.delete(f"/attachments/{a['id']}", "member2").status_code == 403
     ok(api.delete(f"/attachments/{a['id']}", "member"), 204)
     monkeypatch.setattr(settings, "MAX_UPLOAD_MB", 0)
-    big = api.client.post(f"/api/v2/tasks/{tid}/attachments", headers={"X-Test-User": "member"}, files={"file": ("x.txt", b"x", "text/plain")})
+    big = api.client.post(f"/api/v2/tasks/{tid}/attachments", headers={"X-Test-User": "member2"}, files={"file": ("x.txt", b"x", "text/plain")})
     assert big.status_code == 400
+
+
+def test_reminders_cannot_be_set_in_the_past(api, org):
+    url = f"/workspaces/{org['ws']}/reminders"
+    r = api.post(url, "member", {"title": "Old", "remind_at": datetime(2020, 1, 1, 9, tzinfo=UTC).isoformat()})
+    assert r.status_code == 400 and "not passed" in r.json()["detail"]
+    later = ok(api.post(url, "member", {"title": "Later", "remind_at": (datetime.now(UTC) + timedelta(hours=2)).isoformat()}), 201)
+    r = api.patch(f"{url}/{later['id']}", "member", {"remind_at": (datetime.now(UTC) - timedelta(days=1)).isoformat()})
+    assert r.status_code == 400

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v2 import admin, compliance, devlogin, goals, spaces_extra, outbound, planning, viewdata, collab, dashboards, links, locations, organise, people, tasks, templates, timesheets, working_time, workspaces
+from app.api.v2 import admin, assistant, compliance, devlogin, goals, spaces_extra, outbound, planning, viewdata, collab, dashboards, links, locations, organise, people, tasks, templates, timesheets, working_time, workspaces
 
 api_router = APIRouter()
 api_router.include_router(workspaces.router, tags=["v2 workspaces"])
@@ -21,4 +21,5 @@ api_router.include_router(outbound.router, tags=["v2 notification delivery"])
 api_router.include_router(compliance.router, tags=["v2 compliance calendar"])
 api_router.include_router(spaces_extra.router, tags=["v2 spaces, sprints, public links, doc/chat views"])
 api_router.include_router(goals.router, tags=["v2 goals"])
+api_router.include_router(assistant.router, tags=["v2 assistant"])
 api_router.include_router(devlogin.router, tags=["v2 local testing"])  # 404s unless DEV_LOGIN is on

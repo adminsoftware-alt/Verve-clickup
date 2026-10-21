@@ -19,12 +19,13 @@
 //   answers a question you did not ask is worse than one that says it did not follow.
 
 import { isOpen, workApi, type Hierarchy, type Task } from '../api';
-import { matchPerson, type Person } from './parseCommand';
 import { collabApi } from '../collabApi';
 import { dashApi, type DashboardSummary } from '../dashboards/api';
 import { peopleApi } from '../teams/peopleApi';
 import { hrs, isoDay, parseDay, sheetApi } from '../timesheets/api';
 import { places } from './where';
+import type { Reading } from './interpret';
+import { holdingAll, pickMatch, significant } from './match';
 
 export interface Answer {
   /** The answer itself, in one line. */
@@ -37,77 +38,64 @@ export interface Answer {
   goTo?: { label: string; to: string };
 }
 
-/**
- * What a question is about. The first match wins, so the order is the meaning.
- *
- * Leave comes before hours because "how much time off do I have" is a question about leave, and
- * a pattern looking for the word "time" would happily take it.
- */
-const TOPICS: { key: string; pattern: RegExp }[] = [
-  { key: 'hours', pattern: /\b(hours?|timesheet|logged|tracked|billable|capacity)\b/i },
-  { key: 'manager', pattern: /\b(my (manager|boss|reporting manager)|who(?:'s| is) my (manager|boss)|who do i report to)\b/i },
-  // "which teams am i in" is the phrasing the intent reader already recognises as a question, so
-  // it has to be a phrasing this recognises too -- otherwise the panel accepts the question and
-  // then says it did not follow it, which is the worst of the three possible answers.
-  { key: 'team', pattern: /\b(my team|teammates?|direct reports?|reports? to me|who (?:is|are) (?:in|on) my|(?:which|what) teams?|teams? am i in)\b/i },
-  { key: 'inbox', pattern: /\b(notifications?|unread|inbox|mentions?|alerts?)\b/i },
-  { key: 'spaces', pattern: /\b(spaces?|folders?|boards?|sections?|which lists?|what lists?|where can i)\b/i },
-  { key: 'dashboards', pattern: /\b(dashboards?|reports?)\b/i },
-  // The three states of a task, ahead of the plain task topics: "what have I finished this week"
-  // must not be answered with what is still left.
-  { key: 'done', pattern: /\b(finished|completed?|done|closed|delivered)\b/i },
-  { key: 'doing', pattern: /\b(in progress|underway|ongoing|working on|started)\b/i },
-  { key: 'todo', pattern: /\b(to ?dos?|not started|yet to start|untouched)\b/i },
-  { key: 'overdue', pattern: /\b(overdue|late|behind|slipped|past due)\b/i },
-  { key: 'plan', pattern: /\b(plan|schedule|agenda|calendar|my day)\b/i },
-  { key: 'today', pattern: /\b(today|right now|my plate)\b/i },
-  { key: 'week', pattern: /\b(this week|next week|week|7 days|coming days)\b/i },
-  { key: 'tasks', pattern: /\b(tasks?|work|workload|assigned|how many|how much)\b/i },
-];
-
 const shortDay = (d: Date) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+type AskReading = Extract<Reading, { kind: 'ask' }>;
+type FindReading = Extract<Reading, { kind: 'find' }>;
+
+const nameOf = (u: { display_name: string | null; email: string }) => u.display_name || u.email;
+const plainDay = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d); };
+
+/**
+ * Search for a task by what somebody called it.
+ *
+ * The server matches the whole phrase inside a name, so "GST return Sharma" finds nothing when the
+ * task is "Sharma - GST return". When the phrase finds nothing, the rarest-looking word is searched
+ * instead and only the tasks holding every word are kept.
+ */
+export async function searchFor(workspaceId: string, which: string, limit = 8): Promise<Task[]> {
+  if (!which.trim()) return [];
+  const found = await workApi.searchTasks(workspaceId, which, limit);
+  if (found.length) return found;
+  const words = significant(which).sort((a, b) => b.length - a.length);
+  if (words.length < 2) return [];
+  return holdingAll(which, await workApi.searchTasks(workspaceId, words[0], 25)).slice(0, limit);
+}
 
 /**
  * Answer a question about the signed-in person's own work.
  *
  * @param me the signed-in person's id, used only to pick their own tasks out of the list.
- * @returns null when this is not a question it can answer, so the caller can say so plainly
- *          rather than inventing something.
  */
-/**
- * Somebody else the question is about: "how many tasks are overdue of Aditi Jain".
- *
- * Asked without this, the answer came back about the person asking -- a manager checking on their
- * team was quietly told their own numbers, which is the worst kind of wrong answer because it
- * looks like an answer.
- *
- * Only a name that belongs to somebody here counts, and only when it is not the asker. Whether
- * they are allowed to see that person's work is not decided here: the request for it is made in
- * their own name and the server refuses if they may not, which is the one place that knows.
- */
-function askedAbout(question: string, people: Person[], me: string): Person | null {
-  const words = question.replace(/[?,.]/g, ' ').split(/\s+/).filter(Boolean);
-  for (let size = 2; size >= 1; size -= 1) {
-    for (let i = 0; i + size <= words.length; i += 1) {
-      const phrase = words.slice(i, i + size).join(' ');
-      // "me", "my" and the like resolve to the asker, which is the default anyway.
-      if (/^(?:me|my|mine|myself|i)$/i.test(phrase)) continue;
-      const hit = matchPerson(phrase, people);
-      if (hit && hit !== 'me' && hit.id !== me) return hit;
-    }
-  }
-  return null;
-}
-
 export async function answer(
-  question: string, workspaceId: string, me: string, hierarchy?: Hierarchy | null,
-  people: Person[] = [],
-): Promise<Answer | null> {
-  const topic = TOPICS.find((t) => t.pattern.test(question))?.key;
-  if (!topic) return null;
+  ask: AskReading, workspaceId: string, me: string, hierarchy?: Hierarchy | null,
+): Promise<Answer> {
+  const { topic, about } = ask;
+  const question = ask.question;
   const now = new Date();
-  const about = askedAbout(question, people, me);
+
+  if (topic === 'who') {
+    const found = await searchFor(workspaceId, ask.which, 8);
+    if (!found.length) {
+      return { headline: ask.which ? `No task called “${ask.which}” turned up.` : 'Which task do you mean?', detail: 'Try a few words of its name.' };
+    }
+    const { task } = pickMatch(ask.which, found);
+    const who = (t: Task) => (t.assignees.length ? t.assignees.map(nameOf).join(', ') : 'nobody');
+    if (task) {
+      return {
+        headline: task.assignees.length ? `${who(task)} ${task.assignees.length === 1 ? 'is' : 'are'} on “${task.name}”.` : `Nobody is assigned to “${task.name}”.`,
+        detail: `${task.status.name}${task.due_date ? ` · due ${shortDay(new Date(task.due_date))}` : ''}`,
+        tasks: [task],
+      };
+    }
+    // Several with that name: say who is on each, rather than picking one to answer about.
+    return {
+      headline: `${found.length} tasks match “${ask.which}”.`,
+      detail: found.slice(0, 6).map((t) => `${t.name}: ${who(t)}`).join(' · '),
+      tasks: found.slice(0, 6),
+    };
+  }
 
   if (topic === 'inbox') {
     const counts = await collabApi.counts(workspaceId);
@@ -147,30 +135,82 @@ export async function answer(
     // in -- so handing it today is the only way "this week" means the week they are in. A
     // Monday worked out here would have reported last week's total every Sunday.
     //
-    // No user id either: the endpoint then answers for whoever is asking, which is the point.
-    const sheet = await sheetApi.get(workspaceId, isoDay(now));
+    // No user id unless somebody else was named: the endpoint then answers for whoever is asking.
+    // Named, it is asked for theirs, in the asker's name, and a refusal is passed on as one --
+    // "how many hours did Aarti log" used to be answered with the asker's own hours.
+    const whose = about ? { userId: about.id } : {};
+    const subject = about ? nameOf({ display_name: about.display_name ?? null, email: about.email }) : null;
+    const sheetFor = async (start: string) => {
+      try {
+        return await sheetApi.get(workspaceId, start, whose);
+      } catch (e) {
+        if (subject) throw new Error(`You cannot see ${subject}'s timesheet. Only an admin, their approver, or they can.`);
+        throw e;
+      }
+    };
+    const logged_ = (what: string) => (subject ? `${subject} logged ${what}` : `${what} logged`);
+
+    // Time on one task -- "how much time did I spend on the GST return" -- comes from that task.
+    if (ask.which) {
+      const found = await searchFor(workspaceId, ask.which, 8);
+      const { task, options } = pickMatch(ask.which, found);
+      if (!task) {
+        return options.length
+          ? { headline: `${options.length} tasks match “${ask.which}” — which one?`, detail: 'Ask again with more of its name.', tasks: options }
+          : { headline: `No task called “${ask.which}” turned up.`, detail: 'Try a few words of its name.' };
+      }
+      const time = await workApi.taskTime(task.id);
+      const forWhom = about?.id ?? me;
+      const theirs = time.entries.filter((e) => e.user.id === forWhom).reduce((sum, e) => sum + (e.duration_seconds ?? 0), 0);
+      const who = subject ?? 'You';
+      return {
+        headline: theirs ? `${who} ${subject ? 'has' : 'have'} logged ${hrs(theirs)} on “${task.name}”.` : `${who} ${subject ? 'has' : 'have'} not logged any time on “${task.name}”.`,
+        detail: time.shows_everyone && time.total_seconds !== theirs ? `${hrs(time.total_seconds)} by everyone.` : undefined,
+        tasks: [task],
+      };
+    }
+    // A particular day -- "yesterday", "on Monday" -- is read off the week that day falls in, which
+    // may be last week's sheet.
+    if (ask.day && ask.day !== isoDay(now)) {
+      const daySheet = await sheetFor(ask.day);
+      const at = daySheet.days.indexOf(ask.day);
+      const seconds = at >= 0 ? daySheet.tracked_per_day[at] : 0;
+      const when = plainDay(ask.day).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' });
+      const capacity = at >= 0 ? daySheet.capacity_per_day[at] : 0;
+      const rows = at >= 0 ? daySheet.rows.filter((r) => r.seconds_per_day[at] > 0).length : 0;
+      return {
+        headline: seconds ? `${logged_(hrs(seconds))} on ${when}.` : `Nothing logged on ${when}${subject ? ` by ${subject}` : ''}.`,
+        detail: [
+          seconds ? `Across ${plural(rows, 'task')}.` : null,
+          capacity ? `${subject ? 'Their' : 'Your'} day is ${hrs(capacity)}.` : null,
+          `${hrs(daySheet.total_seconds)} that week.`,
+        ].filter(Boolean).join(' '),
+        goTo: { label: subject ? 'Open timesheets' : 'Open my timesheet', to: '/timesheets' },
+      };
+    }
+    const sheet = await sheetFor(isoDay(now));
     const able = sheet.capacity_per_day.reduce((a, b) => a + b, 0);
     const logged = sheet.total_seconds;
     const todayAt = sheet.days.indexOf(isoDay(now));
     const todaySeconds = todayAt >= 0 ? sheet.tracked_per_day[todayAt] : null;
 
-    if (/\btoday\b/i.test(question) && todaySeconds !== null) {
+    if ((/\btoday\b/i.test(question) || ask.day === isoDay(now)) && todaySeconds !== null) {
       return {
-        headline: todaySeconds ? `${hrs(todaySeconds)} logged today.` : 'Nothing logged today yet.',
+        headline: todaySeconds ? `${logged_(hrs(todaySeconds))} today.` : `Nothing logged today yet${subject ? ` by ${subject}` : ''}.`,
         detail: `${hrs(logged)} so far this week, across ${plural(sheet.rows.length, 'task')}.`,
-        goTo: { label: 'Open my timesheet', to: '/timesheets' },
+        goTo: { label: subject ? 'Open timesheets' : 'Open my timesheet', to: '/timesheets' },
       };
     }
     const left = Math.max(0, able - logged);
     return {
-      headline: `${hrs(logged)} logged this week${able ? ` of ${hrs(able)}` : ''}.`,
+      headline: `${logged_(hrs(logged))} this week${able ? ` of ${hrs(able)}` : ''}.`,
       detail: [
         // period_start is the server's own week, so the label cannot disagree with the figure.
         `Week of ${shortDay(parseDay(sheet.period_start))}, across ${plural(sheet.rows.length, 'task')}.`,
-        able ? (left > 0 ? `${hrs(left)} still to account for.` : 'Your week is fully accounted for.') : null,
+        able ? (left > 0 ? `${hrs(left)} still to account for.` : `${subject ? 'The' : 'Your'} week is fully accounted for.`) : null,
         sheet.submission ? `Timesheet ${sheet.submission.status === 'pending' ? 'submitted, awaiting approval' : sheet.submission.status.replace('_', ' ')}.` : null,
       ].filter(Boolean).join(' '),
-      goTo: { label: 'Open my timesheet', to: '/timesheets' },
+      goTo: { label: subject ? 'Open timesheets' : 'Open my timesheet', to: '/timesheets' },
     };
   }
 
@@ -323,6 +363,16 @@ export async function answer(
     };
   }
 
+  if (topic === 'tomorrow') {
+    const due = open.filter((t) => t.due_date && sameDay(new Date(t.due_date), tomorrowOf(now)));
+    return {
+      headline: due.length ? `${plural(due.length, 'task')} due tomorrow.` : `${nothingOfTheirs} is due tomorrow.`,
+      detail: overdue.length ? `${overdue.length} ${overdue.length === 1 ? 'is' : 'are'} already overdue.` : `${open.length} open in total.`,
+      tasks: byDue(due).slice(0, 10),
+      goTo: myTasks,
+    };
+  }
+
   if (topic === 'week') {
     const week = upTo(inAWeek);
     return {
@@ -350,4 +400,44 @@ export async function answer(
     tasks: byDue(open).slice(0, 10),
     goTo: myTasks,
   };
+}
+
+const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+const tomorrowOf = (d: Date) => { const x = new Date(d); x.setDate(x.getDate() + 1); return x; };
+
+/**
+ * The list a "show me..." asks for: someone's tasks, tasks matching some words, or tasks due at
+ * some point -- your own unless a colleague was named.
+ *
+ * Somebody else's come from their own endpoint, in the asker's name, so the server decides whether
+ * they may see them; a refusal is passed on as one rather than turning into a list of the asker's.
+ */
+export async function listTasks(find: FindReading, workspaceId: string, me: string | null): Promise<{ label: string; tasks: Task[] }> {
+  const now = new Date();
+  if (find.search) return { label: find.label, tasks: await searchFor(workspaceId, find.search, 12) };
+  let pool: Task[];
+  if (find.person) {
+    try {
+      pool = await peopleApi.tasks(workspaceId, find.person.id, false);
+    } catch {
+      throw new Error(`You cannot see ${nameOf({ display_name: find.person.display_name ?? null, email: find.person.email })}'s work. Only an admin, or the person themselves, can.`);
+    }
+  } else {
+    const all = await workApi.allTasks(workspaceId);
+    pool = all.tasks.filter((t) => t.assignees.some((a) => a.id === me));
+  }
+  const open = pool.filter(isOpen);
+  const endOf = (d: Date) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
+  const inAWeek = new Date(now); inAWeek.setDate(inAWeek.getDate() + 7);
+  const byDue = (list: Task[]) => [...list].sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999'));
+  // "Due today" and "this week" are what falls in that window. Overdue work is its own question;
+  // listing September's late tasks under "due today" answered the wrong one.
+  const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
+  const between = (t: Task, until: Date) => !!t.due_date && new Date(t.due_date) >= startOfToday && new Date(t.due_date) <= until;
+  const tasks = find.due === 'overdue' ? open.filter((t) => t.is_overdue)
+    : find.due === 'today' ? open.filter((t) => between(t, endOf(now)))
+      : find.due === 'tomorrow' ? open.filter((t) => t.due_date && sameDay(new Date(t.due_date), tomorrowOf(now)))
+        : find.due === 'week' ? open.filter((t) => between(t, endOf(inAWeek)))
+          : open;
+  return { label: find.label, tasks: byDue(tasks).slice(0, 12) };
 }

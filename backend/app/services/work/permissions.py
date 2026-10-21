@@ -7,7 +7,8 @@ node upwards (task, parent tasks, list, folders, space), the first node that dec
   2. The node is a Space and you are a guest -> no access (guests never get a Space)
   3. You hold a personal share on it        -> that share's level
   4. One of your Teams holds a share on it  -> the highest such level
-  5. The node is private                    -> no access
+  5. The node is private                    -> no access (admins pass, except on a
+                                               private task or inside a Personal Space)
   6. The node belongs to a Team you are not in (and you don't run the place) -> no access
   7. Otherwise                              -> ask the parent
 
@@ -33,6 +34,10 @@ class Node:
     is_private: bool
     #: Set when this belongs to a Team: only that Team's people (and admins) see it.
     team_id: Optional[uuid.UUID] = None
+    #: A Personal Space: its owner's alone, admins included.
+    personal: bool = False
+    #: A Space's default permission for members (None: full).
+    default_level: Optional[PermissionLevel] = None
 
 
 ShareKey = Tuple[LocationKind, uuid.UUID]
@@ -56,6 +61,10 @@ def resolve_level(
     if role is None:  # not a member of this workspace
         return None
     team_shares = team_shares or {}
+    # Admins open private Spaces, Folders and Lists, so a place doesn't become unreachable when
+    # whoever made it leaves. Not a private task (that is one person's note, not a place) and not
+    # anything in a Personal Space, which stays its owner's alone.
+    admin_opens_private = can_manage_workspace(role) and not any(n.personal for n in chain)
     for node in chain:
         if node.created_by is not None and node.created_by == user_id:
             return PermissionLevel.full
@@ -68,13 +77,17 @@ def resolve_level(
         team = team_shares.get(key)
         if team is not None:
             return team
-        if node.is_private:
+        if node.is_private and not (admin_opens_private and node.kind != LocationKind.task):
             return None
         # Work given to a Team is that Team's, and the people who run the place.
         if node.team_id is not None and not can_manage_workspace(role) and node.team_id not in (my_teams or set()):
             return None
     if role in SHARED_ONLY:
         return None
+    # The Space's default permission holds members to less than full; admins run the place.
+    default = next((n.default_level for n in chain if n.kind == LocationKind.space), None)
+    if default is not None and not can_manage_workspace(role):
+        return default
     return PermissionLevel.full
 
 

@@ -232,8 +232,8 @@ export const MyWorkloadView: React.FC<{
         >
           Today
         </button>
-        <button type="button" title="Earlier" onClick={() => step(-1)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
-        <button type="button" title="Later" onClick={() => step(1)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
+        <button aria-label="Earlier" type="button" title="Earlier" onClick={() => step(-1)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
+        <button aria-label="Later" type="button" title="Later" onClick={() => step(1)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
         <span className="text-sm font-medium text-gray-700">
           {start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – {
             new Date(start.getTime() + (days - 1) * DAY_MS).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}

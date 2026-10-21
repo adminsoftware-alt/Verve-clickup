@@ -131,6 +131,11 @@ def scope_of(dash: Dashboard) -> Optional[List[str]]:
     return None
 
 
+def me_of(dash: Dashboard) -> Optional[str]:
+    """Who "me" means in a board's filters: its owner on a personal board, else the viewer (None)."""
+    return dash.owner_id if dash.standard == MY_WORK else None
+
+
 def _make(db: Session, access: Access, kind: str, name: str, filters: Dict[str, Any],
           cards: List[Card], team_id: Optional[uuid.UUID] = None) -> None:
     dash = Dashboard(

@@ -402,6 +402,25 @@ def _local(member: WorkspaceMember, now: datetime) -> datetime:
         return now.astimezone(ZoneInfo("Asia/Kolkata"))
 
 
+def _highlights(db: Session, access: Access, local: datetime) -> List[str]:
+    """The Highlights of this person's home Dashboard, as the sentences the panel shows.
+
+    The digest already lists what is due and overdue, so those are not repeated -- the same rule
+    the panel keeps with the cards. A board that cannot be read is no reason to skip the email."""
+    from app.schemas import dashboards as dsch
+    from app.services.work.dashboards import insights, service, standard
+    from app.services.work.dashboards.engine import Engine
+
+    try:
+        with db.begin_nested():
+            opened = service.home_dashboard(db, access)
+            engine = Engine(db, access, local.tzinfo, dsch.Filters.model_validate(opened.dashboard.filters or {}),  # type: ignore[arg-type]
+                            scope=standard.scope_of(opened.dashboard), me=standard.me_of(opened.dashboard))
+            return insights.sentences(insights.compute(engine, service.cards_of(db, opened.dashboard.id)))[:10]
+    except Exception:  # noqa: BLE001 -- the digest still goes without them
+        return []
+
+
 def run_daily_digests(db: Session, now: Optional[datetime] = None) -> int:
     """At each person's digest hour: unread updates plus what's due today and overdue, by email and WhatsApp."""
     from app.services.work import mywork
@@ -427,11 +446,13 @@ def run_daily_digests(db: Session, now: Optional[datetime] = None) -> int:
             Notification.workspace_id == m.workspace_id, Notification.user_id == m.user_id, Notification.category == "primary",
             Notification.read_at.is_(None), Notification.cleared_at.is_(None), Notification.emailed_at.is_(None),
             Notification.created_at >= now - timedelta(days=2)).order_by(Notification.created_at.desc()).limit(20)))
-        if not due and not unread:
+        highlights = _highlights(db, access, local)
+        if not due and not unread and not highlights:
             continue
         base = settings.APP_URL.rstrip("/")
         rows = [(t.name, "Overdue" if t.is_overdue else "Due today", f"{base}/l/{t.list_id}?task={t.id}") for t in due[:20]]
         rows += [(*describe(db, n), _link(n)) for n in unread]
+        rows += [("Highlight", line, f"{base}/") for line in highlights]
         if m.email_notifications == "daily" and _email(
                 user.email, f"Your day: {len(due)} due, {len(overdue)} overdue", rows,
                 f"Good morning. {len(due)} task{'s' if len(due) != 1 else ''} due today or overdue, and {len(unread)} new update{'s' if len(unread) != 1 else ''}."):

@@ -376,7 +376,8 @@ def test_a_task_shared_alone_appears_in_shared_with_me(api, workspace, space):
 
 def test_edit_access_can_update_but_not_create_or_delete(api, folderless_list):
     list_id = folderless_list["id"]
-    task = new_task(api, list_id)
+    # Assigned to them: on a colleague's task an employee is read-and-comment whatever the List says.
+    task = new_task(api, list_id, assignees=["member"])
     ok(api.post(f"/lists/{list_id}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
     ok(api.patch(f"/tasks/{task['id']}", "member", {"name": "edited"}))
     assert api.post(f"/lists/{list_id}/tasks", "member", {"name": "new"}).status_code == 403

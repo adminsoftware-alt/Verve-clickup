@@ -1,16 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ChevronLeft, ChevronRight, Clock, FileSpreadsheet, History, KeyRound, ListChecks, Mail, RotateCcw, Save, Send, ShieldBan, ShieldCheck, Trash2,
+  ChevronLeft, ChevronRight, Clock, FileSpreadsheet, History, ListChecks, RotateCcw, Save, ShieldBan, ShieldCheck, Trash2,
   UserMinus, UserPlus, Wallet, X,
 } from 'lucide-react';
 import { Avatar, Portal } from '../ui';
 import { DrawInPlace } from './inlineDialog';
-import { peopleApi, type AuditEvent, type BlockedEmail, type JoinerPlan, type JoinerRule, type Person, type SignInRules, type TeamFull } from './peopleApi';
+import { peopleApi, type AuditEvent, type BlockedEmail, type JoinerPlan, type JoinerRule, type Person, type TeamFull } from './peopleApi';
 import { HubContext, useHub, type Hub } from './TeamsHub';
 import { useMe, useWork } from '../WorkContext';
 import type { Role } from '../api';
-import { AddPersonDialog, InviteDialog } from './PersonDialogs';
+import { AddPersonDialog } from './PersonDialogs';
 import { ImportPeopleDialog } from './AdminDialogs';
 import { RemovePersonSection } from './RemovePerson';
 import { RunningCosts } from './RunningCosts';
@@ -88,7 +88,7 @@ export const AdminStandalone: React.FC = () => {
 // --- the options ---------------------------------------------------------------------------------------------
 
 /** Everything an admin can do, one option each. Each opens on its own, when it is wanted. */
-type Action = 'add' | 'invite' | 'import' | 'remove' | 'hours' | 'costs' | 'audit' | 'signin' | 'email' | 'blocked' | 'joiner';
+type Action = 'add' | 'import' | 'remove' | 'hours' | 'costs' | 'audit' | 'blocked' | 'joiner';
 
 interface Option {
   key: Action; title: string; line: string; Icon: React.ElementType;
@@ -109,16 +109,13 @@ const TONES: Record<Option['tone'], { chip: string; ring: string }> = {
 const OPTIONS: Option[] = [
   { key: 'add', title: 'Add a person', line: 'Set someone up with their profile', Icon: UserPlus, tone: 'brand', group: 'People' },
   { key: 'remove', title: 'Remove a person', line: 'Offboard someone and hand over their work', Icon: UserMinus, tone: 'red', group: 'People' },
-  { key: 'invite', title: 'Invite people', line: 'Send sign-in invitations by email', Icon: Send, tone: 'sky', group: 'People' },
   { key: 'import', title: 'Import from a spreadsheet', line: 'Add or update many people at once', Icon: FileSpreadsheet, tone: 'emerald', group: 'People' },
   { key: 'hours', title: 'Working hours', line: 'Days and hours for the company, Teams and people', Icon: Clock, tone: 'amber', group: 'People' },
   { key: 'audit', title: 'Audit logs', line: 'Who changed what, and when', Icon: History, tone: 'slate', group: 'Workspace' },
   { key: 'costs', title: 'Running costs', line: 'What the application costs to run', Icon: Wallet, tone: 'violet', group: 'Workspace' },
-  { key: 'signin', title: 'Sign-in rules', line: 'Allowed domains, Google sign-in, two-step', Icon: KeyRound, tone: 'amber', group: 'Workspace' },
-  { key: 'email', title: 'Email', line: 'Whether the app can send invitations', Icon: Mail, tone: 'sky', group: 'Workspace' },
 ];
 
-/** The options this workspace offers: the nine, plus two that come back with their flags. */
+/** The options this workspace offers: the six, plus two that come back with their flags. */
 const options = (): Option[] => [
   ...OPTIONS,
   ...(FEATURES.blockedAddresses ? [{ key: 'blocked', title: 'Blocked addresses', line: 'Emails that may not be added back', Icon: ShieldBan, tone: 'red', group: 'Workspace' } as Option] : []),
@@ -163,14 +160,11 @@ const AdminWindow: React.FC<{ action: Action; onBack: () => void; onClose: () =>
             <DrawInPlace.Provider value>
               <InWindow.Provider value>
                 {action === 'add' && <AddPersonDialog ws={ws} people={people} teams={teams} roles={roles} onClose={onBack} onDone={() => { reload(); }} />}
-                {action === 'invite' && <InviteDialog ws={ws} teams={teams} roles={roles} onClose={onBack} onDone={() => { reload(); }} />}
                 {action === 'import' && <ImportPeopleDialog ws={ws} onClose={onBack} onDone={() => { reload(); }} />}
                 {action === 'remove' && <RemovePersonSection ws={ws} people={people} teams={teams} me={me} onChanged={reload} />}
                 {action === 'hours' && <WorkingHoursSection ws={ws} />}
                 {action === 'costs' && <RunningCosts ws={ws} />}
                 {action === 'audit' && <AuditSection ws={ws} />}
-                {action === 'signin' && <SignInSection ws={ws} />}
-                {action === 'email' && <EmailSection ws={ws} />}
                 {action === 'blocked' && <BlockedSection ws={ws} />}
                 {action === 'joiner' && <JoinerPlanSection ws={ws} />}
               </InWindow.Provider>
@@ -375,72 +369,6 @@ const BlockedSection: React.FC<{ ws: string }> = ({ ws }) => {
             </ul>
           )}
       </div>
-    </Section>
-  );
-};
-
-// --- email ---------------------------------------------------------------------------------------------------
-
-const EmailSection: React.FC<{ ws: string }> = ({ ws }) => {
-  const [status, setStatus] = useState<{ configured: boolean; host: string | null; sender: string | null } | null>(null);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => { peopleApi.emailStatus(ws).then(setStatus).catch(() => undefined); }, [ws]);
-  const test = async () => {
-    setMsg(null);
-    try { await peopleApi.emailTest(ws); setMsg({ ok: true, text: 'Test email sent to you. Check your inbox.' }); } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
-  };
-  return (
-    <Section id="email" icon={<Mail size={17} className="text-brand-600" />} title="Email" hint="Invitations to new joiners go out from the company mail server. The weekly and daily digests are off, so email is not how anybody hears about day-to-day work.">
-      {status && (
-        <p className="text-sm text-gray-700">
-          {status.configured
-            ? <>Sending through <b>{status.host}</b> as <b>{status.sender ?? 'the configured account'}</b>.</>
-            : <>Email is <b>not set up</b>. Ask whoever runs the server to add <code className="rounded bg-gray-100 px-1">SMTP_HOST</code>, <code className="rounded bg-gray-100 px-1">SMTP_PORT</code>, <code className="rounded bg-gray-100 px-1">SMTP_USER</code>, <code className="rounded bg-gray-100 px-1">SMTP_PASSWORD</code> and <code className="rounded bg-gray-100 px-1">SMTP_FROM</code> to the backend settings, then restart it. Until then, copy the sign-in link to share invitations.</>}
-        </p>
-      )}
-      <button type="button" onClick={test} className="mt-3 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Send me a test email</button>
-      {msg && <p className={`mt-2 text-sm ${msg.ok ? 'text-emerald-700' : 'text-red-700'}`} role="status">{msg.text}</p>}
-    </Section>
-  );
-};
-
-// --- sign-in rules ------------------------------------------------------------------------------------------
-
-const SignInSection: React.FC<{ ws: string }> = ({ ws }) => {
-  const [rules, setRules] = useState<SignInRules | null>(null);
-  const [domains, setDomains] = useState('');
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => { peopleApi.signInRules(ws).then((r) => { setRules(r.rules); setDomains(r.rules.allowed_email_domains.join(', ')); }).catch(() => undefined); }, [ws]);
-  if (!rules) return null;
-  const save = async () => {
-    setMsg(null);
-    const body = { ...rules, allowed_email_domains: domains.split(/[\s,;]+/).map((d) => d.trim()).filter(Boolean) };
-    try {
-      const out = await peopleApi.saveSignInRules(ws, body);
-      setRules(out.rules);
-      setDomains(out.rules.allowed_email_domains.join(', '));
-      setMsg({ ok: true, text: out.locked_out.length ? `Saved. These people can't get in until they meet the rules: ${out.locked_out.join(', ')}.` : 'Saved. Everyone meets the rules.' });
-    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
-  };
-  const box = (key: keyof Omit<SignInRules, 'allowed_email_domains'>, label: string, hint: string) => (
-    <label className="flex items-start gap-2 text-sm text-gray-700">
-      <input type="checkbox" className="mt-1" checked={rules[key]} onChange={(e) => setRules({ ...rules, [key]: e.target.checked })} />
-      <span>{label}<span className="block text-xs text-gray-500">{hint}</span></span>
-    </label>
-  );
-  return (
-    <Section id="sign-in" icon={<KeyRound size={17} className="text-brand-600" />} title="Sign-in rules" hint="Who may use this workspace, and how they must sign in. You can't save rules that would lock yourself out.">
-      <label className="block text-sm font-medium text-gray-700">Allowed email domains
-        <input aria-label="Allowed email domains" value={domains} onChange={(e) => setDomains(e.target.value)} placeholder="verveadvisory.com" className={`mt-1 block w-full ${input}`} />
-        <span className="text-xs font-normal text-gray-500">Leave empty to allow any address an admin adds.</span>
-      </label>
-      <div className="mt-3 space-y-2">
-        {box('allow_outside_guests', 'Guests may use other domains', 'e.g. a client or consultant with their own email.')}
-        {box('require_google_sign_in', 'Require signing in with Google', 'Blocks email-and-password sign-ins.')}
-        {box('require_two_step', 'Require two-step verification', 'Needs Firebase multi-factor sign-in turned on for the project; people without it are blocked.')}
-      </div>
-      <button type="button" onClick={save} className={`mt-4 ${primary}`}><Save size={14} /> Save rules</button>
-      {msg && <p className={`mt-2 text-sm ${msg.ok ? 'text-emerald-700' : 'text-red-700'}`} role="status">{msg.text}</p>}
     </Section>
   );
 };

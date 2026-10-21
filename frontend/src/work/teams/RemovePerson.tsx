@@ -194,8 +194,13 @@ const ActionFact: React.FC<{ label: string; onClick: () => void; open?: boolean;
 /** Past this many tasks the list gets a search box and an "undecided only" switch. */
 const FILTER_FROM = 8;
 
-/** One decision per open task, in a box that scrolls on its own so a long workload doesn't
- *  push the rest of the page -- the team lead hand-over, the confirmation -- out of reach. */
+/** Their open tasks, each with its decision on the same row, in a box that scrolls on its own so
+ *  a long workload doesn't push the rest of the page -- the team lead hand-over, the
+ *  confirmation -- out of reach.
+ *
+ *  This is the only list of their tasks on the page. There used to be a second, read-only one
+ *  under step 1 that you opened to see which tasks they were, and then this one to say what
+ *  happens to them: the same tasks twice, one screen apart. */
 const TaskDecisions: React.FC<{
   tasks: Task[];
   perTask: Record<string, string>;
@@ -224,7 +229,7 @@ const TaskDecisions: React.FC<{
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-[13px] font-semibold text-gray-900">
-              What happens to their {tasks.length} open task{tasks.length === 1 ? '' : 's'}?
+              Open tasks <span className="font-normal text-gray-400">{tasks.length}</span>
             </p>
             <p className="mt-0.5 text-[11px] text-gray-500">Give each one to a colleague, or delete it.</p>
           </div>
@@ -333,7 +338,6 @@ export const RemovePersonSection: React.FC<{
   // Task id -> the person who takes it, or DELETE_TASK. Empty until somebody decides.
   const [perTask, setPerTask] = useState<Record<string, string>>({});
   const [typed, setTyped] = useState('');
-  const [showTasks, setShowTasks] = useState(false);
   const [theirTasks, setTheirTasks] = useState<Task[] | null>(null);
   const [movingTeam, setMovingTeam] = useState(false);
   const [moveNote, setMoveNote] = useState<string | null>(null);
@@ -341,15 +345,15 @@ export const RemovePersonSection: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
-  // Their details arrive on their own as soon as they are picked -- what work is on them, who
-  // reports to them, which teams. Nobody should have to go and look that up in another tab.
+  // Their details arrive on their own as soon as they are picked -- what work is on them and
+  // which teams. Nobody should have to go and look that up in another tab, or click to see it.
   useEffect(() => {
     setPreview(null);
     setTyped('');
     setError(null);
     setDone(null);
-    setShowTasks(false);
     setTheirTasks(null);
+    setPerTask({});
     setMovingTeam(false);
     setMoveNote(null);
     if (!chosen) return;
@@ -357,6 +361,9 @@ export const RemovePersonSection: React.FC<{
     peopleApi.offboardPreview(ws, chosen.user.id)
       .then((p) => { if (live) { setPreview(p); setHandTo(p.hand_over_to?.id ?? ''); } })
       .catch((e) => { if (live) setError((e as Error).message); });
+    peopleApi.tasks(ws, chosen.user.id)
+      .then((t) => { if (live) setTheirTasks(t); })
+      .catch(() => { if (live) setTheirTasks([]); });
     return () => { live = false; };
   }, [ws, chosen]);
 
@@ -370,7 +377,8 @@ export const RemovePersonSection: React.FC<{
   // The server decides; this only repeats what it already said, so nobody types a name into a
   // confirmation for something that was never going to be allowed.
   const blocked = preview?.blocked
-    ?? (undecided > 0 ? `Say what happens to ${undecided} more task${undecided === 1 ? '' : 's'}.`
+    ?? (theirTasks === null ? 'Loading their open tasks…'
+      : undecided > 0 ? `Say what happens to ${undecided} more task${undecided === 1 ? '' : 's'}.`
       : preview?.sole_lead_of.length && !handTo
         ? `Choose who takes over — they are the only lead of ${preview.sole_lead_of.join(', ')}.`
         : null);
@@ -464,40 +472,9 @@ export const RemovePersonSection: React.FC<{
                 {moveNote && <span className="w-full text-xs text-emerald-700">{moveNote}</span>}
               </div>
             )}
-            {/* Five open tasks is a number nobody can act on. Which five is the question. */}
-            {preview && preview.open_tasks > 0 ? (
-              <ActionFact
-                label="Open tasks" open={showTasks}
-                onClick={() => {
-                  setShowTasks(!showTasks);
-                  if (!theirTasks) peopleApi.tasks(ws, chosen.user.id).then(setTheirTasks).catch(() => setTheirTasks([]));
-                }}
-              >
-                {preview.open_tasks}
-              </ActionFact>
-            ) : (
-              <Fact label="Open tasks">{preview ? preview.open_tasks : <span className="text-gray-400">Counting…</span>}</Fact>
-            )}
-            {showTasks && (
-              <div className="ml-4 rounded-lg border border-gray-200 bg-white sm:ml-32">
-                {theirTasks === null ? <p className="px-3 py-2 text-sm text-gray-400">Loading…</p> : (
-                  <ul className="divide-y divide-gray-100">
-                    {theirTasks.slice(0, 20).map((t) => (
-                      <li key={t.id}>
-                        <Link to={`/l/${t.list_id}?task=${t.id}`} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-800 no-underline hover:bg-gray-50">
-                          <StatusDot status={t.status} size={11} />
-                          <span className="min-w-0 flex-1 truncate">{t.name}</span>
-                          {t.due_date && <span className="shrink-0 text-[11px] text-gray-400">{formatDue(t.due_date)}</span>}
-                        </Link>
-                      </li>
-                    ))}
-                    {theirTasks.length > 20 && <li className="px-3 py-1.5 text-xs text-gray-400">and {theirTasks.length - 20} more</li>}
-                    {theirTasks.length === 0 && <li className="px-3 py-2 text-sm text-gray-400">None you can see.</li>}
-                  </ul>
-                )}
-              </div>
-            )}
-            <Fact label="Direct reports">{preview ? preview.direct_reports : <span className="text-gray-400">Counting…</span>}</Fact>
+            {/* Their open tasks and their direct reports were counted here too. The tasks are
+                listed, each with its decision, in step 2; the reports move up to this person's
+                manager without anyone choosing, so a number for them asked nothing of you. */}
             {!!preview?.sole_lead_of.length && (
               <Fact label="Only lead of">
                 <span className="text-amber-700">{preview.sole_lead_of.join(', ')}</span>
@@ -520,11 +497,15 @@ export const RemovePersonSection: React.FC<{
               two go to one person, two to another, and one was only ever a note to themselves. The
               old control asked for one name and applied it to everything, so the real sorting out
               happened afterwards, by hand, from memory. */}
-          {theirTasks && theirTasks.length > 0 && (
+          {theirTasks === null ? (
+            <p className="mt-4 text-sm text-gray-400">Loading their open tasks…</p>
+          ) : theirTasks.length > 0 ? (
             <TaskDecisions
               key={chosen.user.id} tasks={theirTasks} perTask={perTask} setPerTask={setPerTask}
               candidates={candidates} managerId={preview?.hand_over_to?.id}
             />
+          ) : (
+            <p className="mt-4 text-sm text-gray-500">They have no open tasks to hand over.</p>
           )}
 
           {!!preview?.sole_lead_of.length && (

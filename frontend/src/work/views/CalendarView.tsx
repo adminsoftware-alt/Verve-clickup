@@ -236,6 +236,7 @@ export const CalendarView: React.FC<{
                     <form onSubmit={(e) => create(e, day)}>
                       <input
                         autoFocus
+                        aria-label="New task name"
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
                         onBlur={() => !draft && setAddingOn(null)}

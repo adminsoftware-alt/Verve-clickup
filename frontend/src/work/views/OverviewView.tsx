@@ -31,9 +31,11 @@ export const OverviewView: React.FC<{
   kind: 'space' | 'folder';
   node: SpaceNode | FolderNode;
   canCreate: boolean;
+  /** Folders are managers' and admins' to add; Lists anyone's with full edit. */
+  canAddFolder?: boolean;
   onAddList: () => void;
   onAddFolder: () => void;
-}> = ({ kind, node, canCreate, onAddList, onAddFolder }) => {
+}> = ({ kind, node, canCreate, canAddFolder = canCreate, onAddList, onAddFolder }) => {
   const { locate } = useWork();
   const lists = useMemo(() => allLists(node), [node]);
   const recent = useMemo(() => {
@@ -42,7 +44,7 @@ export const OverviewView: React.FC<{
   }, [lists]);
 
   const addButton = (label: string, onClick: () => void) =>
-    canCreate ? (
+    (onClick === onAddFolder ? canAddFolder : canCreate) ? (
       <button type="button" onClick={onClick} className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-700">
         <Plus size={12} /> {label}
       </button>

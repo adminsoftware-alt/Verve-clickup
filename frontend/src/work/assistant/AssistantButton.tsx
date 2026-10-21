@@ -5,9 +5,9 @@
 // On a phone it lifts clear of the tab bar rather than sitting on top of it.
 
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { Sparkles } from 'lucide-react';
 
 import { usePhone } from '../useBreakpoint';
+import { ChatBubble } from './Bubble';
 
 // The panel, and everything it reads a sentence with -- the parser, the Hindi tables, the
 // destination resolver -- loads when somebody first opens it. It is on every screen in the app, so
@@ -23,14 +23,24 @@ const HINTS = [
   'Close one — "mark the GST filing done"',
   'Ask — "what\'s overdue?"',
   'Ask about your own figures — "how many hours this week?"',
+  'Run a timer — "start timer on payroll"',
+  'Ask about a task — "who is working on the GST return?"',
 ];
 
 export const AssistantButton: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [hovering, setHovering] = useState(false);
   const phone = usePhone();
-  // A different hint each time it is hovered, so the four things it does get discovered.
+  // A different hint each time it is hovered, so the things it does get discovered.
   const shown = useRef(0);
+  // Focus goes back to the button the panel was opened from, so a keyboard user closing it with
+  // Escape is not dropped at the top of the page.
+  const button = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (!open && wasOpen.current) button.current?.focus();
+    wasOpen.current = open;
+  }, [open]);
 
   // Ctrl/Cmd+J from anywhere, which is how anybody who uses it twice will open it thereafter.
   useEffect(() => {
@@ -51,7 +61,7 @@ export const AssistantButton: React.FC = () => {
 
   return (
     <div
-      className={`no-print fixed right-4 z-[90] flex items-center gap-2 sm:right-6
+      className={`no-print pointer-events-none fixed right-4 z-[90] flex items-center gap-2 sm:right-6
         ${phone ? 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))]' : 'bottom-6'}`}
       onMouseEnter={() => { shown.current = (shown.current + 1) % HINTS.length; setHovering(true); }}
       onMouseLeave={() => setHovering(false)}
@@ -61,24 +71,28 @@ export const AssistantButton: React.FC = () => {
           is no hover and the thumb is already on its way to the button. */}
       <span
         aria-hidden
-        className={`hidden select-none whitespace-nowrap rounded-xl bg-gray-900/92 px-3 py-2 text-xs text-white shadow-lg
+        className={`assistant-hint hidden select-none whitespace-nowrap rounded-xl px-3 py-2 text-xs font-medium text-gray-800 shadow-lg
           transition-all duration-150 md:block
           ${hovering ? 'translate-x-0 opacity-100' : 'pointer-events-none translate-x-2 opacity-0'}`}
       >
         {HINTS[shown.current]}
-        <span className="ml-2 rounded border border-white/25 px-1 text-[10px] text-white/70">Ctrl J</span>
+        <span className="ml-2 rounded border border-fuchsia-300 px-1 text-[10px] text-fuchsia-600">Ctrl J</span>
       </span>
 
       <button
+        ref={button}
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="Assistant — say what you want (Ctrl+J)"
-        className="group relative flex h-12 w-12 items-center justify-center rounded-full
-          bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-lg shadow-brand-700/25
+        aria-haspopup="dialog"
+        aria-label="Verve Assistant — say what you want (Ctrl+J)"
+        className="assistant-launcher group pointer-events-auto relative flex h-14 w-14 items-center justify-center rounded-full
           transition-transform hover:scale-105 active:scale-95"
       >
-        <Sparkles size={20} />
-        <span className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-brand-400/0 transition-all group-hover:ring-4 group-hover:ring-brand-400/25" />
+        {/* Always shining: a ring of colour turning slowly round it, and a glow that breathes,
+            so it is never mistaken for part of the page. */}
+        <span aria-hidden className="assistant-launcher-ring pointer-events-none absolute -inset-[3px] rounded-full" />
+        <span aria-hidden className="absolute inset-0 rounded-full bg-[#14082e]" />
+        <ChatBubble />
       </button>
     </div>
   );

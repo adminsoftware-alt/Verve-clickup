@@ -28,7 +28,7 @@ export const GroupsDialog: React.FC<{
         <div role="dialog" aria-label="Task groups" onMouseDown={(e) => e.stopPropagation()} className="flex max-h-[85vh] w-[30rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white shadow-xl">
           <header className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
             <h3 className="font-semibold text-gray-900">Task groups</h3>
-            <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
           </header>
           <div className="overflow-y-auto px-5 py-4">
             <p className="mb-3 text-xs text-gray-500">

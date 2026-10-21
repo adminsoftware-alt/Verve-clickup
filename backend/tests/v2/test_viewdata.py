@@ -41,30 +41,8 @@ def test_dependencies_and_activity_for_a_location(api, org):
     assert all(f["task_name"] != "Budget" for f in ok(api.get(f"/spaces/{org['space']['id']}/activity", "member")))
 
 
-def test_forms_create_tasks_for_anyone_in_the_workspace(api, org):
-    fee = ok(api.post(f"/lists/{org['secret']['id']}/fields", "owner", {"name": "Amount", "type": "money"}), 201)
+def test_a_form_can_no_longer_be_added(api, org):
+    """Forms lived on a List, and a List now shows only its List view (2026-10-16)."""
     assert api.post(f"/spaces/{org['space']['id']}/views", "owner", {"type": "form"}).status_code == 400
-    view = ok(api.post(f"/lists/{org['secret']['id']}/views", "owner", {"type": "form"}), 201)
-    ok(api.patch(f"/views/{view['id']}", "owner", {"settings": {"form": {
-        "title": "Reimbursement request", "description": "Claim expenses",
-        "fields": [{"key": "name", "label": "What for?"}, {"key": "due_date"}, {"key": f"cf:{fee['id']}", "required": True}, {"key": "priority"}],
-        "assignee_ids": ["admin"], "success": "We'll get back to you",
-    }}}))
-    # The member can't open the private List, but can use its form.
-    form = ok(api.get(f"/forms/{view['id']}", "member"))
-    assert form["title"] == "Reimbursement request" and [f["key"] for f in form["fields"]] == ["name", "due_date", f"cf:{fee['id']}", "priority"]
-    assert form["fields"][2]["field"]["type"] == "money"
-    r = api.post(f"/forms/{view['id']}/submit", "member", {"answers": {"name": "Taxi to client"}})
-    assert r.status_code == 400 and "Amount" in r.json()["detail"]
-    out = ok(api.post(f"/forms/{view['id']}/submit", "member", {"answers": {"name": "Taxi to client", f"cf:{fee['id']}": 540, "priority": 2, "due_date": "2026-10-05"}}), 201)
-    assert out["message"] == "We'll get back to you"
-    got = ok(api.get(f"/tasks/{out['task_id']}", "owner"))
-    assert (got["name"], got["priority"], got["created_by"]) == ("Taxi to client", 2, "member")
-    assert [a["id"] for a in got["assignees"]] == ["admin"] and got["custom_fields"][fee["id"]] == 540
-    # The List stays private, but people can follow the request they made (they created it).
-    assert api.get(f"/lists/{org['secret']['id']}", "member").status_code == 404
-    assert ok(api.get(f"/tasks/{out['task_id']}", "member"))["name"] == "Taxi to client"
-    # Guests can't use forms; a paused form takes no answers.
-    assert api.get(f"/forms/{view['id']}", "guest").status_code == 404
-    ok(api.patch(f"/views/{view['id']}", "owner", {"settings": {"form": {"active": False}}}))
-    assert api.post(f"/forms/{view['id']}/submit", "member", {"answers": {"name": "x"}}).status_code == 403
+    assert api.post(f"/lists/{org['secret']['id']}/views", "owner", {"type": "form"}).status_code == 400
+

@@ -33,7 +33,7 @@ export const PublicLinks: React.FC<{ kind: PublicLink['kind']; id: string; canCr
           <li key={l.id} className="flex items-center gap-2 rounded-md border border-gray-200 px-2 py-1 text-xs">
             <a href={publicUrl(l.token)} target="_blank" rel="noreferrer" aria-label="Public link" className="min-w-0 flex-1 truncate text-brand-700 hover:underline">{publicUrl(l.token)}</a>
             <span className="shrink-0 text-gray-400">{l.views_count} view{l.views_count === 1 ? '' : 's'}{l.expires_at ? ` · until ${new Date(l.expires_at).toLocaleDateString()}` : ''}</span>
-            <button type="button" title="Copy link" onClick={() => copy(l)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Copy size={12} /></button>
+            <button aria-label="Copy link" type="button" title="Copy link" onClick={() => copy(l)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Copy size={12} /></button>
             <button type="button" title="Turn off this link" onClick={() => spacesApi.revokeLink(l.id).then(load).catch((e) => setError(e.message))}
               className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={12} /></button>
           </li>

@@ -1,12 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { FileSpreadsheet, LayoutGrid, List as ListIcon, Mail, Network, Plus, Search, Shapes, UserPlus, Users, X } from 'lucide-react';
-import { ImportPeopleDialog } from './AdminDialogs';
+import { Link, Navigate, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { LayoutGrid, List as ListIcon, Network, Plus, Search, Shapes, Users, X } from 'lucide-react';
 import { useIsManager, useMe, useWork } from '../WorkContext';
 import type { Role } from '../api';
 import { Avatar, AvatarStack, Portal } from '../ui';
 import { peopleApi, personName, type Person, type TeamFull } from './peopleApi';
-import { AddPersonDialog, InviteDialog, PersonPanel, accessOf } from './PersonDialogs';
+import { PersonPanel, accessOf } from './PersonDialogs';
 import { FEATURES } from '../../config/features';
 
 export interface Hub {
@@ -21,6 +20,31 @@ export const useHub = () => {
   return hub;
 };
 
+/** Who the People pages are about for this viewer.
+ *
+ *  An admin's is the firm (ids is null). A Manager's is the Team(s) they lead, sub-teams
+ *  included, and themselves -- "My team" and its org chart, nothing beside it. The server already
+ *  keeps everyone else's profile from a non-admin (people.visible_people); what it sends a lead
+ *  can still hold their own manager or a Team-mate from a Team they only sit in, which is right
+ *  for naming who someone reports to but is not the list a lead came here to manage. */
+export function useScope(): { ids: Set<string> | null; teams: TeamFull[] } {
+  const { isAdmin, teams, me } = useHub();
+  return useMemo(() => {
+    if (isAdmin) return { ids: null, teams };
+    const led = new Set(teams.filter((t) => t.lead_ids.includes(me)).map((t) => t.id));
+    // Sub-teams of a led Team are led too, however deep.
+    let grew = true;
+    while (grew) {
+      grew = false;
+      teams.forEach((t) => { if (t.parent_team_id && led.has(t.parent_team_id) && !led.has(t.id)) { led.add(t.id); grew = true; } });
+    }
+    const mine = teams.filter((t) => led.has(t.id));
+    const ids = new Set<string>([me]);
+    mine.forEach((t) => (t.all_member_ids ?? t.members.map((u) => u.id)).forEach((id) => ids.add(id)));
+    return { ids, teams: mine };
+  }, [isAdmin, teams, me]);
+}
+
 export const TEAM_COLORS = ['#7c3aed', '#0ea5e9', '#16a34a', '#ea580c', '#db2777', '#4f46e5', '#0d9488', '#b45309'];
 export const TeamBadge: React.FC<{ team: TeamFull; size?: number }> = ({ team, size = 32 }) => (
   <span className="flex shrink-0 items-center justify-center rounded-lg font-bold text-white"
@@ -29,7 +53,8 @@ export const TeamBadge: React.FC<{ team: TeamFull; size?: number }> = ({ team, s
   </span>
 );
 
-/** ClickUp's Teams Hub: all people, all teams, the org chart and your teams. */
+/** ClickUp's Teams Hub. An admin gets all people, all teams and the org chart; a Manager gets
+ *  their own team and its org chart. */
 export const TeamsHub: React.FC = () => {
   const { workspace, hierarchy, refresh } = useWork();
   const myId = useMe();
@@ -58,7 +83,6 @@ export const TeamsHub: React.FC = () => {
     reload: async () => { await reload(); refresh(); },
     openPerson: setOpen,
   }), [ws, people, teams, myId, isAdmin, roles, reload, refresh]);
-  const mine = teams.filter((t) => t.members.some((u) => u.id === myId));
   const person = people.find((p) => p.user.id === open);
   if (!workspace) return <div className="p-10 text-center text-sm text-gray-500">Loading…</div>;
   // Hiding the link is not the same as closing the door: this page is reachable by typing its
@@ -77,8 +101,10 @@ export const TeamsHub: React.FC = () => {
       <div className="flex h-full min-h-0 bg-white">
         <nav className="w-52 shrink-0 border-r border-gray-200 p-3" aria-label="Teams Hub">
           <h1 className="mb-3 px-2.5 text-base font-semibold text-gray-900">Teams</h1>
-          <NavLink to="/people" end className={nav}><Users size={15} /> All people</NavLink>
-          <NavLink to="/people/teams" end className={nav}><LayoutGrid size={15} /> All teams</NavLink>
+          {/* A Manager's whole view is their own team: the firm-wide lists, and the "My teams"
+              shortcuts that sat under them, were rows leading to people they are not over. */}
+          <NavLink to="/people" end className={nav}><Users size={15} /> {isAdmin ? 'All people' : 'My team'}</NavLink>
+          {isAdmin && <NavLink to="/people/teams" end className={nav}><LayoutGrid size={15} /> All teams</NavLink>}
           <NavLink to="/people/org" className={nav}><Network size={15} /> Org chart</NavLink>
           {/* Admin used to be the fourth row here, under a heading that says "Teams". Adding a
               person, what the workspace costs to run and the audit log are not teams work, and
@@ -86,20 +112,7 @@ export const TeamsHub: React.FC = () => {
               about something else. It is its own entry in the sidebar now, below this one. */}
           {/* Task types is a workspace setting, not a page about people. It still answers at
               /people/task-types, and the manage entry inside a task'"'"'s Type field still opens it. */}
-          {FEATURES.taskTypesPage && <NavLink to="/people/task-types" className={nav}><Shapes size={15} /> Task types</NavLink>}
-          {/* "My teams" is a shortcut to the teams you are in. An admin is over all of them and
-              usually in none, so for them it is an empty heading above All teams. */}
-          {!isAdmin && (
-            <>
-              <p className="mb-1 mt-4 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">My teams</p>
-              {mine.length === 0 && <p className="px-2.5 text-xs text-gray-400">You'"'"'re not in a team yet.</p>}
-              {mine.map((t) => (
-                <NavLink key={t.id} to={`/people/teams/${t.id}`} className={nav}>
-                  <TeamBadge team={t} size={18} /> <span className="truncate">{t.name}</span>
-                </NavLink>
-              ))}
-            </>
-          )}
+          {FEATURES.taskTypesPage && isAdmin && <NavLink to="/people/task-types" className={nav}><Shapes size={15} /> Task types</NavLink>}
         </nav>
         <main className="min-h-0 min-w-0 flex-1 overflow-auto bg-gray-50/60">
           {error && <p className="m-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -116,43 +129,36 @@ export const TeamsHub: React.FC = () => {
 
 // --- All people ---------------------------------------------------------------------------------------
 
-type Status = 'all' | 'active' | 'pending' | 'left';
-
 export const PeopleDirectory: React.FC = () => {
-  const { ws, people, teams, isAdmin, roles, reload, openPerson } = useHub();
+  const { people: visible, isAdmin, teams: allTeams, openPerson } = useHub();
+  const scope = useScope();
+  const people = useMemo(() => (scope.ids ? visible.filter((p) => scope.ids!.has(p.user.id)) : visible), [visible, scope]);
+  const teams = scope.teams;
   const [q, setQ] = useState('');
   const [team, setTeam] = useState('');
   const [role, setRole] = useState('');
   const [manager, setManager] = useState('');
-  const [status, setStatus] = useState<Status>('all');
   const [layout, setLayout] = useState<'grid' | 'cards'>(() => { try { return (localStorage.getItem('timetriq.peopleLayout') as 'grid' | 'cards') || 'grid'; } catch { return 'grid'; } });
-  const [dialog, setDialog] = useState<'add' | 'invite' | 'import' | null>(null);
   useEffect(() => { try { localStorage.setItem('timetriq.peopleLayout', layout); } catch { /* ignore */ } }, [layout]);
-  const byId = useMemo(() => new Map(people.map((p) => [p.user.id, p])), [people]);
+  // Names for "Reports to" come from everyone the server sent, so a lead's own manager is named.
+  const byId = useMemo(() => new Map(visible.map((p) => [p.user.id, p])), [visible]);
   const shown = people.filter((p) => {
     const text = `${personName(p)} ${p.user.email} ${p.designation ?? ''} ${p.department ?? ''} ${p.employee_code ?? ''}`.toLowerCase();
     return (!q || text.includes(q.trim().toLowerCase()))
       && (!team || p.team_ids.includes(team))
-      && (!role || accessOf(p.role, p.user.id, teams) === role)
+      && (!role || accessOf(p.role, p.user.id, allTeams) === role)
       && (!manager || p.manager_id === manager)
-      && (status === 'left' ? !!p.deactivated_at : !p.deactivated_at && (status === 'all' || (status === 'pending') === p.pending));
+      && !p.deactivated_at;
   });
   const leftCount = people.filter((p) => p.deactivated_at).length;
   const managers = people.filter((p) => p.direct_reports > 0);
-  const pendingCount = people.filter((p) => p.pending && !p.deactivated_at).length;
   const sel = 'rounded-md border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700';
   return (
     <div className="p-6">
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <h2 className="mr-2 text-lg font-semibold text-gray-900">All people <span className="text-sm font-normal text-gray-400">{people.length - leftCount}</span></h2>
-        {pendingCount > 0 && <button type="button" onClick={() => setStatus('pending')} className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">{pendingCount} pending</button>}
-        {isAdmin && (
-          <span className="ml-auto flex gap-2">
-            <button type="button" onClick={() => setDialog('import')} className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"><FileSpreadsheet size={14} /> Import from Excel</button>
-            <button type="button" onClick={() => setDialog('invite')} className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"><Mail size={14} /> Invite by email</button>
-            <button type="button" onClick={() => setDialog('add')} className="flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"><UserPlus size={14} /> Add person</button>
-          </span>
-        )}
+        <h2 className="mr-2 text-lg font-semibold text-gray-900">{isAdmin ? 'All people' : 'My team'} <span className="text-sm font-normal text-gray-400">{people.length - leftCount}</span></h2>
+        {/* Adding and importing people were buttons here as well as in the Admin menu. Admin is
+            where they are done; two doors to the same form was one too many. */}
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1">
@@ -168,15 +174,12 @@ export const PeopleDirectory: React.FC = () => {
         <select aria-label="Filter by manager" value={manager} onChange={(e) => setManager(e.target.value)} className={sel}>
           <option value="">Any manager</option>{managers.map((m) => <option key={m.user.id} value={m.user.id}>Reports to {personName(m)}</option>)}
         </select>
-        <select aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value as Status)} className={sel}>
-          <option value="all">Everyone</option><option value="active">Signed in</option><option value="pending">Pending</option><option value="left">Access turned off{leftCount ? ` (${leftCount})` : ''}</option>
-        </select>
-        {(q || team || role || manager || status !== 'all') && (
-          <button type="button" onClick={() => { setQ(''); setTeam(''); setRole(''); setManager(''); setStatus('all'); }} className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-600"><X size={12} /> Clear</button>
+        {(q || team || role || manager) && (
+          <button type="button" onClick={() => { setQ(''); setTeam(''); setRole(''); setManager(''); }} className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-600"><X size={12} /> Clear</button>
         )}
         <span className="ml-auto flex rounded-md border border-gray-200 bg-white p-0.5">
-          <button type="button" title="Table" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')} className={`rounded p-1 ${layout === 'grid' ? 'bg-gray-100 text-gray-900' : 'text-gray-400'}`}><ListIcon size={15} /></button>
-          <button type="button" title="Cards" aria-pressed={layout === 'cards'} onClick={() => setLayout('cards')} className={`rounded p-1 ${layout === 'cards' ? 'bg-gray-100 text-gray-900' : 'text-gray-400'}`}><LayoutGrid size={15} /></button>
+          <button aria-label="Table" type="button" title="Table" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')} className={`rounded p-1 ${layout === 'grid' ? 'bg-gray-100 text-gray-900' : 'text-gray-400'}`}><ListIcon size={15} /></button>
+          <button aria-label="Cards" type="button" title="Cards" aria-pressed={layout === 'cards'} onClick={() => setLayout('cards')} className={`rounded p-1 ${layout === 'cards' ? 'bg-gray-100 text-gray-900' : 'text-gray-400'}`}><LayoutGrid size={15} /></button>
         </span>
       </div>
 
@@ -186,7 +189,7 @@ export const PeopleDirectory: React.FC = () => {
             <thead className="bg-gray-50 text-left text-xs font-medium text-gray-500">
               <tr>
                 <th className="px-3 py-2">Name</th><th className="px-3 py-2">Designation</th><th className="px-3 py-2">Department</th>
-                <th className="px-3 py-2">Reports to</th><th className="px-3 py-2">Teams</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Reports to</th><th className="px-3 py-2">Teams</th><th className="px-3 py-2">Role</th>
               </tr>
             </thead>
             <tbody>
@@ -203,14 +206,13 @@ export const PeopleDirectory: React.FC = () => {
                     <td className="px-3 py-2 text-gray-700">{p.department ?? <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-2 text-gray-700">{boss ? personName(boss) : <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-2">
-                      <span className="flex flex-wrap gap-1">{p.team_ids.map((id) => { const t = teams.find((x) => x.id === id); return t ? <span key={id} className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] text-brand-700">{t.name}</span> : null; })}</span>
+                      <span className="flex flex-wrap gap-1">{p.team_ids.map((id) => { const t = allTeams.find((x) => x.id === id); return t ? <span key={id} className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] text-brand-700">{t.name}</span> : null; })}</span>
                     </td>
-                    <td className="px-3 py-2 text-gray-700">{accessOf(p.role, p.user.id, teams)}</td>
-                    <td className="px-3 py-2">{p.deactivated_at ? <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] text-red-800">Access off</span> : p.pending ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800">Pending</span> : <span className="text-xs text-emerald-700">Active</span>}</td>
+                    <td className="px-3 py-2 text-gray-700">{accessOf(p.role, p.user.id, allTeams)}</td>
                   </tr>
                 );
               })}
-              {shown.length === 0 && <tr><td colSpan={7} className="px-3 py-10 text-center text-sm text-gray-400">Nobody matches.</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={6} className="px-3 py-10 text-center text-sm text-gray-400">Nobody matches.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -221,16 +223,12 @@ export const PeopleDirectory: React.FC = () => {
               <button type="button" onClick={() => openPerson(p.user.id)} className="flex w-full flex-col items-center rounded-xl border border-gray-200 bg-white p-4 text-center hover:border-brand-300">
                 <Avatar user={p.user} size={48} />
                 <span className="mt-2 w-full truncate text-sm font-semibold text-gray-900">{personName(p)}</span>
-                <span className="w-full truncate text-xs text-gray-500">{p.designation ?? accessOf(p.role, p.user.id, teams)}</span>
-                {p.pending && <span className="mt-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800">Pending</span>}
+                <span className="w-full truncate text-xs text-gray-500">{p.designation ?? accessOf(p.role, p.user.id, allTeams)}</span>
               </button>
             </li>
           ))}
         </ul>
       )}
-      {dialog === 'add' && <AddPersonDialog ws={ws} people={people} teams={teams} roles={roles} onClose={() => setDialog(null)} onDone={() => reload()} />}
-      {dialog === 'import' && <ImportPeopleDialog ws={ws} onClose={() => setDialog(null)} onDone={() => reload()} />}
-      {dialog === 'invite' && <InviteDialog ws={ws} teams={teams} roles={roles} onClose={() => setDialog(null)} onDone={() => reload()} />}
     </div>
   );
 };
@@ -274,7 +272,8 @@ export const CreateTeamDialog: React.FC<{ onClose: () => void; onCreated: (t: Te
           </div>
           <p className="mb-1 mt-3 text-xs font-medium text-gray-600">Members <span className="font-normal text-gray-400">— tick “Lead” for team leads</span></p>
           <ul className="min-h-0 flex-1 overflow-auto rounded-lg border border-gray-200" aria-label="Choose members">
-            {people.map((p) => (
+            {/* Someone who has left (access off) can't be put in a new Team. */}
+            {people.filter((p) => !p.deactivated_at).map((p) => (
               <li key={p.user.id} className="flex items-center gap-2 border-t border-gray-100 px-2 py-1 first:border-t-0">
                 <input type="checkbox" aria-label={`Member: ${personName(p)}`} checked={memberIds.includes(p.user.id)} onChange={() => { setMemberIds((m) => toggle(m, p.user.id)); setLeadIds((l) => l.filter((x) => x !== p.user.id || !memberIds.includes(p.user.id))); }} />
                 <Avatar user={p.user} size={20} /><span className="min-w-0 flex-1 truncate text-sm">{personName(p)}</span>
@@ -299,6 +298,9 @@ export const TeamsList: React.FC = () => {
   const [q, setQ] = useState('');
   const [creating, setCreating] = useState(false);
   const shown = teams.filter((t) => `${t.name} ${t.description ?? ''}`.toLowerCase().includes(q.trim().toLowerCase()));
+  // Every Team in the firm is an admin's list. A Manager reaching this address by hand lands on
+  // their own team instead.
+  if (!isAdmin) return <Navigate to="/people" replace />;
   return (
     <div className="p-6">
       <div className="mb-4 flex flex-wrap items-center gap-2">

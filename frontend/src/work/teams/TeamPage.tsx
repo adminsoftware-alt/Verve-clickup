@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Crown, Folder, List as ListIcon, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useWork } from '../WorkContext';
@@ -41,8 +41,14 @@ export const TeamPage: React.FC = () => {
   const [desc, setDesc] = useState('');
   const [adding, setAdding] = useState(false);
   const [addingPlace, setAddingPlace] = useState(false);
-  const load = useCallback(() => peopleApi.overview(id).then(setData).catch((e) => setError(e.message)), [id]);
-  useEffect(() => { setData(null); setTab('overview'); load(); }, [load]);
+  const shown = useRef(id);
+  shown.current = id;
+  // An answer for a team you have since left the page of is dropped, not drawn over this one.
+  const load = useCallback(() => peopleApi.overview(id).then((d) => { if (shown.current === id) setData(d); }).catch((e) => setError(e.message)), [id]);
+  useEffect(() => { setData(null); setTab('overview'); }, [id]);
+  // Loaded again whenever the hub's people or Teams change: an admin who edits someone from this
+  // page -- their designation, manager or Team -- sees it here at once, not on the next visit.
+  useEffect(() => { load(); }, [load, people, teams]);
 
   const team = data?.team;
   const isLead = !!team?.lead_ids.includes(me);
@@ -83,7 +89,7 @@ export const TeamPage: React.FC = () => {
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-xl font-semibold text-gray-900">
             {team.name}
-            {isAdmin && <button type="button" title="Rename team" onClick={async () => { const n = await ask.prompt('Team name', team.name); if (n && n.trim() !== team.name) run(() => peopleApi.updateTeam(id, { name: n.trim() })); }} className="text-gray-300 hover:text-gray-600"><Pencil size={14} /></button>}
+            {isAdmin && <button aria-label="Rename team" type="button" title="Rename team" onClick={async () => { const n = await ask.prompt('Team name', team.name); if (n && n.trim() !== team.name) run(() => peopleApi.updateTeam(id, { name: n.trim() })); }} className="text-gray-300 hover:text-gray-600"><Pencil size={14} /></button>}
           </h2>
           <p className="text-sm text-gray-500">{team.handle ? `@${team.handle} · ` : ''}{team.members.length} member{team.members.length === 1 ? '' : 's'}
             {(team.all_member_ids?.length ?? 0) > team.members.length && ` · ${team.all_member_ids!.length} counting sub-teams`}</p>
@@ -184,7 +190,7 @@ export const TeamPage: React.FC = () => {
                     <li key={l.id} className="group flex items-center gap-2 text-sm">
                       {l.kind === 'space' ? <span className="h-4 w-4 rounded bg-brand-500" /> : l.kind === 'folder' ? <Folder size={15} className="text-gray-400" /> : <ListIcon size={15} className="text-gray-400" />}
                       <Link to={`/${l.kind === 'space' ? 's' : l.kind === 'folder' ? 'f' : 'l'}/${l.id}`} className="min-w-0 flex-1 truncate text-brand-700 no-underline hover:underline">{locName(l) ?? 'A place you can\'t open'}</Link>
-                      {canDescribe && <button type="button" title="Unpin" onClick={() => run(() => peopleApi.updateTeam(id, { locations: team.locations.filter((x) => x.id !== l.id) }))} className="text-gray-300 opacity-0 hover:text-red-600 group-hover:opacity-100"><X size={13} /></button>}
+                      {canDescribe && <button aria-label="Unpin" type="button" title="Unpin" onClick={() => run(() => peopleApi.updateTeam(id, { locations: team.locations.filter((x) => x.id !== l.id) }))} className="text-gray-300 opacity-0 hover:text-red-600 group-hover:opacity-100"><X size={13} /></button>}
                     </li>
                   ))}
                 </ul>
@@ -223,7 +229,7 @@ export const TeamPage: React.FC = () => {
                         onChange={(e) => setMembers(memberIds, e.target.checked ? [...team.lead_ids, u.id] : team.lead_ids.filter((x) => x !== u.id))} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {isAdmin && <button type="button" title={`Remove ${personName(u)} from the team`} onClick={() => setMembers(memberIds.filter((x) => x !== u.id), team.lead_ids.filter((x) => x !== u.id))} className="text-gray-300 hover:text-red-600"><X size={15} /></button>}
+                      {isAdmin && <button aria-label={`Remove ${personName(u)} from the team`} type="button" title={`Remove ${personName(u)} from the team`} onClick={() => setMembers(memberIds.filter((x) => x !== u.id), team.lead_ids.filter((x) => x !== u.id))} className="text-gray-300 hover:text-red-600"><X size={15} /></button>}
                     </td>
                   </tr>
                 );
@@ -241,7 +247,7 @@ export const TeamPage: React.FC = () => {
           <div role="dialog" aria-label="Add members" onMouseDown={(e) => e.stopPropagation()} className="flex max-h-[80vh] w-[26rem] flex-col rounded-xl bg-white p-5 shadow-xl">
             <h3 className="mb-2 font-semibold text-gray-900">Add members to {team.name}</h3>
             <ul className="min-h-0 flex-1 overflow-auto rounded-lg border border-gray-200">
-              {people.filter((p) => !memberIds.includes(p.user.id)).map((p) => (
+              {people.filter((p) => !memberIds.includes(p.user.id) && !p.deactivated_at).map((p) => (
                 <li key={p.user.id}>
                   <button type="button" onClick={() => setMembers([...memberIds, p.user.id], team.lead_ids)} className="flex w-full items-center gap-2 border-t border-gray-100 px-3 py-1.5 text-left text-sm first:border-t-0 hover:bg-gray-50">
                     <Avatar user={p.user} size={22} /><span className="min-w-0 flex-1 truncate">{personName(p)}</span><span className="text-xs text-gray-400">{p.designation ?? ''}</span><Plus size={14} className="text-brand-600" />

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Favorite, PermissionLevel, Tag, Task, TaskTag, TaskType
 from app.schemas import work as s
 from app.services.work.access import Access, Opened, open_folder, open_list, open_space, open_task
-from app.services.work.errors import Forbidden, Invalid, NotFound
+from app.services.work.errors import Conflict, Forbidden, Invalid, NotFound
 from app.services.work.permissions import can_manage_workspace
 
 VIEW = PermissionLevel.view
@@ -110,10 +110,31 @@ def list_types(db: Session, access: Access) -> List[TaskType]:
     rows = list(db.scalars(select(TaskType).where(TaskType.workspace_id == access.workspace_id).order_by(TaskType.orderindex, TaskType.name)))
     if not rows and can_manage_workspace(access.role):
         # Every workspace starts with Milestone, as in ClickUp; "Task" is the built-in default.
-        db.add(TaskType(workspace_id=access.workspace_id, name="Milestone", name_plural="Milestones", icon="diamond", color="#7c3aed", is_milestone=True, orderindex=1))
-        db.flush()
-        rows = list(db.scalars(select(TaskType).where(TaskType.workspace_id == access.workspace_id)))
+        #
+        # Two pages opening at once both found no types and both added one, which is how
+        # workspaces came to have Milestone twice. Taking a row lock on the workspace makes the
+        # second wait for the first and then find its Milestone instead of adding another.
+        from app.db.models import Workspace
+
+        db.execute(select(Workspace.id).where(Workspace.id == access.workspace_id).with_for_update())
+        if db.scalar(select(TaskType.id).where(TaskType.workspace_id == access.workspace_id).limit(1)) is None:
+            db.add(TaskType(workspace_id=access.workspace_id, name="Milestone", name_plural="Milestones", icon="diamond", color="#7c3aed", is_milestone=True, orderindex=1))
+            db.flush()
+        rows = list(db.scalars(select(TaskType).where(TaskType.workspace_id == access.workspace_id).order_by(TaskType.orderindex, TaskType.name)))
     return rows
+
+
+def _ensure_type_name_free(db: Session, workspace_id: uuid.UUID, name: str, keep: Optional[uuid.UUID] = None) -> None:
+    """One name, one type -- trimmed and case-blind. Checked here, not by a unique index, because
+    workspaces that already hold two Milestones would make that index's migration fail."""
+    wanted = name.strip().lower()
+    if wanted == "task":
+        raise Invalid("“Task” is the built-in type")
+    q = select(TaskType.id).where(TaskType.workspace_id == workspace_id, func.lower(func.trim(TaskType.name)) == wanted)
+    if keep is not None:
+        q = q.where(TaskType.id != keep)
+    if db.scalar(q.limit(1)) is not None:
+        raise Conflict(f"A task type called {name.strip()} already exists")
 
 
 def _type(db: Session, access: Access, type_id: uuid.UUID) -> TaskType:
@@ -128,10 +149,7 @@ def _type(db: Session, access: Access, type_id: uuid.UUID) -> TaskType:
 def create_type(db: Session, access: Access, data: s.TaskTypeIn) -> TaskType:
     if not can_manage_workspace(access.role):
         raise Forbidden("Only owners and admins can manage task types")
-    if data.name.lower() == "task":
-        raise Invalid("“Task” is the built-in type")
-    if db.scalar(select(TaskType.id).where(TaskType.workspace_id == access.workspace_id, func.lower(TaskType.name) == data.name.lower())):
-        raise Invalid(f"A task type called {data.name} already exists")
+    _ensure_type_name_free(db, access.workspace_id, data.name)
     top = db.scalar(select(func.max(TaskType.orderindex)).where(TaskType.workspace_id == access.workspace_id)) or 0.0
     kind = TaskType(workspace_id=access.workspace_id, orderindex=top + 1, **data.model_dump())
     db.add(kind)
@@ -141,6 +159,8 @@ def create_type(db: Session, access: Access, data: s.TaskTypeIn) -> TaskType:
 
 def update_type(db: Session, access: Access, type_id: uuid.UUID, data: s.TaskTypeUpdate) -> TaskType:
     kind = _type(db, access, type_id)
+    if "name" in data.model_fields_set and data.name is not None and data.name.strip().lower() != (kind.name or "").strip().lower():
+        _ensure_type_name_free(db, access.workspace_id, data.name, keep=kind.id)
     for field in data.model_fields_set:
         value = getattr(data, field)
         if value is not None:

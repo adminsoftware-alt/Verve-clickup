@@ -11,7 +11,7 @@ from app.schemas import work as s
 from app.services.work.access import Opened
 from app.services.work.errors import Forbidden, Invalid, NotFound
 from app.services.work.mywork import is_personal
-from app.services.work.permissions import can_manage_workspace
+from app.services.work.permissions import can_manage_workspace, is_manager
 from app.services.work.teams import team_or_404
 
 _COLUMN = {
@@ -60,14 +60,10 @@ def _check_can_share(opened: Opened, level: PermissionLevel, kind: Optional[Loca
     # everyday work and anyone who can edit it may share it.
     if kind == LocationKind.space and not can_manage_workspace(access.role):
         raise Forbidden("Only admins can share a Space. Ask an admin, or share a Folder or List instead.")
-    # Admins only, as for a Space.
-    #
-    # This used to allow a manager too, where "manager" means anyone who leads a Team. The firm's
-    # answer, asked directly, was that leading a team is not a rank here: senior executives,
-    # executives, interns and managers are all employees, and only admins do everything. Handing
-    # out access to a Folder of client work is one of the things only admins do.
-    if kind in (LocationKind.folder, LocationKind.list) and not can_manage_workspace(access.role):
-        raise Forbidden("Only admins can share a Folder or a List. Ask an admin to share it.")
+    # Admins and Managers (the leads of a Team) may share a Folder or a List; Employees may not.
+    # Decided by the firm on 2026-10-16, reversing the admins-only rule of 2026-10-13.
+    if kind in (LocationKind.folder, LocationKind.list) and not is_manager(access.db, access.workspace_id, access.user_id, access.role):
+        raise Forbidden("Only admins and managers can share a Folder or a List. Ask your manager to share it.")
     if not opened.level.at_least(PermissionLevel.edit):
         raise Forbidden("You need edit access to share this")
     if not opened.level.at_least(level):

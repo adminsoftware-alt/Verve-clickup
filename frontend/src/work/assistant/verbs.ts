@@ -18,6 +18,23 @@ export const VERB_WORDS = [
   'update', 'upload', 'verify', 'visit', 'write',
 ] as const;
 
+/**
+ * More verbs a new task opens with, for telling a task from a sentence the assistant cannot act on.
+ *
+ * Kept apart from the list above on purpose: several of these are nouns too ("report", "return",
+ * "order"), and the list above is also used to move a Hindi sentence's last word to the front --
+ * where "MIS report" would become "report MIS".
+ */
+const MORE_TASK_VERBS = [
+  'approve', 'attend', 'buy', 'clean', 'contact', 'coordinate', 'deliver', 'deposit', 'design',
+  'finalise', 'finalize', 'fill', 'inform', 'invoice', 'order', 'pick', 'post', 'process', 'publish',
+  'renew', 'report', 'research', 'respond', 'return', 'start', 'test', 'train', 'transfer', 'collect',
+  'go', 'bring', 'arrange', 'remit', 'deduct', 'calculate', 'claim', 'apply', 'register', 'notify',
+] as const;
+
+/** Does this sentence open like a piece of work? "Call the auditor", "renew the licence". */
+export const TASK_LIKE = new RegExp(`^(?:${[...VERB_WORDS, ...MORE_TASK_VERBS].join('|')})\\b`, 'i');
+
 /** Does this fragment open with an instruction? */
 export const IMPERATIVE = new RegExp(`^(?:please\\s+)?(?:${VERB_WORDS.join('|')})\\b`, 'i');
 

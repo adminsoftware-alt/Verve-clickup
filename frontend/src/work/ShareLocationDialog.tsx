@@ -106,7 +106,7 @@ export const ShareLocationDialog: React.FC<{
         >
           <header className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
             <h3 className="truncate font-semibold text-gray-900">Share “{name}”</h3>
-            <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
           </header>
 
           <div className="flex gap-1 border-b border-gray-200 px-5" role="tablist" aria-label="Share with">

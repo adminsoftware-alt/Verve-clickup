@@ -42,10 +42,10 @@ def test_links_are_symmetric_and_respect_privacy(api, org):
     assert [x["name"] for x in links_a] == ["Policy review"]
     assert ok(api.get(f"/tasks/{b['id']}", "owner"))["link_count"] == 1
     # The member can't see the Audit List once it's private, so the link is hidden for them.
-    # They are given edit on the source task's List first: what this is testing is that a task you
-    # cannot see stays a 404, and without this the refusal would come earlier, from their own
-    # read-and-comment standing on a task somebody else raised.
-    ok(api.post(f"/lists/{org['lst']['id']}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
+    # They are given edit on the source task first: what this is testing is that a task you cannot
+    # see stays a 404, and without this the refusal would come earlier, from their own
+    # read-and-comment standing on a task somebody else raised (which a List share does not lift).
+    ok(api.post(f"/tasks/{a['id']}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
     ok(api.patch(f"/lists/{org['other']['id']}", "owner", {"is_private": True}))
     assert ok(api.get(f"/tasks/{a['id']}/links", "member"))["linked"] == []
     assert api.post(f"/tasks/{a['id']}/links", "member", {"other_id": b["id"], "kind": "relates"}).status_code == 404

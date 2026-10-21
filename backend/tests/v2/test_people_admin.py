@@ -280,9 +280,11 @@ def test_limited_members_see_only_what_is_shared(api, ws):
     ok(api.post(f"/lists/{lst['id']}/shares", "owner", {"user_id": "member", "level": "edit"}), 201)
     tree = ok(api.get(f"/workspaces/{ws}/hierarchy", "member"))
     assert "Payroll" in str(tree)
-    # Unlike guests, limited members are internal: they see colleagues' contact details.
+    # A colleague's phone is theirs, their Manager's and the admins' (test_access_fixes), so not
+    # even the person they report to has theirs handed out to them.
     ok(api.patch(f"/workspaces/{ws}/people/admin", "owner", {"phone": "+91 98"}))
-    assert person(api, ws, "admin", "member")["phone"] == "+91 98"
+    ok(api.patch(f"/workspaces/{ws}/people/member", "owner", {"manager_id": "admin"}))  # someone they may see
+    assert person(api, ws, "admin", "member")["phone"] is None
 
 
 # --- sign-in rules ------------------------------------------------------------------------------------------------

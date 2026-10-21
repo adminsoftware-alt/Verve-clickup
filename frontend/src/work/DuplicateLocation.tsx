@@ -124,7 +124,7 @@ export const DuplicateLocation: React.FC<{
         >
           <div className="mb-3 flex items-start justify-between gap-3">
             <h3 className="flex items-center gap-2 text-base font-semibold text-gray-900"><Copy size={17} /> Duplicate {LABEL[kind]}</h3>
-            <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">

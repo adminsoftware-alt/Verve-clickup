@@ -18,13 +18,22 @@ from app.schemas import costs as cs
 from app.schemas import work as s
 from app.services.work import audit, costs, onboarding, people, people_admin
 from app.services.work.access import Access
-from app.services.work.errors import Invalid, NotFound
+from app.services.work.errors import Forbidden, Invalid, NotFound
+from app.services.work.permissions import can_manage_workspace
 
 router = APIRouter()
 
 
 def _access(db: Session, user: User, workspace_id: uuid.UUID) -> Access:
     return Access.for_workspace(db, user.id, workspace_id)
+
+
+def _admin_access(db: Session, user: User, workspace_id: uuid.UUID, what: str) -> Access:
+    """For reads that are admin settings: the screens are admin-only, so the answers are too."""
+    access = _access(db, user, workspace_id)
+    if not can_manage_workspace(access.role):
+        raise Forbidden(f"Only owners and admins can see {what}")
+    return access
 
 
 # --- import --------------------------------------------------------------------------------------------------
@@ -147,7 +156,7 @@ class SignInRulesOut(BaseModel):
 
 @router.get("/workspaces/{workspace_id}/sign-in-rules", response_model=SignInRulesOut)
 def get_sign_in_rules(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return SignInRulesOut(rules=people_admin.sign_in_rules(db, _access(db, user, workspace_id)))
+    return SignInRulesOut(rules=people_admin.sign_in_rules(db, _admin_access(db, user, workspace_id, "the sign-in rules")))
 
 
 @router.put("/workspaces/{workspace_id}/sign-in-rules", response_model=SignInRulesOut)
@@ -159,7 +168,7 @@ def save_sign_in_rules(workspace_id: uuid.UUID, data: s.SignInRules, user: User 
 
 @router.get("/workspaces/{workspace_id}/email-status", response_model=s.EmailStatus)
 def email_status(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    _access(db, user, workspace_id)
+    _admin_access(db, user, workspace_id, "the email settings")
     return people_admin.email_status()
 
 
@@ -225,7 +234,7 @@ class JoinerPlanIn(BaseModel):
 def joiner_plan(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
     from app.db.models import Workspace
 
-    _access(db, user, workspace_id)
+    _admin_access(db, user, workspace_id, "the joiner checklist")
     return JoinerPlanOut(plan=onboarding.get_plan(db, workspace_id), is_default=db.get(Workspace, workspace_id).joiner_plan is None)
 
 

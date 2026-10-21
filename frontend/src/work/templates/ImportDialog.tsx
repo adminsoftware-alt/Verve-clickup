@@ -104,7 +104,7 @@ export const ImportDialog: React.FC<{ listId: string; listName: string; fields: 
           <div className="mb-3 flex items-center gap-2">
             <FileUp size={17} className="text-brand-600" />
             <h3 className="font-semibold text-gray-900">Import tasks into {listName}</h3>
-            <button type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </div>
 
           {result ? (

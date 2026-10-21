@@ -312,7 +312,7 @@ def render_card(card, data: d.CardData) -> str:
 def render_report(db: Session, opened: OpenedDashboard, tz: ZoneInfo, now: Optional[datetime] = None) -> str:
     dash = opened.dashboard
     engine = Engine(db, opened.access, tz, d.Filters.model_validate(dash.filters or {}), now=now,
-                    scope=standard.scope_of(dash))
+                    scope=standard.scope_of(dash), me=standard.me_of(dash))
     moment = engine.now.astimezone(tz)
     blocks = []
     for card in cards_of(db, dash.id):

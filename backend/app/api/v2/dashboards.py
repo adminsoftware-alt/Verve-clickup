@@ -37,7 +37,7 @@ def _open(db: Session, user: User, dashboard_id: uuid.UUID, minimum: PermissionL
 
 def _engine(db: Session, opened: OpenedDashboard, tz: str) -> Engine:
     return Engine(db, opened.access, _zone(tz), d.Filters.model_validate(opened.dashboard.filters or {}),
-                  scope=standard.scope_of(opened.dashboard))
+                  scope=standard.scope_of(opened.dashboard), me=standard.me_of(opened.dashboard))
 
 
 # --- dashboards ----------------------------------------------------------------------
@@ -151,7 +151,7 @@ def dashboard_data(dashboard_id: uuid.UUID, tz: str = Tz, user: User = Depends(c
     """Every card's data, computed with the caller's own permissions."""
     opened = _open(db, user, dashboard_id)
     engine = _engine(db, opened, tz)
-    return [engine.compute(card) for card in service.cards_of(db, dashboard_id)]
+    return engine.compute_all(service.cards_of(db, dashboard_id))
 
 
 # --- cards ------------------------------------------------------------------------------

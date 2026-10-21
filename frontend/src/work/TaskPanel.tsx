@@ -127,14 +127,16 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
       const t = await workApi.task(taskId);
       setTask(t);
       rememberTask(t.id, t.name, t.list_id);
+      // A task given to you in a private List opens even though its List doesn't, so the List's
+      // statuses and rows may be refused: fall back to what the task itself carries.
       const [set, siblings, usable] = await Promise.all([
-        workApi.statuses('list', t.list_id),
-        workApi.tasks('list', t.list_id, { include_closed: true }),
+        workApi.statuses('list', t.list_id).catch(() => null),
+        workApi.tasks('list', t.list_id, { include_closed: true }).catch(() => null),
         workApi.groups('list', t.list_id).catch(() => [] as TaskGroup[]),
       ]);
-      setStatuses(set.statuses);
+      setStatuses(set ? set.statuses : [t.status]);
       setGroups(usable);
-      setSubtasks(siblings.tasks.filter((x) => x.parent_id === t.id));
+      setSubtasks(siblings ? siblings.tasks.filter((x) => x.parent_id === t.id) : []);
       workApi.assignable('list', t.list_id).then(setAssignable).catch(() => setAssignable(null));
     } catch (e) {
       setError((e as Error).message);
@@ -512,7 +514,7 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                 <TaskRelations task={task} editable={editable} onChanged={() => { load(); setFeedKey((k) => k + 1); onChanged(); }} />
               )}
               <Checklists taskId={task.id} editable={editable} me={meId} onChanged={() => { load(); setFeedKey((k) => k + 1); onChanged(); }} />
-              <Attachments taskId={task.id} canAttach={task.permission_level !== 'view'} isFull={task.permission_level === 'full'} me={meId}
+              <Attachments taskId={task.id} canAttach={editable} isFull={task.permission_level === 'full'} me={meId}
                 onChanged={() => { setFeedKey((k) => k + 1); onChanged(); }} />
               {/* On a narrow panel the activity follows the task, because there is nowhere
                   else for it to go. Given the width, it belongs beside it: the history is read

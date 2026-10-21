@@ -17,7 +17,7 @@ const Dialog: React.FC<{ title: string; onClose: () => void; width?: string; chi
           className={`flex max-h-[90vh] ${width} max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white shadow-xl`}>
           <header className="flex items-center border-b border-gray-100 px-5 py-3">
             <h3 className="font-semibold text-gray-900">{title}</h3>
-            <button type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </header>
           <div className="min-h-0 flex-1 overflow-auto px-5 py-4">{children}</div>
         </div>
@@ -254,7 +254,7 @@ export const ImportPeopleDialog: React.FC<{ ws: string; onClose: () => void; onD
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [check, setCheck] = useState<ImportResult | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
-  const [options, setOptions] = useState({ send_invites: false, start_joiner_checklist: false, update_existing: true });
+  const [options, setOptions] = useState({ start_joiner_checklist: false, update_existing: true });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -298,7 +298,6 @@ export const ImportPeopleDialog: React.FC<{ ws: string; onClose: () => void; onD
           <div className="mb-3 flex flex-wrap gap-4 text-sm text-gray-700">
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={options.update_existing} onChange={(e) => recheck({ ...options, update_existing: e.target.checked })} /> Update people already here</label>
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={options.start_joiner_checklist} onChange={(e) => recheck({ ...options, start_joiner_checklist: e.target.checked })} /> Start the joiner checklist for new people</label>
-            <label className="flex items-center gap-1.5"><input type="checkbox" checked={options.send_invites} onChange={(e) => recheck({ ...options, send_invites: e.target.checked })} /> Email new people an invitation</label>
           </div>
         </>
       )}
@@ -308,7 +307,6 @@ export const ImportPeopleDialog: React.FC<{ ws: string; onClose: () => void; onD
           <p className="mb-2 text-sm text-gray-700" role="status">
             {result ? 'Imported: ' : 'Ready to import: '}<b>{shown.added}</b> new, <b>{shown.updated}</b> updated{shown.errors ? <>, <b className="text-red-700">{shown.errors}</b> with problems (skipped)</> : ''}.
           </p>
-          {result?.email_problem && <p className="mb-2 text-xs text-amber-700">{result.email_problem}</p>}
           <div className="max-h-72 overflow-auto rounded-lg border border-gray-200">
             <table className="w-full text-sm" aria-label="Import rows">
               <thead className="sticky top-0 bg-gray-50 text-left text-xs text-gray-500"><tr><th className="px-3 py-1.5">Row</th><th className="px-3 py-1.5">Email</th><th className="px-3 py-1.5">Result</th><th className="px-3 py-1.5">Notes</th></tr></thead>

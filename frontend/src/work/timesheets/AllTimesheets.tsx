@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Users } from 'lucide-react';
+import { Lock, Search, Users } from 'lucide-react';
 import { useWork } from '../WorkContext';
 import { FEATURES } from '../../config/features';
+import { ApiError } from '../api';
 import { Avatar } from '../ui';
 import { Select } from '../Select';
 import { STATUS_CLASS, STATUS_LABEL, isoDay, sheetApi, type AllTimesheets as Data, type SubmissionStatus } from './api';
@@ -49,10 +50,16 @@ export const AllTimesheets: React.FC = () => {
   const [sort, setSort] = useState('name');
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refused, setRefused] = useState(false);
 
   const load = useCallback(() => {
     if (!workspace) return;
-    sheetApi.all(workspace.id, day, teamId || undefined).then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
+    sheetApi.all(workspace.id, day, teamId || undefined)
+      .then((d) => { setData(d); setError(null); setRefused(false); })
+      .catch((e) => {
+        if (e instanceof ApiError && e.status === 403) setRefused(true);
+        else setError(e.message);
+      });
   }, [workspace, day, teamId]);
   useEffect(() => { load(); }, [load]);
 
@@ -70,6 +77,19 @@ export const AllTimesheets: React.FC = () => {
   }, [data, query, shape, status, sort]);
 
   const narrowed = (data?.people.length ?? 0) - people.length;
+  // Somebody who may only see their own hours gets told so, not an empty week with no dates.
+  if (refused) {
+    return (
+      <div className="mx-auto mt-10 max-w-md rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm" role="alert">
+        <Lock size={22} className="mx-auto text-gray-400" aria-hidden />
+        <h2 className="mt-3 text-base font-semibold text-gray-900">You don’t have access to everyone’s timesheets</h2>
+        <p className="mt-1 text-sm text-gray-600">Admins and Team leads can see other people’s hours. Your own week is in My timesheet.</p>
+        <button type="button" onClick={() => navigate('/timesheets')} className="mt-4 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">
+          Open my timesheet
+        </button>
+      </div>
+    );
+  }
   const control = 'h-9 w-36';
   const cols = 'minmax(220px,1.6fr) repeat(7, minmax(80px,1fr)) minmax(110px,1fr)';
   return (

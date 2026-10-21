@@ -41,17 +41,13 @@ export const MyTasksNav: React.FC = () => {
         </Link>
       )}
       {/* My Tasks is one page with its own views (list, today, calendar, planner, timesheet),
-          so the rail carries a single row rather than a little tree.
-
-          An admin is not doing the task work; their own handful of assigned tasks is not what
-          they open the app for. The page still answers at /my-tasks if they go looking. */}
-      {!isAdmin && (
-        <Link to="/my-tasks" className={`${rowClass(pathname.startsWith('/my-tasks'))} pl-1.5`}>
-          {gap}<UserCheck size={16} className="shrink-0 text-gray-500" />
-          <span className="flex-1 truncate font-medium">My Tasks</span>
-          {dueCount > 0 && <span className="text-xs text-gray-400">{dueCount}</span>}
-        </Link>
-      )}
+          so the rail carries a single row rather than a little tree. Admins get it too: plenty
+          of them do have tasks of their own, and typing the address was the only way in. */}
+      <Link to="/my-tasks" className={`${rowClass(pathname.startsWith('/my-tasks'))} pl-1.5`}>
+        {gap}<UserCheck size={16} className="shrink-0 text-gray-500" />
+        <span className="flex-1 truncate font-medium">My Tasks</span>
+        {dueCount > 0 && <span className="text-xs text-gray-400">{dueCount}</span>}
+      </Link>
       {FEATURES.plannerRow && (
         <Link to="/planner" className={`${rowClass(pathname === '/planner')} pl-1.5`}>
           {gap}<CalendarDays size={16} className="shrink-0 text-gray-500" />
