@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -66,14 +67,15 @@ def test_everyone_gets_their_own_work_and_leads_get_their_team(api, org):
     again = ok(api.get(f"/workspaces/{org['ws']}/dashboards", "member"))
     assert [x["id"] for x in again] == [x["id"] for x in first]
     mine = ok(api.get(f"/dashboards/{first[0]['id']}", "member"))
-    assert mine["filters"]["assignees"] == ["me"] and len(mine["cards"]) >= 6
+    # No filter to start with: whose work it is comes from the board, not from a chip.
+    assert mine["filters"]["assignees"] is None and len(mine["cards"]) >= 6
 
     # The lead of HR also gets HR, person by person; a plain member never sees it.
     for_lead = {x["standard"]: x for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", "lead"))}
     team = for_lead["team"]
     assert (team["name"], team["team"]["id"], team["your_level"]) == ("HR – people", org["team"]["id"], "full")
     board = ok(api.get(f"/dashboards/{team['id']}", "lead"))
-    assert board["filters"]["assignees"] == [f"team:{org['team']['id']}"]
+    assert board["filters"]["assignees"] is None
     # The board is the nine cards a manager reads, not every chart that could be drawn: one
     # chart, by priority. The per-person bars are still built and can be added back from "+ Card".
     assert {c["config"]["group_by"] for c in board["cards"] if c["type"] == "bar"} == {"priority"}
@@ -97,6 +99,147 @@ def test_everyone_gets_their_own_work_and_leads_get_their_team(api, org):
     assert ok(api.get(f"/workspaces/{org['ws']}/dashboards", "guest")) == []
 
 
+def test_a_personal_board_shows_its_owners_work_whoever_opens_it(api, org):
+    """An admin opening somebody's "My work" sees that person's tasks, not their own."""
+    lst = org["list"]["id"]
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Member's job", "assignees": ["member"]}), 201)
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Admin's job", "assignees": ["admin"]}), 201)
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Lead's job", "assignees": ["lead"]}), 201)
+    home = ok(api.get(f"/workspaces/{org['ws']}/dashboards/home", "member"))
+    for viewer in ("member", "admin"):
+        cards = by_title(home, data(api, home, viewer))
+        assert cards["Open tasks"]["data"]["value"] == 1, viewer
+
+    # A Team board is the Team's work (lead + member here), and nobody else's.
+    team = next(x for x in ok(api.get(f"/workspaces/{org['ws']}/dashboards", "lead")) if x["standard"] == "team")
+    team = ok(api.get(f"/dashboards/{team['id']}", "lead"))
+    assert by_title(team, data(api, team, "lead"))["Open tasks"]["data"]["value"] == 2
+
+    # A filter somebody chooses narrows within that, and clearing it goes back to the whole scope.
+    ok(api.patch(f"/dashboards/{team['id']}", "lead", {"filters": {"assignees": ["lead"]}}))
+    assert by_title(team, data(api, team, "lead"))["Open tasks"]["data"]["value"] == 1
+    ok(api.patch(f"/dashboards/{team['id']}", "lead", {"filters": {}}))
+    assert by_title(team, data(api, team, "lead"))["Open tasks"]["data"]["value"] == 2
+
+
+def test_me_on_a_personal_board_still_means_its_owner_for_an_admin(api, org):
+    """Older "My work" boards carry `assignees: ["me"]` on their cards and the board. Read by an
+    admin, "me" there is still the board's owner -- not the admin, who would see zeros."""
+    lst = org["list"]["id"]
+    late = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    for n in range(3):
+        ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": f"Job {n}", "assignees": ["member"], "due_date": late}), 201)
+    home = ok(api.get(f"/workspaces/{org['ws']}/dashboards/home", "member"))
+    with db_session.new_session() as db:  # as an old board was stored, before the scope existed
+        from app.db.models import Dashboard, DashboardCard
+
+        db.get(Dashboard, uuid.UUID(home["id"])).filters = {"assignees": ["me"]}
+        for card in db.query(DashboardCard).filter(DashboardCard.dashboard_id == uuid.UUID(home["id"])):
+            card.config = {**card.config, "filters": {**(card.config.get("filters") or {}), "assignees": ["me"]}}
+        db.commit()
+    mine = by_title(home, data(api, home, "member"))
+    assert mine["Open tasks"]["data"]["value"] == 3 and mine["Overdue"]["data"]["value"] == 3
+    for viewer in ("admin", "owner"):
+        theirs = by_title(home, data(api, home, viewer))
+        assert theirs["Open tasks"]["data"]["value"] == 3, viewer
+        assert theirs["Overdue"]["data"]["value"] == 3, viewer
+    insights = ok(api.get(f"/dashboards/{home['id']}/insights", "admin", params={"tz": "UTC"}))
+    assert insights["who"] == "person"
+
+
+def test_workload_card_counts_work_missing_a_due_date_or_an_estimate(api, org):
+    lst = org["list"]["id"]
+    due = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Sized", "assignees": ["member"], "due_date": due, "time_estimate_seconds": HOUR}), 201)
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "No date", "assignees": ["member"], "time_estimate_seconds": HOUR}), 201)
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "No size", "assignees": ["member"], "due_date": due}), 201)
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Nothing", "assignees": ["member"]}), 201)
+    home = ok(api.get(f"/workspaces/{org['ws']}/dashboards/home", "member"))
+    card = next(row for row in data(api, home, "member") if row["type"] == "capacity")["data"]
+    assert (card["tasks"], card["no_due_date_tasks"], card["no_estimate_tasks"]) == (4, 2, 2)
+
+
+def test_admins_and_leads_open_peoples_own_boards(api, org):
+    lst = org["list"]["id"]
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Late", "assignees": ["member"],
+                                                 "due_date": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()}), 201)
+    # The admin's list: everyone with a board of their own -- not owners or admins -- with figures.
+    rows = {r["user"]["id"]: r for r in ok(api.get(f"/workspaces/{org['ws']}/dashboards/people", "admin"))}
+    assert {"member", "member2", "lead"} <= set(rows) and "owner" not in rows and "admin" not in rows
+    assert (rows["member"]["open"], rows["member"]["overdue"], rows["member"]["teams"]) == (1, 1, ["HR"])
+    assert rows["member2"]["dashboard_id"] is None  # never opened the app
+
+    # Opening member2's board makes it, as theirs, and the admin sees it read-only.
+    board = ok(api.get(f"/workspaces/{org['ws']}/people/member2/dashboard", "admin"))
+    assert (board["owner"]["id"], board["standard"], board["your_level"], board["relation"]) == ("member2", "my_work", "view", "everyone")
+    assert ok(api.get(f"/workspaces/{org['ws']}/dashboards/home", "member2"))["id"] == board["id"]  # the same one they get
+
+    # What the admin sees on it is the member's work, not the admin's.
+    member = ok(api.get(f"/workspaces/{org['ws']}/people/member/dashboard", "admin"))
+    assert by_title(member, data(api, member, "admin"))["Overdue"]["data"]["value"] == 1
+
+    # A lead: only their Team's people. A member: nobody's.
+    assert {r["user"]["id"] for r in ok(api.get(f"/workspaces/{org['ws']}/dashboards/people", "lead"))} == {"member"}
+    ok(api.get(f"/workspaces/{org['ws']}/people/member/dashboard", "lead"))
+    assert api.get(f"/workspaces/{org['ws']}/people/member2/dashboard", "lead").status_code == 403
+    assert api.get(f"/workspaces/{org['ws']}/dashboards/people", "member").status_code == 403
+    assert api.get(f"/workspaces/{org['ws']}/people/member2/dashboard", "member").status_code == 403
+    # Admins have no personal board to open.
+    assert api.get(f"/workspaces/{org['ws']}/people/owner/dashboard", "admin").status_code == 404
+
+
+def test_clear_all_filters_puts_every_card_back_how_it_was_built(api, org):
+    lst = org["list"]["id"]
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Late", "assignees": ["member"], "priority": 1,
+                                                 "due_date": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()}), 201)
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Fine", "assignees": ["member"], "priority": 4}), 201)
+    home = ok(api.get(f"/workspaces/{org['ws']}/dashboards/home", "member"))
+    overdue = next(c for c in home["cards"] if c["title"] == "Overdue")
+    assert overdue["config"]["base_filters"]["due"] == "overdue"  # remembered when it was made
+
+    # Narrow the board and the card from their headers.
+    ok(api.patch(f"/dashboards/{home['id']}", "member", {"filters": {"priorities": [4]}}))
+    narrowed = {**overdue["config"], "filters": {"due": "overdue", "priorities": [2]}}
+    ok(api.patch(f"/dashboards/{home['id']}/cards/{overdue['id']}", "member", {"config": narrowed}))
+    assert by_title(home, data(api, home, "member"))["Overdue"]["data"]["value"] == 0
+
+    # One press: the board's own filter is gone, the card is Overdue again -- not "everything".
+    reset = ok(api.post(f"/dashboards/{home['id']}/reset-filters", "member"))
+    assert reset["filters"]["priorities"] is None
+    card = next(c for c in reset["cards"] if c["id"] == overdue["id"])
+    assert card["config"]["filters"]["due"] == "overdue" and card["config"]["filters"]["priorities"] is None
+    assert by_title(home, data(api, home, "member"))["Overdue"]["data"]["value"] == 1
+    # Someone only viewing the board cannot clear the owner's filters.
+    assert api.post(f"/dashboards/{home['id']}/reset-filters", "admin").status_code == 403
+
+
+def test_insights_say_what_needs_attention(api, org):
+    lst = org["list"]["id"]
+    now = datetime.now(timezone.utc)
+    late = ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Late GST", "assignees": ["member"],
+                                                        "start_date": (now - timedelta(days=6)).isoformat(),
+                                                        "due_date": (now - timedelta(days=4)).isoformat()}), 201)
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Urgent audit", "assignees": ["member"], "priority": 1,
+                                                 "due_date": (now + timedelta(days=1)).isoformat()}), 201)
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Someone else's", "assignees": ["lead"],
+                                                 "start_date": (now - timedelta(days=3)).isoformat(),
+                                                 "due_date": (now - timedelta(days=1)).isoformat()}), 201)
+    home = ok(api.get(f"/workspaces/{org['ws']}/dashboards/home", "member"))
+    got = ok(api.get(f"/dashboards/{home['id']}/insights", "member", params={"tz": "UTC"}))
+    # Only the board's own person: the lead's late start is not on the member's board.
+    assert got["late_start"]["count"] == 1 and got["late_start"]["tasks"][0]["id"] == late["id"]
+    assert got["late_start"]["tasks"][0]["days_late"] >= 5
+    # What a card already says -- due today, overdue, done this week -- is not said again.
+    assert not {"overdue", "due_today", "done_this_week", "logged_this_week"} & set(got)
+    assert [t["name"] for t in got["urgent_soon"]["tasks"]] == ["Urgent audit"]
+    assert got["no_estimate"] == 2 and got["people_behind"] == []  # a board about one person
+    # The company board is about everyone, so it says who is furthest behind.
+    company = ok(api.get(f"/workspaces/{org['ws']}/dashboards/home", "owner"))
+    everyone = ok(api.get(f"/dashboards/{company['id']}/insights", "owner", params={"tz": "UTC"}))
+    assert everyone["late_start"]["count"] == 2
+    assert {row["user"]["id"] for row in everyone["people_behind"]} == {"member", "lead"}
+
+
 def test_home_opens_on_the_company_for_an_admin(api, org):
     """An admin's own open-task count is not the question they open the app with."""
     url = f"/workspaces/{org['ws']}/dashboards/home"
@@ -113,7 +256,7 @@ def test_home_opens_on_your_own_dashboard(api, org):
     url = f"/workspaces/{org['ws']}/dashboards/home"
     home = ok(api.get(url, "member"))
     assert (home["standard"], home["relation"], home["your_level"]) == ("my_work", "mine", "full")
-    assert home["owner"]["id"] == "member" and home["filters"]["assignees"] == ["me"]
+    assert home["owner"]["id"] == "member" and home["filters"]["assignees"] is None
     assert "timesheet" in {c["type"] for c in home["cards"]}  # their week's hours sit on it
     assert ok(api.get(url, "member"))["id"] == home["id"]  # the same one every time
     # It is the very Dashboard the Hub lists for them, and everyone gets their own.
@@ -267,20 +410,34 @@ def test_admins_and_owners_see_every_dashboard(api, org):
 
 def test_sharing_opens_a_dashboard_up_to_the_granted_level(api, org):
     dash = new_dashboard(api, org, "member", name="Shared one")
-    ok(api.post(f"/dashboards/{dash['id']}/shares", "member", {"user_id": "member2", "level": "edit"}), 201)
+    ok(api.post(f"/dashboards/{dash['id']}/shares", "admin", {"user_id": "member2", "level": "edit"}), 201)
     seen = listed(api, org, "member2")["Shared one"]
     assert (seen["relation"], seen["your_level"]) == ("shared", "edit")
     ok(api.post(f"/dashboards/{dash['id']}/cards", "member2", {"type": "notes"}), 201)
     assert api.delete(f"/dashboards/{dash['id']}", "member2").status_code == 403  # delete needs full
-    # Edit cannot hand out full.
-    assert api.post(f"/dashboards/{dash['id']}/shares", "member2", {"user_id": "lead", "level": "full"}).status_code == 403
+
+
+def test_only_admins_share_dashboards(api, org):
+    """Members and managers can't share any board, their own included; admins can share any."""
+    mine = new_dashboard(api, org, "member", name="Mine")
+    team = new_dashboard(api, org, "lead", name="HR board", team_id=org["team"]["id"])
+    for who, dash in (("member", mine), ("lead", team)):
+        refused = api.post(f"/dashboards/{dash['id']}/shares", who, {"user_id": "member2", "level": "view"})
+        assert refused.status_code == 403 and "admin" in refused.json()["detail"]
+    # An admin only views the member's board, and can still share it.
+    share = ok(api.post(f"/dashboards/{mine['id']}/shares", "admin", {"user_id": "member2", "level": "view"}), 201)
+    assert listed(api, org, "member2")["Mine"]["relation"] == "shared"
+    # Taking it back is the admin's too.
+    assert api.delete(f"/dashboards/{mine['id']}/shares/{share['id']}", "member").status_code == 403
+    ok(api.delete(f"/dashboards/{mine['id']}/shares/{share['id']}", "admin"), 204)
+    assert "Mine" not in listed(api, org, "member2")
 
 
 def test_guests_cannot_create_and_only_get_view(api, org):
     assert api.post(f"/workspaces/{org['ws']}/dashboards", "guest", {"name": "x"}).status_code == 403
     dash = new_dashboard(api, org, "member")
-    assert api.post(f"/dashboards/{dash['id']}/shares", "member", {"user_id": "guest", "level": "edit"}).status_code == 400
-    ok(api.post(f"/dashboards/{dash['id']}/shares", "member", {"user_id": "guest", "level": "view"}), 201)
+    assert api.post(f"/dashboards/{dash['id']}/shares", "admin", {"user_id": "guest", "level": "edit"}).status_code == 400
+    ok(api.post(f"/dashboards/{dash['id']}/shares", "admin", {"user_id": "guest", "level": "view"}), 201)
     assert listed(api, org, "guest")["Board"]["your_level"] == "view"
 
 
@@ -289,14 +446,14 @@ def test_team_dashboards_belong_to_the_team_leads(api, org):
     assert api.post(f"/workspaces/{org['ws']}/dashboards", "member", {"name": "x", "team_id": team_id}).status_code == 403
     dash = new_dashboard(api, org, "lead", name="HR board", team_id=team_id)
     assert dash["team"]["name"] == "HR" and dash["relation"] == "team"
-    # By default it shows the Team's people, as one view.
-    assert dash["filters"]["assignees"] == [f"team:{team_id}"]
+    # It shows the Team's people, as one view -- by its scope, so the filter bar starts empty.
+    assert dash["filters"]["assignees"] is None
     # Admins can make one for any Team; the Team's leads get full access to it.
     by_admin = new_dashboard(api, org, "admin", name="HR by admin", team_id=team_id)
     assert listed(api, org, "lead")["HR by admin"]["your_level"] == "full"
     # Team members do not see it unless it is shared with them (or the Team).
     assert "HR board" not in listed(api, org, "member")
-    ok(api.post(f"/dashboards/{dash['id']}/shares", "lead", {"team_id": team_id, "level": "view"}), 201)
+    ok(api.post(f"/dashboards/{dash['id']}/shares", "admin", {"team_id": team_id, "level": "view"}), 201)
     assert listed(api, org, "member")["HR board"]["relation"] == "shared"
     assert by_admin["id"]
 
@@ -649,18 +806,45 @@ def test_discussion_cards_take_messages_from_viewers(api, seeded):
 
 
 def test_dashboard_views_get_a_dashboard_scoped_to_their_location(api, seeded):
-    view = ok(api.post(f"/lists/{seeded['list']['id']}/views", "owner", {"type": "dashboard"}), 201)
+    view = ok(api.post(f"/spaces/{seeded['space']['id']}/views", "owner", {"type": "dashboard"}), 201)
     ok(api.post(f"/spaces/{seeded['space']['id']}/members", "owner", {"user_id": "member", "level": "view"}), 201) \
         if False else None
     assert api.get(f"/views/{view['id']}/dashboard", "member2").status_code in (200, 404)
     assert ok(api.get(f"/views/{view['id']}/dashboard", "owner")) is None  # the standard summary until customised
     dash = ok(api.post(f"/views/{view['id']}/dashboard", "owner"), 201)
-    assert all(c["config"]["sources"] == [{"kind": "list", "id": seeded["list"]["id"]}] for c in dash["cards"] if "sources" in c["config"])
+    assert all(c["config"]["sources"] == [{"kind": "space", "id": seeded["space"]["id"]}] for c in dash["cards"] if "sources" in c["config"])
     again = ok(api.post(f"/views/{view['id']}/dashboard", "owner"), 201)
     assert again["id"] == dash["id"]
     assert dash["name"] not in listed(api, seeded, "owner")  # view dashboards stay out of the Dashboards list
     cards = by_title(dash, data(api, dash, "owner"))
     assert cards["Open tasks"]["data"]["value"] == 2
     # a view isn't a Dashboard view
-    table = ok(api.post(f"/lists/{seeded['list']['id']}/views", "owner", {"type": "table"}), 201)
+    table = ok(api.post(f"/spaces/{seeded['space']['id']}/views", "owner", {"type": "table"}), 201)
     assert api.post(f"/views/{table['id']}/dashboard", "owner").status_code == 400
+
+
+def test_the_top_row_is_the_same_on_every_standard_dashboard():
+    """Your own board, your Team's and the company's open with the same four tiles.
+
+    They had drifted apart in three ways at once -- four tiles of width 3 against three of width 4,
+    "Done this week" against "Done this month", and so a different layout depending on whose board
+    you were looking at. A manager comparing their own figures with their team's was reading two
+    rows that only looked alike.
+
+    Pinned here rather than left to the generator, because the drift was invisible: each board is
+    built once, when its owner first opens it, so a change to the template only ever showed up on
+    the boards made after it.
+    """
+    from app.services.work.dashboards.standard import _my_work_cards, _people_cards
+
+    def row(cards):
+        return [(title, config.get("filters"), width) for kind, title, config, width, height in cards
+                if kind == "calculation" and height == 1]
+
+    mine, team, company = row(_my_work_cards()), row(_people_cards(False)), row(_people_cards(True))
+    assert mine == team == company, "the standard Dashboards have drifted apart again"
+    assert [title for title, _f, _w in mine] == ["Open tasks", "Due today", "Overdue", "Done this week"]
+    # Four tiles of width 3 fill the twelve-column row exactly, so it is square on every board.
+    assert sum(width for _t, _f, width in mine) == 12
+    # The finished-work tile covers the same week as the hours cards underneath it.
+    assert mine[3][1] == {"done": "this_week"}

@@ -23,15 +23,17 @@ from app.services.work.permissions import can_manage_workspace
 
 PROFILE_FIELDS = (
     "designation", "level", "department", "phone", "employee_code", "date_of_joining", "location",
-    "date_of_birth", "marriage_anniversary", "takes_interviews",
+    "address", "date_of_birth", "marriage_anniversary", "takes_interviews",
 )
-# Who sees what on someone else's profile, as person_out applies it:
-#   * a phone number is for everyone inside the firm, and hidden from guests -- see
-#     test_limited_members_see_only_what_is_shared, which says so on purpose;
-#   * a birthday and an anniversary are the person's and the admins', nobody else's.
-# There used to be a PRIVATE_FIELDS tuple here naming all three as admin-only. Nothing read it,
-# and it described a rule the code does not follow, which is worse than no note at all.
-SELF_EDITABLE = {"name", "phone", "location"}
+# Who sees what on someone else's profile, as person_out applies it (see `_standing`):
+#   * name, photo, designation, level, department, Teams and reporting line are directory detail,
+#     for everyone the directory shows them to;
+#   * phone, address, employee code and joining date are the person's, their Manager's (they lead
+#     a Team the person is in, or the person reports to them) and the admins' -- not a colleague's.
+#     The People page being hidden from staff did not stop the server answering them directly;
+#   * a birthday and an anniversary are the person's and the admins', nobody else's. Highlights
+#     still says whose birthday it is today, which needs only the name.
+SELF_EDITABLE = {"name", "phone", "location", "address"}
 # The fields a promotion or a transfer moves. Changes to these are logged with their old and new
 # values, because "what was their designation before?" is the question the log gets asked.
 MOVEMENT_FIELDS = ("designation", "level", "department", "manager_id")
@@ -85,9 +87,11 @@ def person_out(member: WorkspaceMember, user: User, team_ids: Sequence[uuid.UUID
         department=member.department,
         manager_id=member.manager_id,
         phone=None if hide_contact else member.phone,
-        employee_code=member.employee_code,
-        date_of_joining=member.date_of_joining,
+        employee_code=None if hide_contact else member.employee_code,
+        date_of_joining=None if hide_contact else member.date_of_joining,
         location=member.location,
+        # Hidden wherever the phone is: a home address is contact detail, not directory detail.
+        address=None if hide_contact else member.address,
         date_of_birth=member.date_of_birth if show_private else None,
         marriage_anniversary=member.marriage_anniversary if show_private else None,
         takes_interviews=member.takes_interviews,
@@ -105,6 +109,48 @@ def _joiner_counts(db: Session, workspace_id: uuid.UUID) -> Dict[str, int]:
     return dict(db.execute(select(PersonTask.user_id, func.count()).where(PersonTask.workspace_id == workspace_id).group_by(PersonTask.user_id)).all())
 
 
+def _standing(access: Access, member: WorkspaceMember) -> Tuple[bool, bool]:
+    """(contact, private): may the caller see this person's contact details and HR record
+    (phone, address, employee code, joining date), and their birthday and anniversary."""
+    if can_manage_workspace(access.role) or member.user_id == access.user_id:
+        return True, True
+    if access.role != WorkspaceRole.member:
+        return False, False
+    manages = member.manager_id == access.user_id or member.user_id in access.led_people
+    return manages, False
+
+
+def visible_people(db: Session, access: Access) -> Optional[Set[str]]:
+    """Whose profiles someone may see on the People pages and the Org Chart: None means everyone's.
+
+    Admins see the firm. Anyone else sees the people they work with and no further: themselves,
+    their own reporting manager (Home and the assistant answer "who do I report to?"), anyone who
+    reports to them, their Team-mates, and -- for a Team's lead -- everyone in the Teams they lead,
+    sub-teams included, which is the same reach a lead has over time and Dashboards
+    (timetracking.time_visible_people, dashboards.access.Standing.led_people).
+
+    This is the directory only. Picking an assignee goes through the workspace's member list,
+    which stays whole: being able to give a colleague in another Team a task is not the same as
+    reading their profile.
+    """
+    if can_manage_workspace(access.role):
+        return None
+    from app.services.work.teams import people_led_by
+
+    me = access.user_id
+    out: Set[str] = {me}
+    mine = db.get(WorkspaceMember, (access.workspace_id, me))
+    if mine is not None and mine.manager_id:
+        out.add(mine.manager_id)
+    out |= set(db.scalars(select(WorkspaceMember.user_id).where(
+        WorkspaceMember.workspace_id == access.workspace_id, WorkspaceMember.manager_id == me)))
+    my_teams = select(TeamMember.team_id).join(Team, Team.id == TeamMember.team_id).where(
+        Team.workspace_id == access.workspace_id, TeamMember.user_id == me)
+    out |= set(db.scalars(select(TeamMember.user_id).where(TeamMember.team_id.in_(my_teams))))
+    out |= people_led_by(db, access.workspace_id, me)
+    return out
+
+
 def list_people(db: Session, access: Access) -> List[s.PersonOut]:
     rows = list(db.execute(
         select(WorkspaceMember, User).join(User, User.id == WorkspaceMember.user_id)
@@ -115,11 +161,18 @@ def list_people(db: Session, access: Access) -> List[s.PersonOut]:
     for m, _ in rows:
         if m.manager_id:
             reports[m.manager_id] = reports.get(m.manager_id, 0) + 1
-    guest = access.role == WorkspaceRole.guest
+    # Counted over everyone first, so a lead still sees how many report to someone in their Team
+    # even when some of those reports sit outside it.
+    seen = visible_people(db, access)
+    if seen is not None:
+        rows = [(m, u) for m, u in rows if u.id in seen]
     admin = can_manage_workspace(access.role)
     joiner = _joiner_counts(db, access.workspace_id) if admin else {}
-    out = [person_out(m, u, teams.get(u.id, []), reports.get(u.id, 0), hide_contact=guest and u.id != access.user_id,
-                      joiner_tasks=joiner.get(u.id, 0), show_private=admin or u.id == access.user_id) for m, u in rows]
+    out = []
+    for m, u in rows:
+        contact, private = _standing(access, m)
+        out.append(person_out(m, u, teams.get(u.id, []), reports.get(u.id, 0), hide_contact=not contact,
+                              joiner_tasks=joiner.get(u.id, 0), show_private=private))
     return sorted(out, key=lambda p: (p.user.display_name or p.user.email).lower())
 
 
@@ -128,13 +181,19 @@ def get_person(db: Session, access: Access, user_id: str) -> s.PersonOut:
     user = db.get(User, user_id)
     if member is None or user is None:
         raise NotFound("Person not found")
+    seen = visible_people(db, access)
+    if seen is not None and user_id not in seen:
+        # Not found rather than forbidden: whether someone outside your reach works here at all is
+        # part of what the directory is not telling you.
+        raise NotFound("Person not found")
     reports = db.scalar(select(func.count()).select_from(WorkspaceMember).where(
         WorkspaceMember.workspace_id == access.workspace_id, WorkspaceMember.manager_id == user_id)) or 0
     admin = can_manage_workspace(access.role)
+    contact, private = _standing(access, member)
     return person_out(member, user, _teams_by_user(db, access.workspace_id).get(user_id, []), reports,
-                      hide_contact=access.role == WorkspaceRole.guest and user_id != access.user_id,
+                      hide_contact=not contact,
                       joiner_tasks=_joiner_counts(db, access.workspace_id).get(user_id, 0) if admin else 0,
-                      show_private=admin or user_id == access.user_id)
+                      show_private=private)
 
 
 # --- managers and teams ------------------------------------------------------------------------

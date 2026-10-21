@@ -21,12 +21,14 @@ const PREVIOUS: Partial<Record<string, string>> = {
 
 type Tone = 'blue' | 'green' | 'red' | 'violet' | 'amber';
 
-const TONES: Record<Tone, { card: string; badge: string; arrow: string }> = {
-  blue: { card: 'border-blue-100 bg-blue-50/60 hover:bg-blue-50', badge: 'bg-blue-100 text-blue-600', arrow: 'text-blue-400' },
-  green: { card: 'border-emerald-100 bg-emerald-50/60 hover:bg-emerald-50', badge: 'bg-emerald-100 text-emerald-600', arrow: 'text-emerald-400' },
-  red: { card: 'border-red-100 bg-red-50/60 hover:bg-red-50', badge: 'bg-red-100 text-red-600', arrow: 'text-red-400' },
-  violet: { card: 'border-violet-100 bg-violet-50/60 hover:bg-violet-50', badge: 'bg-violet-100 text-brand-600', arrow: 'text-violet-400' },
-  amber: { card: 'border-amber-100 bg-amber-50/60 hover:bg-amber-50', badge: 'bg-amber-100 text-amber-600', arrow: 'text-amber-400' },
+// The meaning is carried by the icon chip and, for overdue, by the figure itself; the tile stays
+// white like every other card, so a row of them reads as one calm band rather than five colours.
+const TONES: Record<Tone, { badge: string; value: string }> = {
+  blue: { badge: 'bg-blue-50 text-blue-600 ring-blue-100', value: 'text-gray-900' },
+  green: { badge: 'bg-emerald-50 text-emerald-600 ring-emerald-100', value: 'text-gray-900' },
+  red: { badge: 'bg-rose-50 text-rose-600 ring-rose-100', value: 'text-rose-600' },
+  violet: { badge: 'bg-violet-50 text-violet-600 ring-violet-100', value: 'text-gray-900' },
+  amber: { badge: 'bg-amber-50 text-amber-600 ring-amber-100', value: 'text-gray-900' },
 };
 
 /** What a stat card means, read from the filters it was built with rather than from its name. */
@@ -73,7 +75,7 @@ export const StatCard: React.FC<{
   const value = data && !data.error && !data.no_access ? d?.value : null;
 
   return (
-    <div className={`group/stat relative flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 transition-colors ${skin.card}`}>
+    <div className="ui-card ui-card-hover group relative flex w-full items-center gap-3 px-4 py-3.5">
       {/* The filter sits above the tile rather than inside it: the tile itself is the button
           that opens the tasks, and a button inside a button is not a thing. It is always on
           show -- hidden until hover, it was a control nobody knew was there, and a card could
@@ -85,17 +87,17 @@ export const StatCard: React.FC<{
         title="Show these tasks"
         className="flex w-full items-center gap-3 text-left"
       >
-      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${skin.badge}`}>
-        <Icon size={17} />
+      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset ${skin.badge}`}>
+        <Icon size={18} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className={`block truncate text-xs font-medium text-gray-600 ${filter ? 'pr-7' : ''}`}>{card.title}</span>
-        <span className="block text-2xl font-semibold leading-tight text-gray-900">
+        <span className={`block truncate text-xs font-medium text-gray-500 ${filter ? 'pr-7' : ''}`}>{card.title}</span>
+        <span className={`tabular block text-[1.625rem] font-semibold leading-tight tracking-tight ${value ? skin.value : 'text-gray-900'}`}>
           {value === null || value === undefined ? <span className="text-gray-300">—</span> : value}
         </span>
-        <span className="block truncate text-[11px] text-gray-500">{statScope(card)}</span>
+        <span className="block truncate text-[11px] text-gray-400">{statScope(card)}</span>
       </span>
-        <ChevronRight size={16} className={`shrink-0 ${skin.arrow}`} />
+        <ChevronRight size={16} className="shrink-0 text-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-500" />
       </button>
     </div>
   );
@@ -119,21 +121,30 @@ export const PeriodBar: React.FC<{
   ];
 
   return (
-    <div className="no-print mb-3 flex flex-wrap items-center justify-end gap-2">
+    // A heading for the row on the left and its one control on the right, so the control has a
+    // line to belong to instead of standing alone above the tiles.
+    <div className="mb-2.5 flex flex-wrap items-center gap-2">
+      <h2 className="ui-eyebrow mr-auto">At a glance</h2>
       {preset === 'custom' && value?.start && value?.end && (
-        <span className="text-xs text-gray-500">{value.start} to {value.end}</span>
+        <span className="no-print text-xs text-gray-500">{value.start} to {value.end}</span>
       )}
-      {!value && <span className="mr-auto text-xs text-gray-400">Each card is on its own window — pick one to line them up.</span>}
+      {/* "Each tile covers the window in its own name..." used to explain this control. The
+          tiles' names say it; the board keeps headings only. */}
+      <span className="no-print">
       <PeriodMenu
-        // With no shared window the button says what it is for rather than naming a state nobody
-        // can pick: "Mixed" read like a period you had chosen, and sat where "This week" would.
-        label={value ? (choices.find(([v]) => v === preset)?.[1] ?? periodLabel(value)) : 'Period'}
+        // "Filter" at rest, like every other filter control in the app, and the period's own name
+        // once one is chosen. It used to say "Period" here, which was the only control in the app
+        // that named its field rather than its job -- so a row of filters read as a row of
+        // different things. What it narrows is still obvious from the calendar on it, and the
+        // moment a period is picked the button says which.
+        label={value ? (choices.find(([v]) => v === preset)?.[1] ?? periodLabel(value)) : 'Filter'}
         preset={preset}
         choices={choices}
         disabled={!canEdit}
         onPick={onPick}
         onCustom={onCustom}
       />
+      </span>
     </div>
   );
 };

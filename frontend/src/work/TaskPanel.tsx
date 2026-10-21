@@ -26,7 +26,6 @@ import { DurationInput } from './DurationInput';
 import { FEATURES } from '../config/features';
 import { TaskTypesDialog, TypeIcon } from './LocationSettings';
 import { TaskActions } from './task/TaskActions';
-import { LeaveWarning } from './leave/LeaveWarning';
 import { DateRange } from './DateField';
 import { TaskLists, TimeInStatusSection } from './task/TaskMore';
 import { Bar } from './Skeleton';
@@ -128,14 +127,16 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
       const t = await workApi.task(taskId);
       setTask(t);
       rememberTask(t.id, t.name, t.list_id);
+      // A task given to you in a private List opens even though its List doesn't, so the List's
+      // statuses and rows may be refused: fall back to what the task itself carries.
       const [set, siblings, usable] = await Promise.all([
-        workApi.statuses('list', t.list_id),
-        workApi.tasks('list', t.list_id, { include_closed: true }),
+        workApi.statuses('list', t.list_id).catch(() => null),
+        workApi.tasks('list', t.list_id, { include_closed: true }).catch(() => null),
         workApi.groups('list', t.list_id).catch(() => [] as TaskGroup[]),
       ]);
-      setStatuses(set.statuses);
+      setStatuses(set ? set.statuses : [t.status]);
       setGroups(usable);
-      setSubtasks(siblings.tasks.filter((x) => x.parent_id === t.id));
+      setSubtasks(siblings ? siblings.tasks.filter((x) => x.parent_id === t.id) : []);
       workApi.assignable('list', t.list_id).then(setAssignable).catch(() => setAssignable(null));
     } catch (e) {
       setError((e as Error).message);
@@ -258,8 +259,15 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                     disabled={!canChangeStatus}
                     current={
                       <>
-                        <StatusDot status={task.status} />
-                        <span className="truncate text-sm font-medium uppercase tracking-wide text-gray-800">{task.status.name}</span>
+                        {/* The status as a coloured pill, the way ClickUp shows it: the one field on
+                            a task you should be able to read from across the room. */}
+                        <span
+                          className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md px-2 py-0.5 text-xs font-semibold uppercase tracking-wide"
+                          style={{ backgroundColor: `${task.status.color}1f`, color: task.status.color, boxShadow: `inset 0 0 0 1px ${task.status.color}40` }}
+                        >
+                          <StatusDot status={task.status} size={11} />
+                          <span className="truncate">{task.status.name}</span>
+                        </span>
                       </>
                     }
                     items={statuses.map((st) => ({
@@ -314,7 +322,6 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                     onChange={(ids) => save({ assignees: ids })}
                     onShared={() => workApi.assignable('list', task.list_id).then(setAssignable).catch(() => undefined)}
                   />
-                  <LeaveWarning dueDate={task.due_date} assignees={task.assignees} />
                 </Field>
                 <Field label="Dates" icon={<CalendarDays size={14} />}>
                   <DateRange
@@ -507,7 +514,7 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                 <TaskRelations task={task} editable={editable} onChanged={() => { load(); setFeedKey((k) => k + 1); onChanged(); }} />
               )}
               <Checklists taskId={task.id} editable={editable} me={meId} onChanged={() => { load(); setFeedKey((k) => k + 1); onChanged(); }} />
-              <Attachments taskId={task.id} canAttach={task.permission_level !== 'view'} isFull={task.permission_level === 'full'} me={meId}
+              <Attachments taskId={task.id} canAttach={editable} isFull={task.permission_level === 'full'} me={meId}
                 onChanged={() => { setFeedKey((k) => k + 1); onChanged(); }} />
               {/* On a narrow panel the activity follows the task, because there is nowhere
                   else for it to go. Given the width, it belongs beside it: the history is read

@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Users } from 'lucide-react';
+import { Lock, Search, Users } from 'lucide-react';
 import { useWork } from '../WorkContext';
 import { FEATURES } from '../../config/features';
+import { ApiError } from '../api';
 import { Avatar } from '../ui';
 import { Select } from '../Select';
 import { STATUS_CLASS, STATUS_LABEL, isoDay, sheetApi, type AllTimesheets as Data, type SubmissionStatus } from './api';
-import { WeekNav, dayLabel, hours } from './pieces';
+import { WeekNav, dayLabel, hours, isWeekend, WEEKEND } from './pieces';
 
 type Person = Data['people'][number];
 
@@ -39,6 +40,7 @@ const APPROVAL_STATES: SubmissionStatus[] = ['pending', 'approved', 'changes_nee
 export const AllTimesheets: React.FC = () => {
   const { workspace, teams } = useWork();
   const navigate = useNavigate();
+  const today = isoDay(new Date());
   const [params, setParams] = useSearchParams();
   const day = params.get('week') || isoDay(new Date());
   const [teamId, setTeamId] = useState('');
@@ -48,10 +50,16 @@ export const AllTimesheets: React.FC = () => {
   const [sort, setSort] = useState('name');
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refused, setRefused] = useState(false);
 
   const load = useCallback(() => {
     if (!workspace) return;
-    sheetApi.all(workspace.id, day, teamId || undefined).then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
+    sheetApi.all(workspace.id, day, teamId || undefined)
+      .then((d) => { setData(d); setError(null); setRefused(false); })
+      .catch((e) => {
+        if (e instanceof ApiError && e.status === 403) setRefused(true);
+        else setError(e.message);
+      });
   }, [workspace, day, teamId]);
   useEffect(() => { load(); }, [load]);
 
@@ -69,6 +77,19 @@ export const AllTimesheets: React.FC = () => {
   }, [data, query, shape, status, sort]);
 
   const narrowed = (data?.people.length ?? 0) - people.length;
+  // Somebody who may only see their own hours gets told so, not an empty week with no dates.
+  if (refused) {
+    return (
+      <div className="mx-auto mt-10 max-w-md rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm" role="alert">
+        <Lock size={22} className="mx-auto text-gray-400" aria-hidden />
+        <h2 className="mt-3 text-base font-semibold text-gray-900">You don’t have access to everyone’s timesheets</h2>
+        <p className="mt-1 text-sm text-gray-600">Admins and Team leads can see other people’s hours. Your own week is in My timesheet.</p>
+        <button type="button" onClick={() => navigate('/timesheets')} className="mt-4 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">
+          Open my timesheet
+        </button>
+      </div>
+    );
+  }
   const control = 'h-9 w-36';
   const cols = 'minmax(220px,1.6fr) repeat(7, minmax(80px,1fr)) minmax(110px,1fr)';
   return (
@@ -136,11 +157,13 @@ export const AllTimesheets: React.FC = () => {
               </button>
             </p>
           )}
-          <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200 bg-white">
+          <div className="ui-card mt-4 overflow-x-auto">
             <div className="min-w-[980px]" role="table" aria-label="All timesheets">
               <div className="grid border-b border-gray-200 text-xs text-gray-500" style={{ gridTemplateColumns: cols }} role="row">
                 <div className="px-4 py-3 text-sm text-gray-700">Person</div>
-                {data.days.map((d) => <div key={d} className="border-l border-gray-100 px-2.5 py-3">{dayLabel(d)}</div>)}
+                {data.days.map((d) => (
+                  <div key={d} className={`border-l border-gray-100 px-2.5 py-3 ${d === today ? 'bg-brand-50/50 font-medium text-brand-700' : isWeekend(d) ? `${WEEKEND} text-gray-400` : ''}`}>{dayLabel(d)}</div>
+                ))}
                 <div className="border-l border-gray-100 px-2.5 py-3">Total</div>
               </div>
               {people.length === 0 && (
@@ -165,7 +188,7 @@ export const AllTimesheets: React.FC = () => {
                     const cap = p.capacity_per_day[i];
                     const over = sec > cap;
                     return (
-                      <div key={i} className={`border-l border-gray-100 px-2.5 py-2.5 ${cap === 0 ? 'bg-gray-50' : ''}`}
+                      <div key={i} className={`border-l border-gray-100 px-2.5 py-2.5 ${isWeekend(data.days[i]) ? WEEKEND : cap === 0 ? 'bg-gray-50' : ''}`}
                         title={`Capacity ${hours(cap)} · Tracked ${hours(sec)} · Billable ${hours(p.billable_per_day[i])} · ${over ? `Over by ${hours(sec - cap)}` : `Remaining ${hours(cap - sec)}`}`}>
                         <div className={`text-sm ${sec ? 'text-gray-900' : 'text-gray-300'}`}>{sec ? hours(sec) : '—'}</div>
                         <div className="mt-1 h-1 overflow-hidden rounded-full bg-gray-200"><div className={`h-full ${over ? 'bg-red-500' : 'bg-brand-500'}`} style={{ width: `${cap ? Math.min(100, (100 * sec) / cap) : sec ? 100 : 0}%` }} /></div>

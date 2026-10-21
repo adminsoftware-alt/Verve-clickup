@@ -31,15 +31,28 @@ Card = Tuple[str, str, Dict[str, Any], int, int]
 WEEK = {"preset": "this_week"}
 MONTH = {"preset": "this_month"}
 
+# The top row, identical on every standard Dashboard: your own, a Team's, and the company's.
+#
+# One definition because three dashboards that answer the same question should ask it the same way.
+# They had drifted into three different rows -- a person saw four tiles a third of the width apart
+# while a Team saw three a quarter wider, and the finished-work tile covered a week on one and a
+# month on the other. Side by side they read as different products.
+#
+# Four tiles of width 3 fill the twelve-column row exactly, so the row is square on every board.
+_STAT_ROW: List["Card"] = [
+    ("calculation", "Open tasks", {}, 3, 1),
+    ("calculation", "Due today", {"filters": {"due": "today"}}, 3, 1),
+    ("calculation", "Overdue", {"filters": {"due": "overdue"}}, 3, 1),
+    # A week, not a month, and the same week the hours cards below already cover.
+    ("calculation", "Done this week", {"filters": {"done": "this_week"}, "include_closed": True}, 3, 1),
+]
+
 
 def _my_work_cards() -> List[Card]:
     """What a person needs from their own Dashboard: how much work, what it adds up to in hours,
     what is finished, what is still to do, and where the hours went against the estimates."""
     return [
-        ("calculation", "Open tasks", {}, 3, 1),
-        ("calculation", "Due today", {"filters": {"due": "today"}}, 3, 1),
-        ("calculation", "Overdue", {"filters": {"due": "overdue"}}, 3, 1),
-        ("calculation", "Done this week", {"filters": {"done": "this_week"}, "include_closed": True}, 3, 1),
+        *_STAT_ROW,
         # Across the full width: the hours, for whatever period is chosen on the card.
         ("capacity", "My hours: capacity, planned and logged", {"period": WEEK, "include_subtasks": True}, 12, 2),
         ("bar", "My work by priority", {"group_by": "priority"}, 6, 3),
@@ -60,15 +73,21 @@ def _people_cards(everyone: bool) -> List[Card]:
     """One Dashboard covering a group of people, broken down person by person."""
     whose = "the company" if everyone else "the team"
     return [
-        # Three figures, not four. "Unassigned" is taken off because an assignee is required on a
-        # new task, so the tile reads 0 for good -- a number that never moves is not worth a third
-        # of the top row. (Tasks made before that rule can still have nobody on them; they are a
-        # one-off clean-up, not a permanent card.)
+        # The same four tiles, in the same order, at the same width as a person's own Dashboard --
+        # see _STAT_ROW. A manager who looks at their own board and then at their team's should be
+        # reading the same row twice, not learning a second layout; and the two rows used to differ
+        # in all three ways at once: three tiles against four, width 4 against 3, and "Done this
+        # month" against "Done this week".
+        #
+        # "Unassigned" is still off: an assignee is required on a new task, so the tile reads 0 for
+        # good, and a number that never moves is not worth a quarter of the top row. (Tasks made
+        # before that rule can still have nobody on them; that is a one-off clean-up, not a card.)
         # ("calculation", "Unassigned", {"filters": {"assignees": ["none"]}}, 3, 1),
-        ("calculation", "Open tasks", {}, 4, 1),
-        ("calculation", "Overdue", {"filters": {"due": "overdue"}}, 4, 1),
-        ("calculation", "Done this month", {"filters": {"done": "this_month"}, "include_closed": True}, 4, 1),
-        ("capacity", f"Hours in {whose}: capacity, planned and logged", {"period": WEEK, "include_subtasks": True}, 12, 2),
+        *_STAT_ROW,
+        # Taller than the same card on a person's own board, and deliberately: this one lists a row
+        # per person, so on a Team of eleven -- or the company's seventy-five -- two rows of height
+        # is a scrollbar where the whole point is to see everyone at once.
+        ("capacity", f"Hours in {whose}: capacity, planned and logged", {"period": WEEK, "include_subtasks": True}, 12, 4),
         ("bar", "Work by priority", {"group_by": "priority"}, 12, 3),
         ("timesheet", "Hours per day this week", {"period": WEEK, "include_subtasks": True}, 12, 3),
         # What is late, what is today, and what is coming -- side by side, because a manager reads
@@ -96,6 +115,25 @@ def _people_cards(everyone: bool) -> List[Card]:
         # ("task_list", "To do", {"filters": {"status_groups": ["not_started", "active"]}, "sort": "due"}, 6, 3),
         # ("variance", "Estimate against actual, per person", {"period": MONTH, "include_subtasks": True}, 12, 4),
     ]
+
+
+def scope_of(dash: Dashboard) -> Optional[List[str]]:
+    """Whose work a Dashboard is about, as assignee tokens -- None when it is about everybody.
+
+    A personal board is about its owner, by id rather than "me": "me" is whoever is looking, so an
+    admin opening someone's board used to see their own tasks on it. A Team board is about the Team.
+    This used to be stored as the board's filter, where it showed as a chip anybody could clear.
+    """
+    if dash.standard == MY_WORK:
+        return [dash.owner_id]
+    if dash.team_id:
+        return [f"team:{dash.team_id}"]
+    return None
+
+
+def me_of(dash: Dashboard) -> Optional[str]:
+    """Who "me" means in a board's filters: its owner on a personal board, else the viewer (None)."""
+    return dash.owner_id if dash.standard == MY_WORK else None
 
 
 def _make(db: Session, access: Access, kind: str, name: str, filters: Dict[str, Any],
@@ -132,14 +170,14 @@ def ensure(db: Session, access: Access, standing: Standing) -> None:
     # An admin's own handful of tasks is not what they open the app to look at, so they are
     # not given a personal board; the Company one is their home. Everyone else gets theirs.
     if not standing.is_admin and (MY_WORK, access.user_id, None) not in have:
-        _make(db, access, MY_WORK, "My work", {"assignees": ["me"]}, _my_work_cards())
+        _make(db, access, MY_WORK, "My work", {}, _my_work_cards())
     for team_id in sorted(standing.led_teams, key=str):
         if any(kind == TEAM and had == team_id for kind, _, had in have):
             continue
         team = db.get(Team, team_id)
         if team is None:
             continue
-        _make(db, access, TEAM, f"{team.name} – people"[:100], {"assignees": [f"team:{team_id}"]},
+        _make(db, access, TEAM, f"{team.name} – people"[:100], {},
               _people_cards(everyone=False), team_id=team_id)
     if standing.is_admin and not any(k == COMPANY for k, _, _ in have):
         _make(db, access, COMPANY, "Company", {}, _people_cards(everyone=True))

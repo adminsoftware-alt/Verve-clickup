@@ -9,22 +9,26 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ArrowLeft, CalendarDays, Check, ChevronDown, ChevronRight, Circle, Columns3, Flag, Layers, Search,
-  Tag as TagIcon, User, X,
+  ArrowLeft, CalendarCheck, CalendarDays, CalendarPlus, CalendarRange, Check, ChevronDown, ChevronRight, Circle,
+  Clock, Columns3, Flag, Hourglass, Layers, Search, Tag as TagIcon, User, X,
 } from 'lucide-react';
 
 import type { Status, Task, UserRef } from '../api';
 import { PRIORITIES } from '../ui';
 import { GROUP_BY_LABELS, PROGRESS_COLUMNS, type GroupBy } from './grouping';
-import { COLUMNS, DUE_FILTERS, EMPTY_FILTERS, filterCount, type DueFilter, type ViewFilters } from './viewSettings';
+import {
+  COLUMNS, CREATED_FILTERS, DONE_FILTERS, DUE_FILTERS, EMPTY_FILTERS, ESTIMATE_FILTERS, START_FILTERS, TRACKED_FILTERS,
+  filterCount, type DueFilter, type ViewFilters,
+} from './viewSettings';
 
-const PANEL_WIDTH = 280;
+const PANEL_WIDTH = 240;
 /** Above this many choices the value list gets its own search box. */
 const SEARCHABLE = 8;
 
 type Option = { value: string; label: string; color?: string };
 
-type Key = 'statuses' | 'assignees' | 'priorities' | 'due' | 'tags';
+type Key = 'statuses' | 'assignees' | 'priorities' | 'due' | 'tags' | 'start' | 'done' | 'created' | 'estimate' | 'tracked';
+const valuesOf = (f: ViewFilters, key: Key) => ((f[key] ?? []) as (string | number)[]);
 
 /**
  * An entry in the panel. Most are filters -- pick some values of one field. The last three are
@@ -102,6 +106,11 @@ export const FilterPanel: React.FC<{
       ...people.map((p) => ({ value: p.id, label: p.display_name || p.email })),
     ] },
     { kind: 'filter', key: 'due', label: 'Due date', Icon: CalendarDays, options: DUE_FILTERS.map((d) => ({ value: d.key, label: d.label })) },
+    { kind: 'filter', key: 'start', label: 'Start date', Icon: CalendarRange, options: START_FILTERS.map((d) => ({ value: d.key, label: d.label })) },
+    { kind: 'filter', key: 'done', label: 'Date done', Icon: CalendarCheck, options: DONE_FILTERS.map((d) => ({ value: d.key, label: d.label })) },
+    { kind: 'filter', key: 'created', label: 'Date created', Icon: CalendarPlus, options: CREATED_FILTERS.map((d) => ({ value: d.key, label: d.label })) },
+    { kind: 'filter', key: 'estimate', label: 'Time estimate', Icon: Hourglass, options: ESTIMATE_FILTERS.map((d) => ({ value: d.key, label: d.label })) },
+    { kind: 'filter', key: 'tracked', label: 'Time tracked', Icon: Clock, options: TRACKED_FILTERS.map((d) => ({ value: d.key, label: d.label })) },
     ...(tagOptions.length ? [{ kind: 'filter' as const, key: 'tags' as const, label: 'Tags', Icon: TagIcon, options: tagOptions }] : []),
     ...(view?.groupOptions?.length
       ? [{ kind: 'group' as const, label: 'Group by', Icon: Layers,
@@ -123,7 +132,7 @@ export const FilterPanel: React.FC<{
       return `${on} of ${e.options.length}`;
     }
     if (e.kind === 'closed') return view?.showClosed ? 'On' : null;
-    const chosen = (filters[e.key] as (string | number)[]).map(String);
+    const chosen = valuesOf(filters, e.key).map(String);
     if (!chosen.length) return null;
     const words = chosen.map((v) => e.options.find((o) => o.value === v)?.label ?? v);
     return words.length > 2 ? `${words.slice(0, 2).join(', ')} +${words.length - 2}` : words.join(', ');
@@ -166,13 +175,13 @@ export const FilterPanel: React.FC<{
     if (e.kind === 'closed') return;
     if (e.key === 'priorities') onChange({ ...filters, priorities: toggled(filters.priorities, Number(option.value)) });
     else if (e.key === 'due') onChange({ ...filters, due: toggled(filters.due, option.value as DueFilter) });
-    else onChange({ ...filters, [e.key]: toggled(filters[e.key] as string[], option.value) });
+    else onChange({ ...filters, [e.key]: toggled(valuesOf(filters, e.key) as string[], option.value) });
   };
   const isOn = (e: Entry, option: Option) => {
     if (e.kind === 'group') return view?.groupBy === option.value;
     if (e.kind === 'columns') return !view?.hidden.includes(option.value);
     if (e.kind === 'closed') return false;
-    return (filters[e.key] as (string | number)[]).map(String).includes(option.value);
+    return valuesOf(filters, e.key).map(String).includes(option.value);
   };
   const clearField = (e: Entry) => {
     if (e.kind === 'group') view?.onGroupBy?.('none');
@@ -195,7 +204,9 @@ export const FilterPanel: React.FC<{
         className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm ${
           count ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
       >
-        {count ? `${count} filter${count === 1 ? '' : 's'}` : 'Filter'}
+        {/* The same shape as every other filter in the app: the word, and a count beside it. */}
+        Filter
+        {count > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-semibold leading-none text-white">{count}</span>}
         <ChevronDown size={13} className={count ? 'text-teal-500' : 'text-gray-400'} />
       </button>
 
@@ -240,12 +251,12 @@ export const FilterPanel: React.FC<{
                   className="w-full bg-transparent text-[13px] text-gray-800 outline-none placeholder:text-gray-400"
                 />
               </label>
-              <div className="max-h-80 overflow-y-auto py-1">
+              <div className="max-h-56 overflow-y-auto py-1">
                 {entries.filter((e) => matches(e.label)).map((e, i, shown) => {
                   const text = textOf(e);
                   // Where the filters end and how they are laid out begins.
                   const rule = e.kind !== 'filter' && shown[i - 1]?.kind === 'filter';
-                  const skin = `flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50 ${
+                  const skin = `flex w-full items-center gap-2 px-3 py-1 text-left text-[13px] text-gray-700 hover:bg-gray-50 ${
                     rule ? 'mt-1 border-t border-gray-100 pt-2' : ''}`;
                   // A yes-or-no needs no second step, so it is answered where it stands.
                   if (e.kind === 'closed') {
@@ -308,7 +319,7 @@ export const FilterPanel: React.FC<{
                 </label>
               )}
 
-              <div className="max-h-72 overflow-y-auto py-1">
+              <div className="max-h-56 overflow-y-auto py-1">
                 {field.options.filter((o) => matches(o.label)).length === 0 ? (
                   <p className="px-3 py-3 text-center text-xs text-gray-400">Nothing called “{search}”.</p>
                 ) : (
@@ -319,7 +330,7 @@ export const FilterPanel: React.FC<{
                         key={o.value}
                         type="button"
                         onClick={() => pick(field, o)}
-                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] ${
+                        className={`flex w-full items-center gap-2 px-3 py-1 text-left text-[13px] ${
                           on ? 'bg-teal-50/70 font-medium text-teal-900' : 'text-gray-700 hover:bg-gray-50'}`}
                       >
                         <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${

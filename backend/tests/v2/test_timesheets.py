@@ -184,6 +184,19 @@ def test_add_task_picker_lists_trackable_tasks(api, org):
     assert [x["name"] for x in found] == ["GST return"] and found[0]["location"] == "Ops / Payroll"
 
 
+def test_add_task_picker_puts_my_open_tasks_first(api, org):
+    lst = org["list"]["id"]
+    closed = [st for st in ok(api.get(f"/lists/{lst}/statuses", "owner"))["statuses"] if st["group"] == "closed"][0]
+    mine = ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "My open one", "assignees": ["member"]}), 201)
+    finished = ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "My finished one", "assignees": ["member"]}), 201)
+    ok(api.patch(f"/tasks/{finished['id']}", "owner", {"status_id": closed["id"]}))
+    ok(api.patch(f"/tasks/{org['a']['id']}", "owner", {"name": "Salary sheet v2"}))  # most recently touched
+    names = [x["name"] for x in ok(api.get(f"/workspaces/{org['ws']}/timesheet/tasks", "member", params={"q": ""}))]
+    assert names[0] == "My open one" and names[-1] == "My finished one"
+    assert names.index("Salary sheet v2") < names.index("My finished one")
+    assert mine["id"]
+
+
 # --- approvals --------------------------------------------------------------------------------------------
 
 
@@ -267,3 +280,19 @@ def test_timer_cannot_start_in_a_locked_week(api, approvals_on):
     today = datetime.now(timezone.utc).date()
     ok(api.post(f"/workspaces/{org['ws']}/timesheet/submit", "member", {"start": today.isoformat(), "tz": "UTC"}))
     assert api.post(f"/tasks/{org['a']['id']}/timer", "member").status_code == 403
+
+
+def test_cells_for_days_ahead_are_refused_and_today_ends_now(api, org):
+    today = datetime.now(timezone.utc).date()
+    tomorrow = today + timedelta(days=1)
+    r = cell(api, org, "member", org["a"], tomorrow, 2)
+    assert r.status_code == 400 and "already started" in r.json()["detail"]
+    now = datetime.now(timezone.utc)
+    if now.hour >= 1:  # an hour fits in the day so far
+        assert cell(api, org, "member", org["a"], today, 1).status_code == 204
+        entries = ok(api.get(f"/tasks/{org['a']['id']}/time", "member"))["entries"]
+        ended = datetime.fromisoformat(entries[0]["ended_at"].replace("Z", "+00:00"))
+        assert ended <= datetime.now(timezone.utc) + timedelta(seconds=5)
+    # more than the day has held so far would be work not done yet
+    if now.hour < 23:
+        assert cell(api, org, "member", org["a"], today, 23.99).status_code == 400

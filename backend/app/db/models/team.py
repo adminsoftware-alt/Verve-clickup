@@ -4,8 +4,8 @@ from typing import Optional
 
 from typing import Any, Dict, List
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, false, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, false, func
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin
@@ -33,6 +33,9 @@ class Team(TimestampMixin, Base):
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     # A sub-team: its people count as members of the parent Team too (shares, mentions, dashboards).
     parent_team_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"), index=True)
+    # The Team's working week, seconds per weekday (Monday first). None means the company's.
+    # A person's own hours still win over it; see working_time.weekly_hours.
+    capacity_seconds: Mapped[Optional[List[int]]] = mapped_column(ARRAY(Integer))
 
 
 Index(

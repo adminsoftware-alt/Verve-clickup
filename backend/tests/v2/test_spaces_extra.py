@@ -12,6 +12,11 @@ from app.services.work import email_to_list, sprints
 from tests.v2.conftest import ok
 
 
+def _today() -> date:
+    """The server's "today" is the UTC date; the local date differs for part of the day in India."""
+    return datetime.now(timezone.utc).date()
+
+
 def _task(api, list_id, name, who="owner", **extra):
     return ok(api.post(f"/lists/{list_id}/tasks", who, {"name": name, **extra}), 201)
 
@@ -154,7 +159,7 @@ def test_public_links_show_tasks_without_signing_in(api, workspace, space, folde
     ok(api.delete(f"/public-links/{link['id']}", "owner"), 204)
     assert api.client.get(f"/api/v2/public/{link['token']}").status_code == 404
 
-    old = ok(api.post("/public-links", "owner", {"kind": "list", "target_id": lst, "expires_on": (date.today() - timedelta(days=1)).isoformat()}), 201)
+    old = ok(api.post("/public-links", "owner", {"kind": "list", "target_id": lst, "expires_on": (_today() - timedelta(days=1)).isoformat()}), 201)
     assert api.client.get(f"/api/v2/public/{old['token']}").status_code == 404
     assert api.post("/public-links", "owner", {"kind": "task", "target_id": ok(api.get(f"/lists/{lst}/tasks", "owner"))["tasks"][2]["id"]}).status_code == 403
 
@@ -218,7 +223,7 @@ def test_time_in_status_from_history(api, space, folderless_list):
 def test_sprints_roll_over_and_report(api, workspace, space):
     ok(api.patch(f"/spaces/{space['id']}", "owner", {"clickapps": {"sprint_points": True}}))
     folder = ok(api.post(f"/spaces/{space['id']}/folders", "owner", {"name": "Engineering"}), 201)
-    monday = date.today() - timedelta(days=date.today().weekday())
+    monday = _today() - timedelta(days=_today().weekday())
     assert api.put(f"/folders/{folder['id']}/sprints", "guest", {}).status_code == 404
     out = ok(api.put(f"/folders/{folder['id']}/sprints", "owner", {"weeks": 1, "first_start": monday.isoformat()}))
     assert out["sprint_settings"]["weeks"] == 1
@@ -232,7 +237,7 @@ def test_sprints_roll_over_and_report(api, workspace, space):
     report = ok(api.get(f"/lists/{first['id']}/sprint", "member"))
     assert report["unit"] == "points" and report["sprint"]["total_points"] == 8 and report["sprint"]["done_points"] == 5
     assert report["burndown"][0]["ideal"] == 8 and report["burndown"][-1]["ideal"] == 0
-    today = next(d for d in report["burndown"] if d["day"] == date.today().isoformat())
+    today = next(d for d in report["burndown"] if d["day"] == _today().isoformat())
     assert today["remaining"] == 3
 
     assert api.post(f"/lists/{first['id']}/sprint/complete", "guest", {}).status_code == 404
@@ -249,7 +254,7 @@ def test_sprints_roll_over_and_report(api, workspace, space):
 
 def test_sprints_auto_complete_when_their_end_passes(api, space):
     folder = ok(api.post(f"/spaces/{space['id']}/folders", "owner", {"name": "Eng"}), 201)
-    start = date.today() - timedelta(days=21)
+    start = _today() - timedelta(days=21)
     ok(api.put(f"/folders/{folder['id']}/sprints", "owner", {"weeks": 1, "first_start": start.isoformat(), "auto_complete": True}))
     [first] = ok(api.get(f"/folders/{folder['id']}/sprints", "owner"))
     _task(api, first["id"], "Carry me")
@@ -311,7 +316,7 @@ def test_email_to_list(api, space, folderless_list, monkeypatch):
 
 def test_doc_view_saves_with_versions(api, space, folderless_list):
     lst = folderless_list["id"]
-    doc = ok(api.post(f"/lists/{lst}/views", "owner", {"type": "doc"}), 201)
+    doc = ok(api.post(f"/spaces/{space['id']}/views", "owner", {"type": "doc"}), 201)
     assert doc["name"] == "Doc"
     assert ok(api.get(f"/views/{doc['id']}/content", "member")) == {"content": {}, "version": 0, "updated_by": None, "updated_at": None}
     saved = ok(api.put(f"/views/{doc['id']}/content", "member", {"content": {"pages": [{"title": "SOP", "body": "<p>Step 1</p>"}]}, "version": 0}))
@@ -320,7 +325,7 @@ def test_doc_view_saves_with_versions(api, space, folderless_list):
     assert api.put(f"/views/{doc['id']}/content", "guest", {"content": {}, "version": 1}).status_code == 404
     lv = ok(api.get(f"/lists/{lst}/views", "owner"))[0]
     assert api.get(f"/views/{lv['id']}/content", "owner").status_code == 400
-    wb = ok(api.post(f"/lists/{lst}/views", "owner", {"type": "whiteboard"}), 201)
+    wb = ok(api.post(f"/spaces/{space['id']}/views", "owner", {"type": "whiteboard"}), 201)
     ok(api.put(f"/views/{wb['id']}/content", "owner", {"content": {"items": [{"kind": "sticky", "text": "Idea"}]}, "version": 0}))
     link = ok(api.post("/public-links", "owner", {"kind": "view", "target_id": doc["id"]}), 201)
     assert api.client.get(f"/api/v2/public/{link['token']}").json()["doc"]["pages"][0]["title"] == "SOP"
@@ -350,7 +355,7 @@ def test_chat_view_messages_mentions_and_tasks(api, workspace, space, folderless
 
 def test_embed_view_and_location_field(api, space, folderless_list):
     lst = folderless_list["id"]
-    emb = ok(api.post(f"/lists/{lst}/views", "owner", {"type": "embed"}), 201)
+    emb = ok(api.post(f"/spaces/{space['id']}/views", "owner", {"type": "embed"}), 201)
     out = ok(api.put(f"/views/{emb['id']}/embed", "owner", {"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}))
     assert out["settings"]["url"] == "https://www.youtube.com/embed/dQw4w9WgXcQ"
     assert api.put(f"/views/{emb['id']}/embed", "owner", {"url": "http://example.com"}).status_code == 422
@@ -362,8 +367,8 @@ def test_embed_view_and_location_field(api, space, folderless_list):
     val = ok(api.put(f"/tasks/{task['id']}/fields/{field['id']}", "owner", {"value": {"address": "Bandra, Mumbai", "lat": 19.0596, "lng": 72.8295}}))
     assert val["value"]["lat"] == 19.0596
     assert api.put(f"/tasks/{task['id']}/fields/{field['id']}", "owner", {"value": {"lat": 200, "lng": 0}}).status_code == 400
-    ok(api.post(f"/lists/{lst}/views", "owner", {"type": "map"}), 201)
-    ok(api.post(f"/lists/{lst}/views", "owner", {"type": "mind_map"}), 201)
+    ok(api.post(f"/spaces/{space['id']}/views", "owner", {"type": "map"}), 201)
+    ok(api.post(f"/spaces/{space['id']}/views", "owner", {"type": "mind_map"}), 201)
 
 
 @pytest.fixture(autouse=True)

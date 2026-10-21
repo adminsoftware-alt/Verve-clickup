@@ -15,7 +15,7 @@ const Shell: React.FC<{ title: string; onClose: () => void; children: React.Reac
           className={`flex max-h-[88vh] ${wide ? 'w-[34rem]' : 'w-[28rem]'} max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white p-5 shadow-xl`}>
           <div className="mb-3 flex items-center">
             <h3 className="font-semibold text-gray-900">{title}</h3>
-            <button type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </div>
           {children}
         </div>
@@ -133,7 +133,7 @@ export const TagManagerDialog: React.FC<{ spaceId: string; spaceName: string; ca
             <span className="text-xs text-gray-400">{t.task_count} task{t.task_count === 1 ? '' : 's'}</span>
             {canEdit && (
               <span className="ml-auto flex gap-1 opacity-60 group-hover:opacity-100">
-                <button type="button" title={`Rename ${t.name}`} onClick={async () => { const n = await ask.prompt('Rename tag (use another tag’s name to merge them)', t.name); if (n && n.trim() && n.trim() !== t.name) run(() => workApi.updateTag(t.id, { name: n.trim() })); }} className="rounded p-1 text-gray-400 hover:text-gray-700"><Pencil size={13} /></button>
+                <button aria-label={`Rename ${t.name}`} type="button" title={`Rename ${t.name}`} onClick={async () => { const n = await ask.prompt('Rename tag (use another tag’s name to merge them)', t.name); if (n && n.trim() && n.trim() !== t.name) run(() => workApi.updateTag(t.id, { name: n.trim() })); }} className="rounded p-1 text-gray-400 hover:text-gray-700"><Pencil size={13} /></button>
                 <button type="button" title={`Delete ${t.name}`} onClick={async () => await ask.confirm({ danger: true, title: `Delete the tag “${t.name}” from every task in ${spaceName}?` }) && run(() => workApi.deleteTag(t.id))} className="rounded p-1 text-gray-300 hover:text-red-600"><Trash2 size={13} /></button>
               </span>
             )}
@@ -174,7 +174,7 @@ export const TaskTypesDialog: React.FC<{ onClose: () => void; onChanged: () => v
             <span className="flex-1 text-sm text-gray-800">{t.name}{t.is_milestone && <span className="ml-2 text-xs text-gray-400">milestone</span>}</span>
             {isAdmin && (
               <>
-                <button type="button" title={`Rename ${t.name}`} onClick={async () => { const n = await ask.prompt('Rename type', t.name); if (n && n.trim()) run(() => workApi.updateTaskType(workspace.id, t.id, { name: n.trim() })); }} className="text-gray-300 hover:text-gray-700"><Pencil size={13} /></button>
+                <button aria-label={`Rename ${t.name}`} type="button" title={`Rename ${t.name}`} onClick={async () => { const n = await ask.prompt('Rename type', t.name); if (n && n.trim()) run(() => workApi.updateTaskType(workspace.id, t.id, { name: n.trim() })); }} className="text-gray-300 hover:text-gray-700"><Pencil size={13} /></button>
                 <button type="button" title={`Delete ${t.name}`} onClick={async () => await ask.confirm({ danger: true, title: `Delete the type “${t.name}”? Its tasks become plain tasks.` }) && run(() => workApi.deleteTaskType(workspace.id, t.id))} className="text-gray-300 hover:text-red-600"><Trash2 size={13} /></button>
               </>
             )}

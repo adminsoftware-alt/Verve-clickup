@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Lock, PartyPopper, Send, Trash2, TrendingUp } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Lock, PartyPopper, Send, Trash2 } from 'lucide-react';
 import { useMe } from '../WorkContext';
 import { workApi, type Task, type UserRef } from '../api';
 import { Avatar, AvatarStack, StatusDot, formatDue, formatDuration } from '../ui';
@@ -324,7 +324,6 @@ const Empty: React.FC<{ text?: string }> = ({ text = 'No matching tasks' }) => (
 const PieCard: React.FC<{ segments: Segment[]; format: string; total: number; donut: boolean } & Pick<CardHandlers, 'onDrill'>> = ({ segments, format, total, donut, onDrill }) => {
   if (!segments.length || !total) return <Empty />;
   const share = (value: number) => (total ? (100 * value) / total : 0);
-  const biggest = [...segments].sort((a, b) => b.value - a.value)[0];
 
   // Each slice is named where it sits, with a leader line back to it, so nothing has to be
   // matched up against a legend on the far side of the card.
@@ -381,26 +380,8 @@ const PieCard: React.FC<{ segments: Segment[]; format: string; total: number; do
           </div>
         )}
       </div>
-
-      {/* What the split means, rather than leaving the reader to work out which slice is biggest. */}
-      {biggest && (
-        <button
-          type="button"
-          onClick={() => onDrill(biggest.key, biggest.label)}
-          className="flex items-center gap-2.5 rounded-lg bg-gray-50 px-3 py-2 text-left hover:bg-gray-100"
-          title={`Show the ${biggest.label} tasks`}
-        >
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${biggest.color}1f`, color: biggest.color }}>
-            <TrendingUp size={14} />
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate text-xs font-semibold text-gray-800">Most of your work is {biggest.label}</span>
-            <span className="block truncate text-[11px] text-gray-500">
-              {share(biggest.value).toFixed(1)}% of the total sits there.
-            </span>
-          </span>
-        </button>
-      )}
+      {/* "Most of your work is In progress" used to sit here. The chart and its legend already
+          say it, and the board's notes now live together in Highlights at the foot of the page. */}
     </div>
   );
 };
@@ -494,7 +475,9 @@ const BarCard: React.FC<{ segments: Segment[]; format: string } & Pick<CardHandl
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={shown} margin={{ top: 30, right: 8, bottom: crowded ? 34 : 0, left: 6 }}>
+          {/* The figure and its share sit above each bar and need about 36px; any less and the
+              tallest bar's label is cut off at the top of the card. */}
+          <BarChart data={shown} margin={{ top: 40, right: 8, bottom: crowded ? 34 : 0, left: 6 }}>
             <defs>
               {shown.map((sg) => (
                 <linearGradient key={sg.key} id={`bar-${sg.key.replace(/[^\w-]/g, '')}`} x1="0" y1="0" x2="0" y2="1">
@@ -526,10 +509,11 @@ const BarCard: React.FC<{ segments: Segment[]; format: string } & Pick<CardHandl
               }}
               tickFormatter={(v: number) => (format === 'duration' ? `${Math.round(v / 3600)}h` : String(v))}
             />
-            <Tooltip formatter={(v: number) => fmt(v, format)} cursor={{ fill: '#f5f5ff' }} />
+            <Tooltip formatter={(v: number) => fmt(v, format)} cursor={{ fill: '#f3f4f6' }} />
             <Bar
               dataKey="value"
               radius={[8, 8, 0, 0]}
+              maxBarSize={96}
               isAnimationActive={false}
               onClick={(entry: { key?: string; label?: string }) => entry.key && onDrill(entry.key, entry.label ?? '')}
             >
@@ -618,27 +602,41 @@ const DiscussionCard: React.FC<{ dashboardId: string; cardId: string }> = ({ das
 
 const TaskListCard: React.FC<{ tasks: Task[]; total: number; onOpenTask: (id: string) => void; onMore: () => void }> = ({ tasks, total, onOpenTask, onMore }) => {
   if (!tasks.length) return <Empty />;
+  // Rows, not a table.
+  //
+  // The table gave Assignee 7rem and Due 6rem whatever the card's width, and these cards sit three
+  // to a row -- a quarter of the screen each. Thirteen rem of fixed columns in a narrow card push
+  // the rest off the left edge, which is why the first heading read "me" instead of "Name" and why
+  // a date as short as "14 Sep" came out on two lines.
+  //
+  // A flex row cannot do that: the name takes what is left and truncates, the two on the right
+  // take exactly what they need and never wrap.
   return (
     <div className="h-full overflow-y-auto">
-      <table className="w-full text-sm">
-        <thead className="sticky top-0 bg-white text-left text-[11px] font-medium text-gray-400">
-          <tr><th className="py-1 pl-1 font-medium">Name</th><th className="w-28 font-medium">Assignee</th><th className="w-24 font-medium">Due</th></tr>
-        </thead>
-        <tbody>
-          {tasks.map((t) => (
-            <tr key={t.id} onClick={() => onOpenTask(t.id)} className="cursor-pointer border-t border-gray-100 hover:bg-gray-50">
-              <td className="py-1.5 pl-1">
-                <span className="flex min-w-0 items-center gap-2">
-                  <StatusDot status={t.status} size={11} />
-                  <span className={`truncate ${t.status.group === 'closed' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{t.name}</span>
-                </span>
-              </td>
-              <td><AvatarStack users={t.assignees} max={3} /></td>
-              <td className={`text-xs ${t.is_overdue ? 'text-red-600' : 'text-gray-500'}`}>{formatDue(t.due_date)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="sticky top-0 z-10 flex items-center gap-2 bg-white py-1 pl-1 text-[11px] font-medium text-gray-400">
+        <span className="min-w-0 flex-1">Name</span>
+        <span className="w-12 shrink-0 text-center">Who</span>
+        <span className="w-14 shrink-0 text-right">Due</span>
+      </div>
+      <ul>
+        {tasks.map((t) => (
+          <li key={t.id}>
+            <button
+              type="button" onClick={() => onOpenTask(t.id)}
+              className="flex w-full items-center gap-2 border-t border-gray-100 py-1.5 pl-1 text-left text-sm hover:bg-gray-50"
+            >
+              <StatusDot status={t.status} size={11} />
+              <span className={`min-w-0 flex-1 truncate ${t.status.group === 'closed' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+                {t.name}
+              </span>
+              <span className="flex w-12 shrink-0 justify-center"><AvatarStack users={t.assignees} max={2} /></span>
+              <span className={`w-14 shrink-0 whitespace-nowrap text-right text-xs ${t.is_overdue ? 'text-red-600' : 'text-gray-500'}`}>
+                {formatDue(t.due_date)}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
       {total > tasks.length && (
         <button type="button" onClick={onMore} className="mt-1 w-full py-1 text-center text-xs text-brand-600 hover:underline">
           Show all {total}
@@ -648,8 +646,9 @@ const TaskListCard: React.FC<{ tasks: Task[]; total: number; onOpenTask: (id: st
   );
 };
 
-const OnlyYours: React.FC<{ seesEveryone: boolean }> = ({ seesEveryone }) =>
-  seesEveryone ? null : <p className="mt-1 text-[11px] text-gray-400">Showing your time, and your Team's if you lead one.</p>;
+// "Showing your time, and your Team's if you lead one" used to be printed under every time card.
+// The cards keep only their heading now; who may see whose time is the rule, not news.
+const OnlyYours: React.FC<{ seesEveryone: boolean }> = () => null;
 
 /**
  * Hours per person for a period, against the hours each of them had.
@@ -991,10 +990,6 @@ const TimesheetCard: React.FC<{
     };
     onShift(move(days[0]), move(days[span - 1]));
   };
-  const logged = rows.reduce((n, r) => n + r.total, 0);
-  // Everyone the card covers now gets a row, so the empty ones are countable here.
-  const nobodyLogged = rows.filter((r) => !r.total).length;
-  const able = rows.reduce((n, r) => n + (r.capacity_per_day ?? capacity).reduce((m, v) => m + v, 0), 0);
   const range = span
     ? `${new Date(`${days[0]}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${new Date(`${days[span - 1]}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
     : '';
@@ -1002,18 +997,6 @@ const TimesheetCard: React.FC<{
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <span className="text-lg font-semibold leading-none text-gray-900">{formatDuration(logged) || '0h'}</span>
-        <span className="text-xs text-gray-500">logged of {formatDuration(able) || '0h'}</span>
-        {able > logged + 60 && (
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">{formatDuration(able - logged)} to go</span>
-        )}
-        {/* The rows with nothing on them are the point of this card for a manager, so they are
-            counted out loud rather than left to be noticed. */}
-        {!!nobodyLogged && (
-          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
-            {nobodyLogged} logged nothing
-          </span>
-        )}
         {onShift && (
           <span className="no-print ml-auto flex items-center gap-1">
             <button type="button" onClick={() => shift(-1)} aria-label="Previous period"

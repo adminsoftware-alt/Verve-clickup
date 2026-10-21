@@ -13,7 +13,7 @@ Follows ClickUp's Workload view:
 
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Dict, List, Optional, Set, Tuple
+from typing import AbstractSet, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -32,6 +32,7 @@ from app.schemas import work as s
 from app.services.work.access import Access, Opened, chain_for_folder, chain_for_list, chain_for_space
 from app.services.work.permissions import Node
 from app.services.work.errors import Invalid
+from app.services.work.permissions import can_manage_workspace
 from app.services.work.statuses import OPEN_GROUPS
 from app.services.work.tasks import TaskFilter, visible_lists, visible_tasks
 from app.services.work.teams import team_or_404
@@ -46,16 +47,18 @@ def capacity_for(day: date) -> int:
     return WORKDAY_SECONDS if day.weekday() in WORKING_WEEKDAYS else 0
 
 
-def spread(estimate: int, first: date, last: date) -> Dict[date, int]:
+def spread(estimate: int, first: date, last: date, workdays: Optional[AbstractSet[int]] = None) -> Dict[date, int]:
     """Divide an estimate evenly over the working days in [first, last].
 
-    If the span has no working days at all, it is divided over every day in it, so the
-    effort still shows up (on zero-capacity days) instead of vanishing.
+    `workdays` are the weekdays (0 = Monday) the person works -- six for a six-day Team -- and
+    default to Monday to Friday. If the span has no working days at all, it is divided over every
+    day in it, so the effort still shows up (on zero-capacity days) instead of vanishing.
     """
     if last < first:
         first, last = last, first
+    working = WORKING_WEEKDAYS if workdays is None else workdays
     span = [first + timedelta(days=i) for i in range((last - first).days + 1)]
-    days = [d for d in span if d.weekday() in WORKING_WEEKDAYS] or span
+    days = [d for d in span if d.weekday() in working] or span
     share, remainder = divmod(estimate, len(days))
     # Hand leftover seconds to the earliest days so the total is exact.
     return {d: share + (1 if i < remainder else 0) for i, d in enumerate(days)}
@@ -83,7 +86,13 @@ def _chain_for(db: Session, location) -> List[Node]:
     return chain_for_list(db, location)
 
 
-def _people_who_can_see(db: Session, location, workspace_id: uuid.UUID) -> List[User]:
+def _people_who_can_see(db: Session, location, workspace_id: uuid.UUID, assigned: Set[str]) -> List[User]:
+    """The people whose week this location's Workload is about.
+
+    Everyone who can open it -- except owners and admins, who can open every List in the firm and
+    so had a row on every Team's Workload. They appear where they have work assigned here, like
+    anyone else would; otherwise a Team's Workload is that Team's people.
+    """
     rows = db.execute(
         select(WorkspaceMember, User)
         .join(User, User.id == WorkspaceMember.user_id)
@@ -93,6 +102,8 @@ def _people_who_can_see(db: Session, location, workspace_id: uuid.UUID) -> List[
     chain = _chain_for(db, location)
     people = []
     for member, user in rows:
+        if can_manage_workspace(member.role) and user.id not in assigned:
+            continue
         viewer = Access(db, user.id, workspace_id, member.role)
         if viewer.level(chain) is not None:
             people.append(user)
@@ -137,6 +148,9 @@ def my_workload(
             )
         ))
 
+    from app.services.work.working_time import working_weekdays
+
+    my_days = working_weekdays(db, access.workspace_id, [access.user_id])[access.user_id]
     scheduled = [0] * days
     row_tasks: List[s.WorkloadTask] = []
     unscheduled: List[Task] = []
@@ -154,7 +168,7 @@ def my_workload(
         if task.time_estimate_seconds is None:
             no_estimate.append(task)
             continue
-        per_day = spread(task.time_estimate_seconds, _local_date(begins, tz), _local_date(ends, tz))
+        per_day = spread(task.time_estimate_seconds, _local_date(begins, tz), _local_date(ends, tz), my_days)
         seconds = [per_day.get(d, 0) for d in window]
         if not any(seconds):
             continue
@@ -165,7 +179,7 @@ def my_workload(
             status=s.StatusOut.model_validate(statuses[task.status_id]), seconds_per_day=seconds,
         ))
 
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
 
     own = daily_capacity(db, access.workspace_id, [access.user_id], window)
     me = db.get(User, access.user_id)
@@ -221,18 +235,31 @@ def workload(
             assignees.setdefault(task_id, []).append(user_id)
 
     # Who gets a row: everyone who can see this location, or one Team's members.
-    people = _people_who_can_see(db, location, opened.access.workspace_id)
+    people = _people_who_can_see(
+        db, location, opened.access.workspace_id, {uid for ids in assignees.values() for uid in ids},
+    )
     team_members: Optional[Set[str]] = None
     if team_id is not None:
         team = team_or_404(db, opened.access, team_id)
         from app.services.work import team_tree
 
         team_members = team_tree.people(db, [team.id])  # sub-teams count too
+    # Whose week the viewer may see (as for tracked time): an employee their own, a manager
+    # theirs and their Teams' people, an admin everyone.
+    if not can_manage_workspace(opened.access.role):
+        from app.services.work.dashboards.access import Standing
+
+        mine = Standing.load(db, opened.access).led_people | {opened.access.user_id}
+        team_members = mine if team_members is None else team_members & mine
+    if team_members is not None:
         people = [p for p in people if p.id in team_members]
     rows: Dict[Optional[str], Tuple[Optional[User], List[int], List[s.WorkloadTask]]] = {
         p.id: (p, [0] * days, []) for p in people
     }
 
+    from app.services.work.working_time import working_weekdays
+
+    weekdays = working_weekdays(db, opened.access.workspace_id, {uid for ids in assignees.values() for uid in ids})
     unscheduled: List[Task] = []
     no_estimate: List[Task] = []
     for task in open_tasks:
@@ -252,30 +279,28 @@ def workload(
         if task.time_estimate_seconds is None:
             no_estimate.append(task)
             continue
-        per_day = spread(task.time_estimate_seconds, first, last)
-        seconds = [per_day.get(d, 0) for d in window]
-        if not any(seconds):
-            continue
-        entry = s.WorkloadTask(
-            id=task.id,
-            name=task.name,
-            list_id=task.list_id,
-            priority=task.priority,
-            status=s.StatusOut.model_validate(statuses[task.status_id]),
-            seconds_per_day=seconds,
-        )
+        status_out = s.StatusOut.model_validate(statuses[task.status_id])
         for uid in who:
             if uid not in rows:
                 if uid is None:
                     rows[None] = (None, [0] * days, [])
                 else:
                     continue  # assignee who cannot see this location
+            # Spread over this person's own working days: a six-day week takes Saturday's share.
+            per_day = spread(task.time_estimate_seconds, first, last, weekdays.get(uid) if uid else None)
+            seconds = [per_day.get(d, 0) for d in window]
+            if not any(seconds):
+                continue
+            entry = s.WorkloadTask(
+                id=task.id, name=task.name, list_id=task.list_id, priority=task.priority,
+                status=status_out, seconds_per_day=seconds,
+            )
             _, scheduled, row_tasks = rows[uid]
             for i, value in enumerate(seconds):
                 scheduled[i] += value
             row_tasks.append(entry)
 
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
 
     # Each person's own working hours, less company holidays and approved leave.
     capacities = daily_capacity(db, opened.access.workspace_id, [u.id for u, _, _ in rows.values() if u], window)

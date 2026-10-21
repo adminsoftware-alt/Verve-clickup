@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { CalendarDays, ChevronDown, ChevronRight, Clock, DollarSign, ExternalLink, MoreHorizontal, MoveRight, Pencil, Play, Plus, Tag as TagIcon, Trash2 } from 'lucide-react';
 import { Menu, StatusDot, formatDuration, parseDuration } from '../ui';
 import { isoDay, type EntryUpdate, type SheetEntry, type SheetRow, type TimeTag, type Timesheet } from './api';
-import { Popover, TaskPicker, dayLabel, hours } from './pieces';
+import { Popover, TaskPicker, dayLabel, hours, isWeekend, WEEKEND } from './pieces';
 import { CellCard, DayCard, HoverCard } from './Hover';
 import { TrackTime } from '../task/TrackTime';
 import { ask } from '../../components/ask';
@@ -18,6 +18,7 @@ export interface EntryActions {
 
 const COLS = 'minmax(340px,2.8fr) repeat(7, minmax(84px,1fr)) minmax(110px,1fr)';
 
+
 /** The day header: date, total, and tracked-vs-capacity bar, with the full breakdown on hover. */
 const DayHead: React.FC<{ iso: string; tracked: number; billable: number; capacity: number; today: boolean }> = ({ iso, tracked, billable, capacity, today }) => {
   const over = tracked > capacity;
@@ -25,10 +26,10 @@ const DayHead: React.FC<{ iso: string; tracked: number; billable: number; capaci
   const long = new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
   return (
     <HoverCard
-      className={`border-l border-gray-100 px-2.5 py-3 ${today ? 'bg-brand-50/40' : ''}`}
+      className={`border-l border-gray-100 px-2.5 py-3 ${today ? 'bg-brand-50/40' : isWeekend(iso) ? WEEKEND : ''}`}
       card={<DayCard title={long} capacity={capacity} tracked={tracked} billable={billable} />}
     >
-      <div className={`text-xs ${today ? 'font-medium text-brand-700' : 'text-gray-500'}`}>{dayLabel(iso)}</div>
+      <div className={`text-xs ${today ? 'font-medium text-brand-700' : isWeekend(iso) ? 'font-medium text-gray-400' : 'text-gray-500'}`}>{dayLabel(iso)}</div>
       <div className="mt-0.5 text-base text-gray-900">{hours(tracked)}</div>
       <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-gray-200">
         <div className={`h-full rounded-full ${over ? 'bg-red-500' : 'bg-brand-500'}`} style={{ width: `${pct}%` }} />
@@ -59,7 +60,7 @@ const Cell: React.FC<{
     setError(false);
     if (value !== seconds) await onSave(value);
   };
-  const base = `flex h-full items-center justify-end border-l border-gray-100 text-sm ${muted ? 'bg-gray-50' : ''}`;
+  const base = `flex h-full items-center justify-end border-l border-gray-100 text-sm ${isWeekend(day) ? WEEKEND : muted ? 'bg-gray-50' : ''}`;
   if (draft !== null) {
     return (
       <div className={`${base} px-3`}>
@@ -208,7 +209,7 @@ export const Grid: React.FC<{
           const rowMenu = [
             ...(row.task.can_open ? [{ label: 'Open task', icon: <ExternalLink size={14} />, onClick: () => onOpenTask(row.task.id) }] : []),
             ...(onStartTimer && row.task.can_open ? [{ label: 'Start timer', icon: <Play size={14} />, onClick: () => onStartTimer(row.task.id) }] : []),
-            ...(editable ? [{ label: 'Delete row', icon: <Trash2 size={14} />, danger: true, onClick: () => onDeleteRow(row) }] : []),
+            ...(editable ? [{ label: 'Delete task', icon: <Trash2 size={14} />, danger: true, onClick: () => onDeleteRow(row) }] : []),
           ];
           return (
             <div key={row.task.id} className="border-b border-gray-100 last:border-b-0" role="rowgroup">
@@ -245,8 +246,8 @@ export const Grid: React.FC<{
                   <div className="flex min-w-0 items-center gap-2 py-2 pl-12 pr-3">
                     <EntryDetails entry={entry} editable={editable} actions={actions} />
                   </div>
-                  {sheet.days.map((_, i) => (
-                    <div key={i} className="flex items-center justify-end border-l border-gray-100 px-3 text-gray-600">
+                  {sheet.days.map((d, i) => (
+                    <div key={i} className={`flex items-center justify-end border-l border-gray-100 px-3 text-gray-600 ${isWeekend(d) ? WEEKEND : ''}`}>
                       {entry.day === i ? (entry.running ? <span className="text-red-600">running</span> : formatDuration(entry.duration_seconds)) : ''}
                     </div>
                   ))}
@@ -289,7 +290,7 @@ export const EntryDetails: React.FC<{ entry: SheetEntry; editable: boolean; acti
   const time = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   return (
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-      <button
+      <button aria-label={entry.billable ? 'Billable' : 'Not billable'}
         type="button"
         title={entry.billable ? 'Billable' : 'Not billable'}
         disabled={!editable || entry.running}
@@ -324,7 +325,7 @@ export const TagPicker: React.FC<{ entry: SheetEntry; actions: EntryActions }> =
   const chosen = new Set(entry.tags.map((t) => t.id));
   const toggle = (id: string) => actions.onUpdate(entry, { tag_ids: chosen.has(id) ? [...chosen].filter((x) => x !== id) : [...chosen, id] });
   return (
-    <Popover width={220} trigger={(open) => <button type="button" title="Tags" onClick={open} className="rounded p-0.5 text-gray-300 hover:text-gray-600"><TagIcon size={12} /></button>}>
+    <Popover width={220} trigger={(open) => <button aria-label="Tags" type="button" title="Tags" onClick={open} className="rounded p-0.5 text-gray-300 hover:text-gray-600"><TagIcon size={12} /></button>}>
       {() => (
         <div>
           <div className="mb-1 text-xs font-medium text-gray-500">Time tags</div>
@@ -339,7 +340,7 @@ export const TagPicker: React.FC<{ entry: SheetEntry; actions: EntryActions }> =
             className="mt-1 flex gap-1 border-t border-gray-100 pt-1.5"
             onSubmit={async (e) => { e.preventDefault(); if (!name.trim()) return; const tag = await actions.onCreateTag(name.trim()); setName(''); await actions.onUpdate(entry, { tag_ids: [...chosen, tag.id] }); }}
           >
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New tag" className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-0.5 text-xs" />
+            <input aria-label="New tag name" value={name} onChange={(e) => setName(e.target.value)} placeholder="New tag" className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-0.5 text-xs" />
             <button type="submit" className="rounded bg-brand-600 px-2 text-xs text-white">Add</button>
           </form>
         </div>

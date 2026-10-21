@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Flag } from 'lucide-react';
+import { Check, Flag, Search, X } from 'lucide-react';
 import { API_V2, type Status, type UserRef } from './api';
 
 // --- people ------------------------------------------------------------------
@@ -279,6 +279,88 @@ export const Menu: React.FC<{
 
 // --- name dialog -------------------------------------------------------------
 
+const PICKER_COLORS = ['#7c3aed', '#0ea5e9', '#16a34a', '#ea580c', '#db2777', '#4f46e5', '#0d9488', '#b45309', '#dc2626', '#64748b'];
+const initialsOf = (name: string) => name.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('');
+const colorOf = (id: string) => PICKER_COLORS[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % PICKER_COLORS.length];
+
+/** Initials in a coloured circle, for people known only by id and name. */
+export const InitialsAvatar: React.FC<{ id: string; name: string; size?: number }> = ({ id, name, size = 26 }) => (
+  <span aria-hidden className="flex shrink-0 items-center justify-center rounded-full font-semibold text-white"
+    style={{ width: size, height: size, fontSize: Math.round(size * 0.4), backgroundColor: colorOf(id) }}>
+    {initialsOf(name) || '?'}
+  </span>
+);
+
+/**
+ * Pick several people: who is chosen as chips you can take back, a search box, and the list with
+ * a tick on each one chosen. What a multiple <select> did, without Ctrl-clicking.
+ */
+export const PeoplePicker: React.FC<{
+  label: string;
+  people: { id: string; name: string }[];
+  value: string[];
+  onChange: (ids: string[]) => void;
+}> = ({ label, people, value, onChange }) => {
+  const [q, setQ] = useState('');
+  const chosen = new Set(value);
+  const byId = new Map(people.map((p) => [p.id, p]));
+  const shown = people.filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const toggle = (id: string) => onChange(chosen.has(id) ? value.filter((v) => v !== id) : [...value, id]);
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-sm font-medium text-gray-700">{label}</span>
+        {value.length > 0 && (
+          <button type="button" onClick={() => onChange([])} className="text-xs text-gray-500 hover:text-red-600">Clear ({value.length})</button>
+        )}
+      </div>
+      <div className="rounded-lg border border-gray-300 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100">
+        {value.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 border-b border-gray-100 p-2" aria-label="Chosen">
+            {value.map((id) => {
+              const p = byId.get(id);
+              if (!p) return null;
+              return (
+                <span key={id} className="inline-flex items-center gap-1 rounded-full bg-brand-50 py-0.5 pl-0.5 pr-1.5 text-xs text-brand-800 ring-1 ring-brand-100">
+                  <InitialsAvatar id={id} name={p.name} size={20} />
+                  {p.name}
+                  <button type="button" aria-label={`Remove ${p.name}`} onClick={() => toggle(id)} className="rounded-full p-0.5 text-brand-600 hover:bg-brand-100">
+                    <X size={11} />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+        <div className="flex items-center gap-2 px-2.5 py-1.5">
+          <Search size={14} className="shrink-0 text-gray-400" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people…" aria-label={`Search ${label.toLowerCase()}`}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (shown[0]) { toggle(shown[0].id); setQ(''); } } }}
+            className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none focus:ring-0" />
+        </div>
+        <ul role="listbox" aria-multiselectable aria-label={label} className="max-h-44 overflow-y-auto border-t border-gray-100 py-1">
+          {shown.map((p) => {
+            const on = chosen.has(p.id);
+            return (
+              <li key={p.id}>
+                <button type="button" role="option" aria-selected={on} onClick={() => toggle(p.id)}
+                  className={`flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left text-sm ${on ? 'bg-brand-50/60' : 'hover:bg-gray-50'}`}>
+                  <InitialsAvatar id={p.id} name={p.name} />
+                  <span className="min-w-0 flex-1 truncate text-gray-800">{p.name}</span>
+                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? 'border-brand-600 bg-brand-600 text-white' : 'border-gray-300'}`}>
+                    {on && <Check size={11} strokeWidth={3} />}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+          {shown.length === 0 && <li className="px-3 py-3 text-center text-xs text-gray-400">Nobody matches “{q}”</li>}
+        </ul>
+      </div>
+    </div>
+  );
+};
+
 export const NameDialog: React.FC<{
   title: string;
   initial?: string;
@@ -315,11 +397,12 @@ export const NameDialog: React.FC<{
         onSubmit={submit}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
-        className="w-96 max-w-[calc(100vw-2rem)] rounded-xl bg-white p-5 shadow-xl"
+        className="w-[28rem] max-w-[calc(100vw-2rem)] rounded-xl bg-white p-5 shadow-xl"
       >
         <h3 className="mb-3 text-base font-semibold text-gray-900">{title}</h3>
         <input
           autoFocus
+          aria-label={title}
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={100}
@@ -327,21 +410,12 @@ export const NameDialog: React.FC<{
           placeholder="Name"
         />
         {assignTo && assignTo.people.length > 0 && (
-          <label className="mt-3 block text-sm text-gray-700">
-            Assign to
-            <select
-              multiple
-              size={Math.min(5, Math.max(3, assignTo.people.length))}
-              value={assignees}
-              onChange={(e) => setAssignees([...e.target.selectedOptions].map((o) => o.value))}
-              className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500"
-            >
-              {assignTo.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            <span className="mt-1 block text-xs text-gray-500">
+          <div className="mt-4">
+            <PeoplePicker label="Assign to" people={assignTo.people} value={assignees} onChange={setAssignees} />
+            <p className="mt-1.5 text-xs text-gray-500">
               {assignees.length ? assignTo.note : 'Optional \u2014 leave empty to keep it for everyone here.'}
-            </span>
-          </label>
+            </p>
+          </div>
         )}
         {withPrivate && (
           <label className="mt-3 flex items-center gap-2 text-sm text-gray-600">

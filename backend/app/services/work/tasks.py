@@ -303,6 +303,7 @@ def create_task(
         parent = db.get(Task, data.parent_id)
         if parent is None or access.level(chain_for_task(db, parent)) is None:
             raise NotFound("Parent task not found")
+        _require_parent_edit(db, access, parent)
         if parent.list_id != lst.id:
             raise Invalid("A subtask must be created in its parent's List")
         if _depth(db, parent) + 1 > MAX_SUBTASK_DEPTH:
@@ -359,6 +360,16 @@ def create_task(
 # --- update ------------------------------------------------------------------
 
 
+def _require_parent_edit(db: Session, access, parent: Task) -> None:
+    """A subtask adds to its parent, so it takes edit on the parent -- after the employee cap, or
+    anyone could hang work under a colleague's task they may only comment on."""
+    from app.services.work.access import best_task_level
+
+    level = best_task_level(db, access, parent)
+    if level is None or not level.at_least(PermissionLevel.edit):
+        raise Forbidden("You can only comment on this task, so you can't add subtasks to it")
+
+
 def _reparent(db: Session, opened: Opened[Task], new_parent_id: Optional[uuid.UUID]) -> None:
     task, access = opened.obj, opened.access
     if new_parent_id == task.parent_id:
@@ -374,6 +385,7 @@ def _reparent(db: Session, opened: Opened[Task], new_parent_id: Optional[uuid.UU
         parent = db.get(Task, new_parent_id)
         if parent is None or access.level(chain_for_task(db, parent)) is None:
             raise NotFound("Parent task not found")
+        _require_parent_edit(db, access, parent)
         if parent.id == task.id or parent.id in {d.id for d in descendants}:
             raise Invalid("A task cannot become a subtask of itself or of its own subtasks")
         if parent.list_id != task.list_id:
@@ -749,7 +761,7 @@ class TaskFilter:
 
 def visible_lists(db: Session, opened: Opened) -> List[Tuple[TaskList, List[Node]]]:
     """The non-archived Lists inside a Space, Folder or List that the caller can open."""
-    obj, access = opened.obj, opened.access
+    obj = opened.obj
     if isinstance(obj, TaskList):
         candidates = [obj]
     elif isinstance(obj, Space):
@@ -757,11 +769,59 @@ def visible_lists(db: Session, opened: Opened) -> List[Tuple[TaskList, List[Node
     else:
         folder_ids = [obj.id] + list(db.scalars(select(Folder.id).where(Folder.parent_folder_id == obj.id)))
         candidates = list(db.scalars(select(TaskList).where(TaskList.folder_id.in_(folder_ids))))
+    return _openable(db, opened.access, candidates, obj)
+
+
+def visible_lists_in_spaces(db: Session, access, spaces: Sequence[Space]) -> List[Tuple[TaskList, List[Node]]]:
+    """visible_lists for several Spaces at once, in the Spaces' order: one question, not one each.
+
+    A Dashboard reading "everywhere" opens every Space in the firm, and asking for each Space's
+    Lists (and each List's Folder) separately was a round trip per Space and per Folder -- which
+    on a database a continent away is most of a 24-second page.
+    """
+    if not spaces:
+        return []
+    order = {space.id: i for i, space in enumerate(spaces)}
+    candidates = list(db.scalars(select(TaskList).where(TaskList.space_id.in_(list(order)))))
+    by_space: Dict[uuid.UUID, List[TaskList]] = {}
+    for lst in candidates:
+        by_space.setdefault(lst.space_id, []).append(lst)
+    out: List[Tuple[TaskList, List[Node]]] = []
+    held = _hold_parents(db, candidates, {space.id: space for space in spaces})
+    for space in spaces:
+        out.extend(_openable(db, access, by_space.get(space.id, []), space, held))
+    return out
+
+
+def _hold_parents(db: Session, lists: Sequence[TaskList], known: Optional[Dict[uuid.UUID, object]] = None) -> Dict[uuid.UUID, object]:
+    """Load the Folders (and their parents) and Spaces above these Lists in two or three queries.
+
+    The session's identity map holds objects weakly, so `db.get` in chain_for_list only skips the
+    database while something else still references them; this dict is that something.
+    """
+    held: Dict[uuid.UUID, object] = dict(known or {})
+    folder_ids = {lst.folder_id for lst in lists if lst.folder_id is not None}
+    while folder_ids:
+        found = list(db.scalars(select(Folder).where(Folder.id.in_(list(folder_ids)))))
+        held.update({f.id: f for f in found})
+        folder_ids = {f.parent_folder_id for f in found if f.parent_folder_id is not None} - set(held)
+    space_ids = {lst.space_id for lst in lists} | {f.space_id for f in held.values() if isinstance(f, Folder)}
+    space_ids -= set(held)
+    if space_ids:
+        held.update({sp.id: sp for sp in db.scalars(select(Space).where(Space.id.in_(list(space_ids))))})
+    return held
+
+
+def _openable(db: Session, access, candidates: Sequence[TaskList], obj, held: Optional[Dict[uuid.UUID, object]] = None) -> List[Tuple[TaskList, List[Node]]]:
+    if held is None:
+        held = _hold_parents(db, candidates)
     result = []
     for lst in sorted(candidates, key=lambda item: (item.orderindex, item.name.lower())):
         if lst.archived_at is not None and lst is not obj:
             continue
-        folder = db.get(Folder, lst.folder_id) if lst.folder_id else None
+        folder = held.get(lst.folder_id) if lst.folder_id else None
+        if folder is None and lst.folder_id:
+            folder = db.get(Folder, lst.folder_id)
         if folder is not None and folder.archived_at is not None and folder is not obj:
             continue
         chain = chain_for_list(db, lst)
@@ -844,6 +904,11 @@ def visible_tasks(
         levels[task.id] = level
         groups[task.id] = group
         visible.append(task)
+    # The level each task reports is the one its endpoints enforce: an employee is read-and-comment
+    # on a colleague's task even where the List itself resolves to full.
+    from app.services.work.access import cap_levels
+
+    cap_levels(db, access, visible, levels)
     return visible, levels, groups
 
 

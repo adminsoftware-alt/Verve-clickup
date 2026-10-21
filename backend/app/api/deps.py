@@ -3,15 +3,22 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.core.config import settings
 from app.core.firebase import verify_token
 
-security = HTTPBearer()
+# auto_error is off so a missing token answers 401 (not signed in) rather than FastAPI's 403.
+security = HTTPBearer(auto_error=False)
 
 DEV_PREFIX = "dev:"
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
     """
     Dependency to verify the Firebase JWT token and extract user details.
     """
+    if credentials is None or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not signed in",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     token = credentials.credentials
     # Local testing: "dev:<user id>" signs you in as that person, but only where DEV_LOGIN is on.
     if settings.DEV_LOGIN and token.startswith(DEV_PREFIX):

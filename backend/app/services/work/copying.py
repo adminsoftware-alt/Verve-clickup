@@ -266,12 +266,18 @@ def _copy_task_tree(
     return copy
 
 
+def _require_copyable(opened: Opened[Task]) -> None:
+    """Copying a task takes edit on it. With comment access (a colleague's task, see
+    access.employee_cap) a copy would be a way round the cap: their work, now yours to change."""
+    if not opened.level.at_least(PermissionLevel.edit):
+        raise Forbidden("You can only comment on this task, so you can't make a copy of it")
+
+
 def duplicate_task(
     db: Session, opened: Opened[Task], target: Opened[TaskList], name: Optional[str], include_subtasks: bool,
     parts: Optional[s.CopyParts] = None,
 ) -> Task:
-    if not opened.level.at_least(PermissionLevel.view):
-        raise Forbidden("You can't see this task")
+    _require_copyable(opened)
     _require_full(target, "create tasks in that List")
     task = opened.obj
     return _copy_task_tree(
@@ -297,8 +303,7 @@ def duplicate_to_people(
     from app.services.work.permissions import can_manage_workspace
 
     access = opened.access
-    if not opened.level.at_least(PermissionLevel.view):
-        raise Forbidden("You can't see this task")
+    _require_copyable(opened)
     others = [uid for uid in dict.fromkeys(user_ids) if uid != access.user_id]
     # A Personal List is private to its owner; putting work there is an admin's doing.
     if others and not can_manage_workspace(access.role):
@@ -423,7 +428,9 @@ def _copy_list(
 ) -> TaskList:
     copy = TaskList(
         space_id=space_id, folder_id=folder_id, name=name, description=lst.description, color=lst.color,
-        is_private=lst.is_private, created_by=actor,
+        # A copy of a Team's List is still that Team's: without this, duplicating
+        # "Attending Special Events - Atish" made a List the whole workspace could see.
+        is_private=lst.is_private, created_by=actor, team_id=lst.team_id,
         orderindex=_next_orderindex(
             db, TaskList.orderindex, TaskList.space_id == space_id,
             TaskList.folder_id == folder_id if folder_id else TaskList.folder_id.is_(None),
@@ -526,7 +533,7 @@ def duplicate_folder(
     def copy_folder(src: Folder, space_id: uuid.UUID, parent_id: Optional[uuid.UUID], new_name: str) -> Folder:
         new = Folder(
             space_id=space_id, parent_folder_id=parent_id, name=new_name, color=src.color,
-            is_private=src.is_private, created_by=actor,
+            is_private=src.is_private, created_by=actor, team_id=src.team_id,
             orderindex=_next_orderindex(db, Folder.orderindex, Folder.space_id == space_id),
         )
         db.add(new)

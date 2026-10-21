@@ -1,22 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Circle } from 'lucide-react';
 import { useAuth } from './AuthContext';
-import { presenceService } from '../services/presenceService';
+import { presenceService, PRESENCE_COLORS } from '../services/presenceService';
 import type { PresenceStatus } from '../services/presenceService';
 
-const statusColors: Record<PresenceStatus, string> = {
-  'Available': '#10B981', // Green
-  'Busy': '#EF4444', // Red
-  'In Meeting': '#F59E0B', // Orange
-  'Focus Mode': '#8B5CF6', // Purple
-  'Break': '#3B82F6', // Blue
-  'On Leave': '#6B7280', // Gray
-  'Work From Home': '#14B8A6', // Teal
-  'In Office': '#3B82F6', // Blue
-  'Offline': '#9CA3AF' // Light Gray
-};
+const statusColors = PRESENCE_COLORS;
+// Everything but Offline, which is what you are when you are not signed in, not a choice.
+const statuses = (Object.keys(PRESENCE_COLORS) as PresenceStatus[]).filter((s) => s !== 'Offline');
 
-export const StatusSelector: React.FC = () => {
+export const StatusSelector: React.FC<{ align?: 'left' | 'right' }> = ({ align = 'right' }) => {
   const { user } = useAuth();
   const [currentStatus, setCurrentStatus] = useState<PresenceStatus>('Available');
   const [isOpen, setIsOpen] = useState(false);
@@ -52,10 +44,6 @@ export const StatusSelector: React.FC = () => {
     await presenceService.updatePresence({ currentStatus: status });
   };
 
-  const statuses: PresenceStatus[] = [
-    'Available', 'Busy', 'Focus Mode', 'Break', 'Work From Home', 'In Office'
-  ]; // Skip "On Leave" and "In Meeting" as they might be auto-managed, or include them if manual
-
   return (
     <div style={{ position: 'relative' }} ref={dropdownRef}>
       <button
@@ -85,16 +73,17 @@ export const StatusSelector: React.FC = () => {
       {isOpen && (
         <div style={{
           position: 'absolute',
-          right: 0,
+          [align]: 0,
           top: '100%',
           marginTop: '8px',
           backgroundColor: 'white',
           borderRadius: '8px',
           border: '1px solid var(--color-border)',
           boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
-          minWidth: '160px',
+          minWidth: '180px',
+          maxHeight: '360px',
           zIndex: 100,
-          overflow: 'hidden'
+          overflowY: 'auto'
         }}>
           <div style={{ padding: '8px 12px', borderBottom: '1px solid #F3F4F6', fontSize: '0.7rem', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase' }}>
             Set Status

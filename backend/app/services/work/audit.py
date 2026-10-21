@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from app.db.models import AuditEvent, User
@@ -48,7 +48,28 @@ LABELS = {
     "team.members_changed": "changed the members of",
     "automation.created": "added an Automation on",
     "automation.deleted": "deleted an Automation on",
+    # Working hours: the label carries whose and the new week, e.g. "Accounts: 6 days, 48h a week".
+    "hours.company": "set working hours for",
+    "hours.team": "set working hours for",
+    "hours.people": "set working hours for",
+    # Blocking an address is gone from Admin -- offboarding already covers it -- but the events it
+    # wrote are still in the log, and without these two they printed as "email.blocked" to the
+    # reader. History does not get rewritten just because the feature went away.
+    "email.blocked": "barred the address",
+    "email.unblocked": "lifted the bar on",
 }
+
+
+def _verb(action: str) -> str:
+    """The wording for an action, and something readable for one nobody has worded yet.
+
+    The old fallback was the action itself, so a line in the log read "Aarti Yadav email.blocked
+    former.contractor@example.com". Anything missing from LABELS now at least reads as English.
+    """
+    if action in LABELS:
+        return LABELS[action]
+    _, _, verb = action.partition(".")
+    return (verb or action).replace("_", " ")
 
 
 def record(
@@ -79,7 +100,13 @@ def events(
     if before is not None:
         query = query.where(AuditEvent.created_at < before)
     if action:
-        query = query.where(AuditEvent.action.startswith(action))
+        # Several prefixes, comma separated. One chip in the log covers Spaces, Folders and Lists,
+        # because to the person reading it those are one subject -- and with a single prefix the
+        # "Spaces" filter quietly hid folder.deleted and list.deleted, which were recorded all
+        # along and findable under nothing but "Everything".
+        wanted = [p.strip() for p in action.split(",") if p.strip()]
+        if wanted:
+            query = query.where(or_(*[AuditEvent.action.startswith(p) for p in wanted]))
     if actor_id:
         query = query.where(AuditEvent.actor_id == actor_id)
     # Who it was done to, as against who did it. "What has happened to this person" could not be
@@ -90,7 +117,7 @@ def events(
     users = {u.id: u for u in db.scalars(select(User).where(User.id.in_({r.actor_id for r in rows if r.actor_id})))}
     return [
         s.AuditEventOut(
-            id=r.id, action=r.action, verb=LABELS.get(r.action, r.action), target_kind=r.target_kind, target_id=r.target_id,
+            id=r.id, action=r.action, verb=_verb(r.action), target_kind=r.target_kind, target_id=r.target_id,
             target_label=r.target_label, data=r.data, created_at=r.created_at,
             actor=s.UserOut.model_validate(users[r.actor_id]) if r.actor_id in users else None,
         )

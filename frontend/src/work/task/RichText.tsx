@@ -158,7 +158,7 @@ export const RichTextEditor: React.FC<{ value: string; disabled?: boolean; onSav
       <div role="button" tabIndex={disabled ? -1 : 0} aria-label="Description" onClick={(e) => { if ((e.target as HTMLElement).closest('a,input')) return; start(); }}
         onKeyDown={(e) => { if (e.key === 'Enter') start(); }}
         className={`min-h-18 rounded-md border border-gray-200 px-3 py-2 ${disabled ? '' : 'cursor-text hover:border-gray-300'}`}>
-        {shown.trim() ? <Markdown text={shown} onToggle={disabled ? undefined : toggleLine} /> : <span className="text-sm text-gray-400">{placeholder ?? 'Add a description'}</span>}
+        {shown.trim() ? <Markdown text={shown} onToggle={disabled ? undefined : toggleLine} /> : <span className="text-sm text-gray-400">{disabled ? 'No description' : placeholder ?? 'Add a description'}</span>}
       </div>
     );
   }

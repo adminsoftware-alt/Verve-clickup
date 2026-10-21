@@ -90,16 +90,18 @@ def test_tag_manager(api, org):
 
 
 def test_view_options(api, org):
-    L = org["a"]["id"]
-    board = ok(api.post(f"/lists/{L}/views", "owner", {"type": "board"}), 201)
-    mine = ok(api.post(f"/lists/{L}/views", "member", {"type": "table", "private": True}), 201)
+    # On a Space: a List shows only its List view.
+    L = org["hr"]["id"]
+    assert api.post(f"/lists/{org['a']['id']}/views", "owner", {"type": "board"}).status_code == 400
+    board = ok(api.post(f"/spaces/{L}/views", "owner", {"type": "board"}), 201)
+    mine = ok(api.post(f"/spaces/{L}/views", "member", {"type": "table", "private": True}), 201)
     assert mine["private"] is True
-    assert [v["name"] for v in ok(api.get(f"/lists/{L}/views", "owner"))] == ["List", "Board"]
-    assert "Table" in [v["name"] for v in ok(api.get(f"/lists/{L}/views", "member"))]
+    assert [v["name"] for v in ok(api.get(f"/spaces/{L}/views", "owner"))] == ["Overview", "List", "Board"]
+    assert "Table" in [v["name"] for v in ok(api.get(f"/spaces/{L}/views", "member"))]
     assert api.patch(f"/views/{mine['id']}", "owner", {"name": "x"}).status_code == 404
     # Default view comes first.
     ok(api.patch(f"/views/{board['id']}", "owner", {"is_default": True}))
-    assert ok(api.get(f"/lists/{L}/views", "owner"))[0]["id"] == board["id"]
+    assert ok(api.get(f"/spaces/{L}/views", "owner"))[0]["id"] == board["id"]
     # Protected views refuse changes until unprotected — and only the creator or an admin may unprotect.
     ok(api.patch(f"/views/{board['id']}", "owner", {"protected": True}))
     assert api.patch(f"/views/{board['id']}", "member", {"settings": {"groupBy": "none"}}).status_code == 403
@@ -114,3 +116,27 @@ def test_list_info_dates(api, org):
     got = ok(api.patch(f"/lists/{org['a']['id']}", "owner", {"start_date": "2026-10-01T00:00:00", "due_date": "2026-10-31T00:00:00"}))
     assert got["start_date"].startswith("2026-10-01") and got["due_date"].startswith("2026-10-31")
     assert api.patch(f"/lists/{org['a']['id']}", "owner", {"due_date": "2026-09-01T00:00:00"}).status_code == 400
+
+
+# --- one name, one thing ---------------------------------------------------------------------
+
+
+def test_space_names_are_unique_in_a_workspace(api, org):
+    r = api.post(f"/workspaces/{org['ws']}/spaces", "owner", {"name": "  finance "})
+    assert r.status_code == 409 and "already a Space called finance" in r.json()["detail"]
+    assert api.patch(f"/spaces/{org['hr']['id']}", "owner", {"name": "FINANCE"}).status_code == 409
+    # Renaming a Space to its own name in another case is fine, and so is a free name.
+    ok(api.patch(f"/spaces/{org['fin']['id']}", "owner", {"name": "FINANCE"}))
+    ok(api.post(f"/workspaces/{org['ws']}/spaces", "owner", {"name": "Audit"}), 201)
+
+
+def test_task_type_names_are_unique_and_milestone_is_seeded_once(api, org):
+    url = f"/workspaces/{org['ws']}/task-types"
+    first = ok(api.get(url, "owner"))
+    again = ok(api.get(url, "owner"))
+    assert [t["name"] for t in first] == [t["name"] for t in again] == ["Milestone"]
+    r = api.post(url, "owner", {"name": " milestone"})
+    assert r.status_code == 409 and "already exists" in r.json()["detail"]
+    req = ok(api.post(url, "owner", {"name": "Request"}), 201)
+    assert api.patch(f"{url}/{req['id']}", "owner", {"name": "MILESTONE"}).status_code == 409
+    ok(api.patch(f"{url}/{req['id']}", "owner", {"name": "request"}))

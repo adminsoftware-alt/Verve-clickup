@@ -231,8 +231,11 @@ export const ReminderDialog: React.FC<{ taskId?: string; defaultTitle?: string; 
   const [at, setAt] = useState(toLocalInput(QUICK[2].at()));
   const [who, setWho] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // A reminder is for later; one already gone would never ring. The server refuses it too.
+  const past = !!at && new Date(at).getTime() < Date.now() - 60_000;
   const save = async () => {
     if (!workspace) return;
+    if (!at || past) { setError('Pick a time that has not passed yet.'); return; }
     try {
       await collabApi.addReminder(workspace.id, { title: title || undefined, task_id: taskId, remind_at: new Date(at).toISOString(), user_id: who || undefined });
       onDone();
@@ -244,10 +247,10 @@ export const ReminderDialog: React.FC<{ taskId?: string; defaultTitle?: string; 
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={taskId ? 'This task' : 'e.g. Call the vendor'} className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal" />
       </label>
       <div className="mt-3 flex flex-wrap gap-1.5">
-        {QUICK.map((q) => <button key={q.label} type="button" onClick={() => setAt(toLocalInput(q.at()))} className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs text-gray-700 hover:bg-gray-200">{q.label}</button>)}
+        {QUICK.filter((q) => q.at().getTime() > Date.now()).map((q) => <button key={q.label} type="button" onClick={() => setAt(toLocalInput(q.at()))} className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs text-gray-700 hover:bg-gray-200">{q.label}</button>)}
       </div>
       <label className="mt-3 block text-xs font-medium text-gray-600">When
-        <input type="datetime-local" aria-label="Remind at" value={at} onChange={(e) => setAt(e.target.value)} className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal" />
+        <input type="datetime-local" aria-label="Remind at" value={at} min={toLocalInput(new Date())} onChange={(e) => { setAt(e.target.value); setError(null); }} className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal" />
       </label>
       <label className="mt-3 block text-xs font-medium text-gray-600">For
         <select value={who} onChange={(e) => setWho(e.target.value)} className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal">
@@ -255,10 +258,11 @@ export const ReminderDialog: React.FC<{ taskId?: string; defaultTitle?: string; 
           {members.map((m) => <option key={m.user.id} value={m.user.id}>{m.user.display_name || m.user.email}</option>)}
         </select>
       </label>
+      {past && !error && <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">That time has already passed.</p>}
       {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-        <button type="button" onClick={save} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">Set reminder</button>
+        <button type="button" onClick={save} disabled={past} className="disabled:opacity-50 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">Set reminder</button>
       </div>
     </Dialog>
   );
@@ -301,7 +305,8 @@ export const TaskActions: React.FC<{
       <button type="button" title="Set a reminder" onClick={() => setDialog('remind')} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Bell size={15} /></button>
       <Menu align="right" label="Task actions" items={[
         { label: 'Copy link', icon: <Link2 size={14} />, onClick: () => { navigator.clipboard?.writeText(`${window.location.origin}/l/${task.list_id}?task=${task.id}`); flash('Link copied'); } },
-        { label: 'Duplicate', icon: <Copy size={14} />, onClick: () => setDialog('duplicate') },
+        // A copy takes edit on the task: with comment access it would be a way round the cap.
+        ...(editable ? [{ label: 'Duplicate', icon: <Copy size={14} />, onClick: () => setDialog('duplicate') }] : []),
         // Beside Duplicate on purpose: the two are the choice between a copy each and one task
         // between them, and that is a choice best made with both in front of you.
         ...(full ? [{ label: 'Share with people…', icon: <Users size={14} />, onClick: () => setDialog('share') }] : []),

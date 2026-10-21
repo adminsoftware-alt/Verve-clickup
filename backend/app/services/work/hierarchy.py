@@ -17,6 +17,8 @@ from app.db.models import (
     StatusGroup,
     Task,
     TaskList,
+    Team,
+    WorkspaceRole,
 )
 from app.schemas import work as s
 from app.services.work.access import (
@@ -27,11 +29,11 @@ from app.services.work.access import (
     space_node,
     task_ancestry,
 )
-from app.services.work.errors import Forbidden, Invalid
+from app.services.work.errors import Conflict, Forbidden, Invalid
 from app.services.work.mywork import ensure_not_personal
-from app.services.work.permissions import Node, can_create_spaces, can_manage_workspace, is_manager
+from app.services.work.permissions import Node, can_create_spaces, can_manage_workspace
 from app.services.work.statuses import seed_space_statuses
-from app.services.work.views import add_required_views
+from app.services.work.views import add_default_views, add_required_views
 
 Location = Union[Space, Folder, TaskList]
 
@@ -103,6 +105,8 @@ def _apply_location_update(
             value = getattr(data, name)
             if name == "name" and value is None:
                 raise Invalid("Name cannot be empty")
+            if name == "name" and kind == LocationKind.space and getattr(obj, "personal_owner_id", None) is None                     and value.strip().lower() != (obj.name or "").strip().lower():
+                ensure_space_name_free(db, obj.workspace_id, value, keep=obj.id)
             setattr(obj, name, value)
     if "is_private" in fields and data.is_private is not None:
         if data.is_private and not obj.is_private:
@@ -130,12 +134,34 @@ def default_prefix(name: str) -> str:
     return letters[:3] or "T"
 
 
+def ensure_space_name_free(db: Session, workspace_id: uuid.UUID, name: str, keep: Optional[uuid.UUID] = None) -> None:
+    """Two Spaces with one name is two places people think are the same one.
+
+    Compared trimmed and case-blind, among the workspace's live shared Spaces -- each person's
+    Personal Space is called Personal and that is fine, since nobody sees anyone else's. Checked
+    here rather than by a unique index because some workspaces already hold duplicates, and an
+    index would refuse the migration instead of just the next one.
+    """
+    wanted = name.strip().lower()
+    q = select(Space.id).where(
+        Space.workspace_id == workspace_id,
+        Space.archived_at.is_(None),
+        Space.personal_owner_id.is_(None),
+        func.lower(func.trim(Space.name)) == wanted,
+    )
+    if keep is not None:
+        q = q.where(Space.id != keep)
+    if db.scalar(q.limit(1)) is not None:
+        raise Conflict(f"There is already a Space called {name.strip()}. Pick another name.")
+
+
 def create_space(db: Session, access: Access, data: s.SpaceCreate) -> Space:
     if not can_create_spaces(access.role):
         raise Forbidden("Guests cannot create Spaces")
     # A Space is the firm's shape, so only the people who run the place may add one.
     if not can_manage_workspace(access.role):
         raise Forbidden("Only admins can create Spaces. Ask one of them to add it.")
+    ensure_space_name_free(db, access.workspace_id, data.name)
     space = Space(
         workspace_id=access.workspace_id,
         name=data.name,
@@ -146,11 +172,26 @@ def create_space(db: Session, access: Access, data: s.SpaceCreate) -> Space:
         created_by=access.user_id,
         task_prefix=default_prefix(data.name),
         orderindex=_next_orderindex(db, Space.orderindex, Space.workspace_id == access.workspace_id),
+        default_permission=data.default_permission,
+        default_views=[v.value for v in dict.fromkeys(data.views)] if data.views else None,
     )
+    if data.clickapps:
+        from app.services.work import space_admin
+
+        space_admin.set_clickapps(space, dict(data.clickapps))
     db.add(space)
     db.flush()
-    seed_space_statuses(db, space)
+    if data.statuses:
+        from app.db.models import Status
+        from app.services.work.statuses import StatusInput, validate_status_set
+
+        validate_status_set([StatusInput(name=st.name, color=st.color, group=st.group) for st in data.statuses])
+        for position, st in enumerate(data.statuses):
+            db.add(Status(space_id=space.id, name=st.name, color=st.color, group=st.group, orderindex=position))
+    else:
+        seed_space_statuses(db, space)
     add_required_views(db, space, access.user_id)
+    add_default_views(db, space, space, access.user_id)
     db.flush()
     from app.services.work import audit
 
@@ -169,11 +210,36 @@ def update_space(db: Session, opened: Opened[Space], data: s.SpaceUpdate) -> Spa
         space_admin.set_clickapps(opened.obj, dict(data.clickapps))
     if "discoverable" in fields and data.discoverable is not None:
         opened.obj.discoverable = data.discoverable
+    if "default_permission" in fields:
+        if opened.level != PermissionLevel.full:
+            raise Forbidden("You need full access to change this Space's default permission")
+        opened.obj.default_permission = data.default_permission
     db.flush()
     return opened.obj
 
 
 # --- folders -----------------------------------------------------------------
+
+
+def _home_team(db: Session, access: Access, space: Space, folder: Optional[Folder]) -> Optional[uuid.UUID]:
+    """Which Team a new Folder or List belongs to.
+
+    Its parent's Team if the parent has one, so a Team's Folder stays the Team's. Otherwise, when a
+    Team lead makes it, the Team they lead -- the first by name if they lead several -- so a lead's
+    new List is their Team's work and not every Team's. An admin's is the workspace's unless its
+    parent says otherwise; they can hand it to a Team afterwards.
+    """
+    for parent in (folder, db.get(Folder, folder.parent_folder_id) if folder and folder.parent_folder_id else None, space):
+        if parent is not None and parent.team_id is not None:
+            return parent.team_id
+    if can_manage_workspace(access.role):
+        return None
+    from app.services.work.teams import led_team_ids
+
+    led = led_team_ids(db, access.workspace_id, access.user_id)
+    if not led:
+        return None
+    return db.scalars(select(Team.id).where(Team.id.in_(list(led))).order_by(func.lower(Team.name))).first()
 
 
 def create_folder(
@@ -195,6 +261,7 @@ def create_folder(
     parent_condition = (
         Folder.parent_folder_id == parent.id if parent else Folder.parent_folder_id.is_(None)
     )
+    team_id = _home_team(db, access, space, parent)
     folder = Folder(
         space_id=space.id,
         parent_folder_id=parent.id if parent else None,
@@ -202,6 +269,7 @@ def create_folder(
         color=data.color,
         is_private=data.is_private,
         created_by=access.user_id,
+        team_id=team_id,
         orderindex=_next_orderindex(
             db, Folder.orderindex, Folder.space_id == space.id, parent_condition
         ),
@@ -209,17 +277,20 @@ def create_folder(
     db.add(folder)
     db.flush()
     add_required_views(db, folder, access.user_id)
+    add_default_views(db, folder, space, access.user_id)
     # A Folder is only useful with somewhere to put tasks, so it starts with one List.
     starter = TaskList(
         space_id=space.id,
         folder_id=folder.id,
         name="List",
         created_by=access.user_id,
+        team_id=team_id,
         orderindex=1.0,
     )
     db.add(starter)
     db.flush()
     add_required_views(db, starter, access.user_id)
+    add_default_views(db, starter, space, access.user_id)
     db.flush()
     return folder
 
@@ -240,10 +311,11 @@ def create_list(
     folder: Optional[Folder] = None,
 ) -> TaskList:
     ensure_not_personal(db, space, "given more Lists")
-    # A List is where a piece of work lives, so the people who decide the shape of the work make
-    # them: admins, and the managers who lead a Team. Everyone else works inside them.
-    if not is_manager(db, access.workspace_id, access.user_id, access.role):
-        raise Forbidden("Only admins and managers can create Lists. Ask your manager to add it.")
+    # Anyone with full edit on the Space or Folder may add a List to it -- Employees included, as
+    # the firm asked on 2026-10-16. The route has already checked that level; a Space whose default
+    # permission is Edit or lower is how an admin keeps Employees from adding Lists there.
+    if access.role == WorkspaceRole.guest:
+        raise Forbidden("Guests can't create Lists")
     parent_condition = (
         TaskList.folder_id == folder.id if folder else TaskList.folder_id.is_(None)
     )
@@ -255,6 +327,7 @@ def create_list(
         color=data.color,
         is_private=data.is_private,
         created_by=access.user_id,
+        team_id=_home_team(db, access, space, folder),
         orderindex=_next_orderindex(
             db, TaskList.orderindex, TaskList.space_id == space.id, parent_condition
         ),
@@ -262,6 +335,7 @@ def create_list(
     db.add(lst)
     db.flush()
     add_required_views(db, lst, access.user_id)
+    add_default_views(db, lst, space, access.user_id)
     db.flush()
     return lst
 
@@ -324,6 +398,7 @@ def space_out(space: Space, level: PermissionLevel) -> s.SpaceOut:
         task_prefix=space.task_prefix,
         clickapps=_clickapps(space),
         discoverable=space.discoverable,
+        default_permission=space.default_permission,
     )
 
 
@@ -509,6 +584,28 @@ def get_hierarchy(db: Session, access: Access, include_archived: bool = False) -
         (parent_node.lists if parent_node else shared.lists).append(node)
 
     shared.tasks = _shared_tasks(db, access, lists, list_chain, placed_lists)
+
+    # A Folder whose Lists all belong to other Teams is an empty heading to this person -- "Learning"
+    # with nothing under it, on every Team's sidebar. Admins see everything, and someone who made
+    # the Folder keeps it; a Folder that is empty for everyone (just made) stays too.
+    if not can_manage_workspace(access.role):
+        holds_lists = {lst.folder_id for lst in lists if lst.folder_id and visible(lst)}
+        holds_lists |= {f.parent_folder_id for f in folders if f.parent_folder_id and f.id in holds_lists}
+
+        def prune(nodes: List[s.FolderNode]) -> List[s.FolderNode]:
+            kept = []
+            for node in nodes:
+                node.folders = prune(node.folders)
+                folder = folder_by_id[node.id]
+                empty_to_me = not node.lists and not node.folders and node.id in holds_lists
+                if empty_to_me and folder.created_by != access.user_id:
+                    continue
+                kept.append(node)
+            return kept
+
+        for space_node_ in space_nodes.values():
+            space_node_.folders = prune(space_node_.folders)
+        shared.folders = prune(shared.folders)
 
     for node in list(space_nodes.values()) + list(folder_nodes.values()):
         node.folders.sort(key=_sort_key)

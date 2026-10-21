@@ -60,10 +60,10 @@ def _check_can_share(opened: Opened, level: PermissionLevel, kind: Optional[Loca
     # everyday work and anyone who can edit it may share it.
     if kind == LocationKind.space and not can_manage_workspace(access.role):
         raise Forbidden("Only admins can share a Space. Ask an admin, or share a Folder or List instead.")
-    if kind in (LocationKind.folder, LocationKind.list) and not is_manager(
-        access.db, access.workspace_id, access.user_id, access.role
-    ):
-        raise Forbidden("Only admins and managers can share a Folder or a List.")
+    # Admins and Managers (the leads of a Team) may share a Folder or a List; Employees may not.
+    # Decided by the firm on 2026-10-16, reversing the admins-only rule of 2026-10-13.
+    if kind in (LocationKind.folder, LocationKind.list) and not is_manager(access.db, access.workspace_id, access.user_id, access.role):
+        raise Forbidden("Only admins and managers can share a Folder or a List. Ask your manager to share it.")
     if not opened.level.at_least(PermissionLevel.edit):
         raise Forbidden("You need edit access to share this")
     if not opened.level.at_least(level):

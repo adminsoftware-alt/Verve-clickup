@@ -125,6 +125,9 @@ export type EntryUpdate = Partial<{
 export const viewerTz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
 /** yyyy-mm-dd of a local date. */
+/** Seconds as the hours a person would say out loud: 5400 -> "1.5h". */
+export const hrs = (seconds: number) => `${Math.round((seconds / 3600) * 10) / 10}h`;
+
 export const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 export const parseDay = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 
@@ -157,8 +160,6 @@ export const sheetApi = {
   updateSettings: (ws: string, body: Partial<Pick<SheetSettings, 'week_start' | 'approvals_enabled' | 'capacity_seconds' | 'reminders_enabled' | 'reminder_weekday' | 'reminder_hour' | 'reminder_timezone'>>) =>
     request<SheetSettings>('PATCH', `/workspaces/${ws}/timesheet-settings`, body),
   capacity: (ws: string, userId: string) => request<{ capacity_seconds: number[]; is_custom: boolean }>('GET', `/workspaces/${ws}/members/${encodeURIComponent(userId)}/capacity`),
-  setCapacity: (ws: string, userId: string, seconds: number[] | null) =>
-    request<{ capacity_seconds: number[]; is_custom: boolean }>('PUT', `/workspaces/${ws}/members/${encodeURIComponent(userId)}/capacity`, { capacity_seconds: seconds }),
 
   tags: (ws: string) => request<TimeTag[]>('GET', `/workspaces/${ws}/time-tags`),
   createTag: (ws: string, name: string) => request<TimeTag>('POST', `/workspaces/${ws}/time-tags`, { name }),

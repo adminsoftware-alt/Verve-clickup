@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Users } from 'lucide-react';
-import { useWork } from '../WorkContext';
+import { useMe, useWork } from '../WorkContext';
 import { workApi, type LocationKind, type Workload, type WorkloadRow } from '../api';
 import { Avatar, StatusDot, formatDue, startOfDay } from '../ui';
 
@@ -37,7 +37,11 @@ export const WorkloadView: React.FC<{
   listName: (listId: string) => string | null;
   onOpenTask: (id: string) => void;
 }> = ({ kind, id, refreshKey, listName, onOpenTask }) => {
-  const { teams } = useWork();
+  const { teams: allTeams, hierarchy } = useWork();
+  const me = useMe();
+  // An employee picks among their own Teams; the rest of the firm's Teams are not theirs to see.
+  const isAdmin = hierarchy?.role === 'owner' || hierarchy?.role === 'admin';
+  const teams = isAdmin ? allTeams : allTeams.filter((t) => t.members.some((m) => m.id === me) || t.lead_ids.includes(me));
   const [start, setStart] = useState(() => mondayOf(new Date()));
   const [days, setDays] = useState(14);
   const [teamId, setTeamId] = useState('');
@@ -69,23 +73,25 @@ export const WorkloadView: React.FC<{
         <button type="button" onClick={() => setStart(mondayOf(new Date()))} className="rounded-md border border-gray-200 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50">
           Today
         </button>
-        <button type="button" title="Earlier" onClick={() => setStart(new Date(start.getTime() - 7 * DAY_MS))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
-        <button type="button" title="Later" onClick={() => setStart(new Date(start.getTime() + 7 * DAY_MS))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
+        <button aria-label="Earlier" type="button" title="Earlier" onClick={() => setStart(new Date(start.getTime() - 7 * DAY_MS))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
+        <button aria-label="Later" type="button" title="Later" onClick={() => setStart(new Date(start.getTime() + 7 * DAY_MS))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
         <span className="text-sm font-medium text-gray-700">
           {start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – {new Date(start.getTime() + (days - 1) * DAY_MS).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
         </span>
-        <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-700">
+        <select aria-label="Period length" value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-700">
           <option value={7}>1 week</option>
           <option value={14}>2 weeks</option>
           <option value={28}>4 weeks</option>
         </select>
-        <label className="ml-auto flex items-center gap-2 text-sm text-gray-600">
-          <Users size={15} />
-          <select aria-label="Team" value={teamId} onChange={(e) => setTeamId(e.target.value)} className="rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-700">
-            <option value="">Everyone</option>
-            {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </label>
+        {teams.length > (isAdmin ? 0 : 1) && (
+          <label className="ml-auto flex items-center gap-2 text-sm text-gray-600">
+            <Users size={15} />
+            <select aria-label="Team" value={teamId} onChange={(e) => setTeamId(e.target.value)} className="rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-700">
+              <option value="">Everyone</option>
+              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </label>
+        )}
       </div>
 
       {error && <div className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -152,18 +158,16 @@ export const WorkloadView: React.FC<{
           </div>
 
           <p className="mt-2 text-xs text-gray-400">
-            Capacity is 8h on weekdays. Each task's estimate is spread evenly over the working days between its start and due dates.
-            <span className="ml-2 inline-flex items-center gap-1"><span className="h-2 w-2 rounded bg-emerald-200" />under 80%</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded bg-emerald-200" />under 80%</span>
             <span className="ml-2 inline-flex items-center gap-1"><span className="h-2 w-2 rounded bg-amber-200" />80–100%</span>
             <span className="ml-2 inline-flex items-center gap-1"><span className="h-2 w-2 rounded bg-red-200" />over capacity</span>
           </p>
 
           <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-            {([['Unscheduled', data.unscheduled, 'Open tasks with no start or due date'], ['No estimate', data.no_estimate, 'Scheduled in this period, but with no time estimate']] as const).map(([title, items, hint]) => (
+            {([['Unscheduled', data.unscheduled], ['No estimate', data.no_estimate]] as const).map(([title, items]) => (
               <section key={title} className="rounded-lg border border-gray-200">
                 <header className="border-b border-gray-100 px-3 py-2">
                   <h4 className="text-sm font-semibold text-gray-700">{title} <span className="font-normal text-gray-400">{items.length}</span></h4>
-                  <p className="text-xs text-gray-400">{hint}</p>
                 </header>
                 {items.length === 0 ? (
                   <div className="px-3 py-4 text-center text-xs text-gray-400">Nothing here</div>

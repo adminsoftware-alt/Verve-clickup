@@ -130,8 +130,10 @@ def test_a_copy_can_be_made_for_named_people_only(api, workspace, space):
 
     # The person named can open it and finds the work inside.
     assert ok(api.get(f"/lists/{copy['id']}/tasks", "member"))["total"] == 2
-    # Somebody else cannot, even though they can see the Space it lives in.
-    assert api.get(f"/lists/{copy['id']}", "admin").status_code == 404
+    # Somebody else cannot, even though they can see the Space it lives in (admins aside).
+    ok(api.get("/workspaces", "member2"))
+    ok(api.post(f"/workspaces/{workspace['id']}/members", "owner", {"email": "member2@example.com", "role": "member"}), 201)
+    assert api.get(f"/lists/{copy['id']}", "member2").status_code == 404
 
 
 def test_naming_nobody_leaves_the_copy_as_open_as_the_original(api, space):

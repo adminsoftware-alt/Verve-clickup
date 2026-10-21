@@ -31,12 +31,26 @@ export const BatteryCard: React.FC<{ total: number; done: number; percent: numbe
   </div>
 );
 
+/** "3 of 10 tasks are left out: 2 have no due date, 1 has no time estimate." */
+function missingNote(unplanned: number, tasks: number, noDue?: number, noEstimate?: number): string {
+  const lead = `${unplanned} of ${tasks} task${tasks === 1 ? '' : 's'} ${unplanned === 1 ? 'is' : 'are'} left out`;
+  if (noDue === undefined || noEstimate === undefined) return `${lead}: ${unplanned === 1 ? 'it has' : 'each has'} no due date, no time estimate, or neither.`;
+  const parts = [
+    noDue > 0 ? `${noDue} ${noDue === 1 ? 'has' : 'have'} no due date` : null,
+    noEstimate > 0 ? `${noEstimate} ${noEstimate === 1 ? 'has' : 'have'} no time estimate` : null,
+  ].filter(Boolean);
+  return parts.length ? `${lead}: ${parts.join(', ')}.` : `${lead}: their dates fall outside this period.`;
+}
+
 /** Workload for a period: what these people can do, what is planned for them, what they logged. */
 export const CapacityCard: React.FC<{
   capacity_seconds: number; planned_seconds: number; logged_seconds: number; remaining_seconds: number;
   people: number; tasks: number; scheduled_tasks: number; sees_everyone: boolean;
+  /** Of the tasks left out of Planned, how many lack a due date and how many lack an estimate
+   *  (a task can lack both). Sent by newer servers; without them the note names both reasons. */
+  no_due_date_tasks?: number; no_estimate_tasks?: number;
   onDrill?: (segment: string | undefined, label: string) => void;
-}> = ({ capacity_seconds, planned_seconds, logged_seconds, remaining_seconds, people, tasks, scheduled_tasks, sees_everyone, onDrill }) => {
+}> = ({ capacity_seconds, planned_seconds, logged_seconds, remaining_seconds, people, tasks, scheduled_tasks, sees_everyone, no_due_date_tasks, no_estimate_tasks, onDrill }) => {
   const width = (seconds: number) => `${capacity_seconds ? Math.min(100, (100 * seconds) / capacity_seconds) : 0}%`;
   const over = planned_seconds > capacity_seconds && capacity_seconds > 0;
   const unplanned = Math.max(0, tasks - scheduled_tasks);
@@ -106,8 +120,8 @@ export const CapacityCard: React.FC<{
         <p className="flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <AlertTriangle size={13} className="mt-px shrink-0" />
           <span>
-            {unplanned} of {tasks} task{tasks === 1 ? '' : 's'} {unplanned === 1 ? 'has' : 'have'} no dates or no estimate,
-            so {unplanned === 1 ? 'it is' : 'they are'} missing from Planned above.
+            {missingNote(unplanned, tasks, no_due_date_tasks, no_estimate_tasks)}
+            {' '}A task needs both a due date and a time estimate to count in Planned above.
           </span>
         </p>
       )}
@@ -177,7 +191,7 @@ export const VarianceCard: React.FC<{
   sees_everyone: boolean;
   onDrill: (segment: string | undefined, label: string) => void;
   onOpenTask?: (id: string) => void;
-}> = ({ tasks = [], more_tasks = 0, expected_seconds, logged_seconds, sees_everyone, onDrill, onOpenTask }) => {
+}> = ({ tasks = [], more_tasks = 0, expected_seconds, logged_seconds, onDrill, onOpenTask }) => {
   const [shape, setShape] = useState<Shape>('all');
   const [who, setWho] = useState<string>('all');
   const [sort, setSort] = useState<string>('gap');
@@ -321,7 +335,7 @@ export const VarianceCard: React.FC<{
           aria-label="Sort"
           value={sort}
           onChange={(e) => setSort(e.target.value)}
-          className="rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[11px] text-gray-600"
+          className="no-print rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[11px] text-gray-600"
         >
           {SORTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
@@ -387,12 +401,7 @@ export const VarianceCard: React.FC<{
         )}
       </div>
 
-      {(more_tasks > 0 || !sees_everyone) && (
-        <p className="mt-1 shrink-0 text-[11px] text-gray-400">
-          {more_tasks > 0 && `${more_tasks} more not shown. `}
-          {!sees_everyone && 'Only the people whose time you may see.'}
-        </p>
-      )}
+      {more_tasks > 0 && <p className="mt-1 shrink-0 text-[11px] text-gray-400">{more_tasks} more not shown.</p>}
     </div>
   );
 };

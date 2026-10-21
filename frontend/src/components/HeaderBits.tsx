@@ -1,13 +1,12 @@
-// The pieces of the top bar: where you've just been, help, and who you're signed in as.
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { CircleHelp, Clock3, CornerDownLeft, List as ListIcon, LogOut, Settings, UserRound } from 'lucide-react';
+// The pieces of the top bar: who you're signed in as.
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { LogOut, Settings, ShieldCheck, UserRound } from 'lucide-react';
 
 import { useAuth } from './AuthContext';
-import { useIsManager, useWork } from '../work/WorkContext';
+import { useIsAdmin, useIsManager, useWork } from '../work/WorkContext';
 import { Avatar, Portal } from '../work/ui';
-import { recentItems, type RecentItem } from '../work/recent';
-import type { FolderNode, SpaceNode } from '../work/api';
+import { accessOf } from '../work/teams/access';
 
 const item = 'flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50';
 
@@ -85,109 +84,41 @@ const Dropdown: React.FC<{
   );
 };
 
-// --- where you've just been ------------------------------------------------------
-
-export const RecentMenu: React.FC = () => {
-  const { hierarchy } = useWork();
-  const navigate = useNavigate();
-  const [items, setItems] = useState<RecentItem[]>(recentItems);
-
-  const paths = useMemo(() => {
-    const out = new Map<string, string>();
-    const walk = (node: SpaceNode | FolderNode, path: string[]) => {
-      node.folders.forEach((f) => walk(f, [...path, f.name]));
-      node.lists.forEach((l) => out.set(l.id, [...path, l.name].join(' / ')));
-    };
-    hierarchy?.spaces.forEach((sp) => walk(sp, [sp.name]));
-    if (hierarchy?.personal_list) out.set(hierarchy.personal_list.id, 'Personal List');
-    return out;
-  }, [hierarchy]);
-
-  const rows = items
-    .filter((r) => (r.kind === 'list' ? paths.has(r.id) : r.listId && paths.has(r.listId)))
-    .slice(0, 10);
-
-  return (
-    <Dropdown
-      label="Recently opened" width={320} align="left" onOpen={() => setItems(recentItems())}
-      trigger={(open) => (
-        <span className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium ${open ? 'bg-gray-100 text-gray-800' : 'text-gray-600 hover:bg-gray-100'}`}>
-          <Clock3 size={16} /> Recent
-        </span>
-      )}
-    >
-      {(close) => (rows.length === 0 ? (
-        <p className="px-3 py-6 text-center text-sm text-gray-500">Lists and tasks you open show up here.</p>
-      ) : rows.map((r) => {
-        const where = r.kind === 'list' ? paths.get(r.id)! : paths.get(r.listId!)!;
-        const to = r.kind === 'list' ? `/l/${r.id}` : `/l/${r.listId}?task=${r.id}`;
-        return (
-          <button key={`${r.kind}:${r.id}`} type="button" role="menuitem" className={item} onClick={() => { close(); navigate(to); }}>
-            {r.kind === 'list' ? <ListIcon size={15} className="shrink-0 text-gray-400" /> : <CornerDownLeft size={15} className="shrink-0 text-gray-400" />}
-            <span className="min-w-0 flex-1">
-              <span className="block truncate">{r.kind === 'list' ? where.split(' / ').pop() : r.name}</span>
-              <span className="block truncate text-xs text-gray-400">{where}</span>
-            </span>
-          </button>
-        );
-      }))}
-    </Dropdown>
-  );
-};
-
-// --- help ------------------------------------------------------------------------
-
-const SHORTCUTS: [string, string][] = [
-  ['Ctrl K', 'Search tasks, Lists, people and pages'],
-  ['Esc', 'Close the panel or dialog in front of you'],
-  ['Enter', 'Open whatever is highlighted in search'],
-  ['Space', 'Start or stop the timer on an open task'],
-];
-
-export const HelpMenu: React.FC = () => (
-  <Dropdown
-    label="Help and keyboard shortcuts" width={320} align="right"
-    trigger={(open) => (
-      <span title="Help" className={`flex rounded-lg p-1.5 ${open ? 'bg-gray-100 text-gray-700' : 'text-gray-500 hover:bg-gray-100'}`}>
-        <CircleHelp size={20} />
-      </span>
-    )}
-  >
-    {() => (
-      <>
-        <p className="px-3 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Keyboard shortcuts</p>
-        {SHORTCUTS.map(([keys, what]) => (
-          <div key={keys} className="flex items-center gap-3 px-3 py-1.5 text-sm text-gray-700">
-            <kbd className="w-16 shrink-0 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-center text-[11px] font-semibold text-gray-600">{keys}</kbd>
-            <span className="min-w-0 flex-1">{what}</span>
-          </div>
-        ))}
-      </>
-    )}
-  </Dropdown>
-);
-
 // --- who you are -----------------------------------------------------------------
 
 export const ProfileChip: React.FC = () => {
-  const { logout } = useAuth();
-  const { me, workspace, allMembers } = useWork();
+  const { logout, user: signedIn } = useAuth();
+  const { me, workspace, allMembers, teams } = useWork();
   const isManager = useIsManager();
+  const isAdmin = useIsAdmin();
 
   const mine = allMembers.find((m) => m.user.id === me);
-  const user = mine?.user ?? { id: me || 'me', email: '', display_name: null };
-  const role = mine?.role ?? workspace?.role;
+  // Until the members load, the sign-in already knows a name and an email; drawing "?" and "You"
+  // for that moment read as if the app did not know who you were.
+  const known = signedIn?.displayName || signedIn?.email;
+  const user = mine?.user ?? { id: me || signedIn?.uid || 'me', email: signedIn?.email ?? '', display_name: signedIn?.displayName ?? null };
+  const waiting = !mine && !known;
+  const stored = mine?.role ?? workspace?.role;
+  // Admin, Manager or Employee -- not the stored role's own name ("member").
+  const role = stored ? accessOf(stored, me ?? '', teams) : undefined;
 
   return (
     <Dropdown
       label="Your account" width={272} align="right"
       trigger={(open) => (
-        <span className={`flex items-center gap-2 rounded-full py-0.5 pl-0.5 pr-2 ${open ? 'bg-gray-100' : 'hover:bg-gray-100'}`}>
-          <Avatar user={user} size={28} />
-          <span className="hidden max-w-[120px] truncate text-sm font-medium text-gray-700 sm:block">
-            {user.display_name || user.email.split('@')[0] || 'You'}
+        waiting ? (
+          <span className="flex items-center gap-2 rounded-full py-0.5 pl-0.5 pr-2" aria-busy="true">
+            <span className="h-7 w-7 animate-pulse rounded-full bg-gray-200" />
+            <span className="hidden h-3 w-20 animate-pulse rounded bg-gray-200 sm:block" />
           </span>
-        </span>
+        ) : (
+          <span className={`flex items-center gap-2 rounded-full py-0.5 pl-0.5 pr-2 ${open ? 'bg-gray-100' : 'hover:bg-gray-100'}`}>
+            <Avatar user={user} size={28} />
+            <span className="hidden max-w-[120px] truncate text-sm font-medium text-gray-700 sm:block">
+              {user.display_name || user.email.split('@')[0]}
+            </span>
+          </span>
+        )
       )}
     >
       {(close) => (
@@ -195,13 +126,15 @@ export const ProfileChip: React.FC = () => {
           <div className="flex items-center gap-3 border-b border-gray-100 px-3 pb-3 pt-2">
             <Avatar user={user} size={36} />
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-gray-800">{user.display_name || 'You'}</p>
+              <p className="truncate text-sm font-semibold text-gray-800">{user.display_name || user.email.split('@')[0] || 'Loading…'}</p>
               <p className="truncate text-xs text-gray-500">{user.email}</p>
               {role && <p className="mt-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">{role}</p>}
             </div>
           </div>
           {/* Running teams is a manager's job, and the directory is part of it. */}
           {isManager && <Link to="/people" role="menuitem" onClick={close} className={item}><UserRound size={15} className="text-gray-400" /> People &amp; Teams</Link>}
+          {/* On a phone there is no sidebar, so Admin's way in is here. */}
+          {isAdmin && <Link to="/admin" role="menuitem" onClick={close} className={`${item} md:hidden`}><ShieldCheck size={15} className="text-gray-400" /> Admin</Link>}
           <Link to="/settings" role="menuitem" onClick={close} className={item}><Settings size={15} className="text-gray-400" /> Settings</Link>
           <button type="button" role="menuitem" onClick={() => { close(); logout(); }} className={`${item} text-red-600 hover:bg-red-50`}>
             <LogOut size={15} /> Sign out

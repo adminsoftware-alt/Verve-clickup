@@ -52,7 +52,10 @@ def test_only_admins_put_work_in_someone_elses_personal_list(api, folderless_lis
     Handing someone work is what running the place consists of, so admins may. Anyone else may
     only share a task with themselves.
     """
-    task = ok(api.post(f"/lists/{folderless_list['id']}/tasks", "owner", {"name": "Quarterly filing"}), 201)
+    # Raised by the member, so they hold full access to it. Otherwise they are read-and-comment on
+    # somebody else's task and the refusal below would be about that, not about whose Personal List
+    # they were reaching into -- which is the rule this is here to hold.
+    task = ok(api.post(f"/lists/{folderless_list['id']}/tasks", "member", {"name": "Quarterly filing"}), 201)
 
     refused = api.post(f"/tasks/{task['id']}/shared-with", "member", {"user_ids": ["admin"]})
     assert refused.status_code == 403 and "admins" in refused.json()["detail"]

@@ -13,7 +13,7 @@ export const Dialog: React.FC<{ title: string; wide?: boolean; onClose: () => vo
         className={`${wide ? 'w-[34rem]' : 'w-[26rem]'} flex max-h-[85vh] max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white p-5 shadow-xl`}>
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-semibold text-gray-900">{title}</h3>
-          <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+          <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
         </div>
         {children}
       </div>
@@ -132,8 +132,8 @@ export const StatusEditorDialog: React.FC<{ kind: LocationKind; id: string; name
                           {GROUPS.filter((x) => x.key !== 'closed').map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
                         </select>
                       )}
-                      <button type="button" title="Move up" onClick={() => move(r.key, -1)} className="text-gray-300 hover:text-gray-600"><ArrowUp size={13} /></button>
-                      <button type="button" title="Move down" onClick={() => move(r.key, 1)} className="text-gray-300 hover:text-gray-600"><ArrowDown size={13} /></button>
+                      <button aria-label="Move up" type="button" title="Move up" onClick={() => move(r.key, -1)} className="text-gray-300 hover:text-gray-600"><ArrowUp size={13} /></button>
+                      <button aria-label="Move down" type="button" title="Move down" onClick={() => move(r.key, 1)} className="text-gray-300 hover:text-gray-600"><ArrowDown size={13} /></button>
                       {g.key !== 'closed' && <button type="button" title="Delete status" onClick={() => setRows((rs) => rs!.filter((x) => x.key !== r.key))} className="text-gray-300 hover:text-red-600"><Trash2 size={13} /></button>}
                     </div>
                   ))}

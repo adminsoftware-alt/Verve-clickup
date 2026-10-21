@@ -23,7 +23,7 @@ from app.db.models import (
     WorkspaceRole,
 )
 from app.services.work.errors import Forbidden, NotFound
-from app.services.work.permissions import Node, ShareKey, resolve_level
+from app.services.work.permissions import SHARED_ONLY, Node, ShareKey, resolve_level
 
 
 def email_domain(email: str) -> str:
@@ -66,6 +66,7 @@ class Access:
         self._shares: Optional[Dict[ShareKey, PermissionLevel]] = None
         self._team_shares: Optional[Dict[ShareKey, PermissionLevel]] = None
         self._my_teams: Optional[Set[uuid.UUID]] = None
+        self._led_people: Optional[Set[str]] = None
 
     @classmethod
     def for_workspace(cls, db: Session, user_id: str, workspace_id: uuid.UUID) -> "Access":
@@ -122,6 +123,15 @@ class Access:
             self._my_teams = set(team_tree.ancestors(self.db, mine)) if mine else set()
         return self._my_teams
 
+    @property
+    def led_people(self) -> Set[str]:
+        """Everyone in the Teams this person leads, sub-teams counted (empty unless a Manager)."""
+        if self._led_people is None:
+            from app.services.work.teams import people_led_by
+
+            self._led_people = set(people_led_by(self.db, self.workspace_id, self.user_id))
+        return self._led_people
+
     def level(self, chain: List[Node]) -> Optional[PermissionLevel]:
         return resolve_level(chain, self.user_id, self.role, self.shares, self.team_shares, self.my_teams)
 
@@ -149,7 +159,8 @@ def share_key(share: Share) -> ShareKey:
 
 
 def space_node(space: Space) -> Node:
-    return Node(LocationKind.space, space.id, space.created_by, space.is_private, space.team_id)
+    return Node(LocationKind.space, space.id, space.created_by, space.is_private, space.team_id,
+                personal=space.personal_owner_id is not None, default_level=space.default_permission)
 
 
 def folder_node(folder: Folder) -> Node:
@@ -254,11 +265,116 @@ def open_list(db: Session, user_id: str, list_id: uuid.UUID, minimum: Permission
     return Opened(lst, access, level)
 
 
+def _task_owners(db: Session, task: Task) -> Set[str]:
+    """The people whose task this is: whoever raised it and whoever it is assigned to."""
+    from app.db.models import TaskAssignee
+
+    owners = set(db.scalars(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)))
+    if task.created_by is not None:
+        owners.add(task.created_by)
+    return owners
+
+
+def employee_cap(
+    access: Access, task: Task, ancestry: List[Node], level: Optional[PermissionLevel], owners: Set[str]
+) -> Optional[PermissionLevel]:
+    """Apply the employee cap to `level`, the caller's standing on `task` before it.
+
+    Employees are read-and-comment on work that is not theirs. Everyone who can see a public Space
+    resolves to full access on everything in it, which meant any of the seventy-five could edit --
+    and, because deleting needs full, permanently delete -- a colleague's task.
+
+    So a plain member's level is capped at `comment` on a task unless one of these holds:
+      * it is theirs: they raised it or it is assigned to them;
+      * they manage it: they lead a Team (sub-teams counted) that its creator or an assignee is in;
+      * it was shared with them on the task itself (or a parent task), a deliberate grant about
+        this one task.
+    A share on a List, Folder or Space does NOT lift the cap. It used to, and the dev data shares
+    whole Lists and Spaces at full with Teams, so an employee could delete a colleague's task
+    there. Sharing a place is about seeing and working in it, not about rewriting other people's
+    tasks in it; an admin who wants someone to change one task shares that task.
+
+    That lands exactly where the task service already draws its lines: editing needs `edit`,
+    deleting needs `full`, commenting still works, and an assignee with `comment` may still move
+    their own task's status. Owners and admins are untouched; guests and limited members only ever
+    have what is shared with them and are not capped further.
+    """
+    if level is None or access.role != WorkspaceRole.member:
+        return level
+    if level.rank <= PermissionLevel.comment.rank:
+        return level
+    if access.user_id in owners:
+        return level
+    if owners & access.led_people:
+        return level
+    for node in ancestry:
+        key = (node.kind, node.id)
+        if key in access.shares or key in access.team_shares:
+            return level
+    return PermissionLevel.comment
+
+
 def best_task_level(db: Session, access: Access, task: Task) -> Optional[PermissionLevel]:
-    """The caller's level on a task through its home List or any other List it was added to."""
+    """The caller's level on a task through its home List or any other List it was added to,
+    with the employee cap applied (see `employee_cap`)."""
+    ancestry = task_ancestry(db, task)
+    best = tracking_level(db, access, task, ancestry)
+    if best is None or access.role != WorkspaceRole.member:
+        return best
+    return employee_cap(access, task, ancestry, best, _task_owners(db, task))
+
+
+def cap_levels(db: Session, access: Access, tasks: List[Task], levels: Dict[uuid.UUID, PermissionLevel]) -> None:
+    """Apply the employee cap, in place, to levels resolved for a batch of tasks (a List view,
+    search results), loading assignees once rather than per task."""
+    if access.role != WorkspaceRole.member or not tasks:
+        return
+    from app.db.models import TaskAssignee
+
+    ids = [t.id for t in tasks if t.id in levels and levels[t.id].rank > PermissionLevel.comment.rank]
+    if not ids:
+        return
+    owners: Dict[uuid.UUID, Set[str]] = {i: set() for i in ids}
+    for task_id, user_id in db.execute(
+        select(TaskAssignee.task_id, TaskAssignee.user_id).where(TaskAssignee.task_id.in_(ids))
+    ):
+        owners[task_id].add(user_id)
+    by_id = {t.id: t for t in tasks}
+    for task_id in ids:
+        task = by_id[task_id]
+        if task.created_by is not None:
+            owners[task_id].add(task.created_by)
+        ancestry = [task_node(task)]
+        parent_id = task.parent_id
+        while parent_id is not None:
+            parent = by_id.get(parent_id) or db.get(Task, parent_id)
+            if parent is None:
+                break
+            ancestry.append(task_node(parent))
+            parent_id = parent.parent_id
+        capped = employee_cap(access, task, ancestry, levels[task_id], owners[task_id])
+        if capped is not None:
+            levels[task_id] = capped
+
+
+def tracking_level(
+    db: Session, access: Access, task: Task, ancestry: Optional[List[Node]] = None
+) -> Optional[PermissionLevel]:
+    """Their standing on a task for the purpose of recording hours against it.
+
+    The employee cap is about changing a colleague's task, not about writing down your own time, so
+    this reads the level before that cap is applied. Everything else still decides: an explicit
+    share of comment or view means what it says -- somebody deliberately said read-and-comment, and
+    tracking time in an area you were let into to read would not be what they agreed to -- and a
+    guest, who only ever has what was shared, is unaffected either way.
+
+    Lowering the bar to comment everywhere instead was the first attempt, and it quietly undid that
+    distinction: a List shared at comment became a List you could bill against.
+    """
     from app.db.models import TaskListLink
 
-    ancestry = task_ancestry(db, task)
+    if ancestry is None:
+        ancestry = task_ancestry(db, task)
     best = access.level(ancestry + chain_for_list(db, db.get(TaskList, task.list_id)))
     root_id = task.top_level_parent_id or task.id
     for list_id in db.scalars(select(TaskListLink.list_id).where(TaskListLink.task_id == root_id)):
@@ -268,7 +384,18 @@ def best_task_level(db: Session, access: Access, task: Task) -> Optional[Permiss
         level = access.level(ancestry + chain_for_list(db, extra))
         if level is not None and (best is None or level.rank > best.rank):
             best = level
+    if best is None and _is_assignee(db, task, access.user_id):
+        # A task given to you in a List you can't open (a private one) is still yours to open: you
+        # got the notification for it. Edit for members, comment for guests, who only ever get
+        # what was handed to them; either way the List itself stays closed.
+        best = PermissionLevel.comment if access.role in SHARED_ONLY else PermissionLevel.edit
     return best
+
+
+def _is_assignee(db: Session, task: Task, user_id: str) -> bool:
+    from app.db.models import TaskAssignee
+
+    return db.get(TaskAssignee, (task.id, user_id)) is not None
 
 
 def open_task(db: Session, user_id: str, task_id: uuid.UUID, minimum: PermissionLevel) -> Opened[Task]:

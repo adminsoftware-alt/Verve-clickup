@@ -5,7 +5,6 @@ export interface TimeBlock { id: string; task_id: string | null; title: string |
 export interface CalendarEvent { feed_id: string; title: string; start: string; end: string; all_day: boolean; location: string | null; color: string }
 export interface DayOff { day: string; label: string; part: string; kind: 'leave' | 'holiday'; pending: boolean }
 export interface Planner { blocks: TimeBlock[]; events: CalendarEvent[]; feed_errors: Record<string, string>; days_off?: DayOff[] }
-export interface CalendarFeed { id: string; name: string; color: string; host: string; event_count: number; fetched_at: string | null; error: string | null }
 
 export type HomeCardKey = 'recents' | 'agenda' | 'lineup' | 'priorities' | 'planner' | 'delegated' | 'done';
 export interface HomeCard { key: HomeCardKey; hidden: boolean; size: 'half' | 'full' }
@@ -32,14 +31,6 @@ export const planningApi = {
   updateBlock: (workspaceId: string, id: string, body: Partial<{ title: string | null; start_at: string; end_at: string }>) =>
     request<TimeBlock>('PATCH', `${ws(workspaceId)}/time-blocks/${id}`, body),
   removeBlock: (workspaceId: string, id: string) => request('DELETE', `${ws(workspaceId)}/time-blocks/${id}`),
-
-  calendars: (workspaceId: string) => request<CalendarFeed[]>('GET', `${ws(workspaceId)}/calendars`),
-  addCalendar: (workspaceId: string, body: { name: string; url: string; color: string }) => request<CalendarFeed>('POST', `${ws(workspaceId)}/calendars`, body),
-  syncCalendar: (workspaceId: string, id: string) => request<CalendarFeed>('POST', `${ws(workspaceId)}/calendars/${id}/sync`),
-  removeCalendar: (workspaceId: string, id: string) => request('DELETE', `${ws(workspaceId)}/calendars/${id}`),
-  calendarLink: (workspaceId: string) => request<{ url: string | null }>('GET', `${ws(workspaceId)}/calendar-link`),
-  makeCalendarLink: (workspaceId: string, reset = false) => request<{ url: string }>('POST', `${ws(workspaceId)}/calendar-link`, undefined, reset ? { reset: true } : undefined),
-  stopCalendarLink: (workspaceId: string) => request('DELETE', `${ws(workspaceId)}/calendar-link`),
 
   lineup: (workspaceId: string) => request<Task[]>('GET', `${ws(workspaceId)}/lineup`),
   addToLineup: (workspaceId: string, taskId: string) => request<Task[]>('POST', `${ws(workspaceId)}/lineup`, { task_id: taskId }),

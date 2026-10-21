@@ -11,6 +11,9 @@ class Settings(BaseSettings):
 
     # PostgreSQL, used by the v2 work hierarchy. Optional so v1 still boots without it.
     DATABASE_URL: Optional[str] = None
+    # Where the v2 tests run (they empty every table). Set it whenever DATABASE_URL is a shared
+    # database such as Supabase, so the tests stay on a local server.
+    TEST_DATABASE_URL: Optional[str] = None
 
     # Scheduled Dashboard email reports. Without SMTP_HOST, reports are still built
     # and kept for preview, but not sent.
@@ -32,6 +35,25 @@ class Settings(BaseSettings):
     MAX_UPLOAD_MB: int = 25
     # Checks for due reports once a minute while the API runs.
     REPORTS_SCHEDULER_ENABLED: bool = True
+    # Email that goes out on a timer rather than because somebody did something: the daily,
+    # weekly and monthly digests, the Friday recap, the overdue chase, the manager's Monday
+    # heads-up, the team digest, and the weekly timesheet nudge.
+    #
+    # Off. Seventy-five people receiving a summary none of them asked for is how a firm learns
+    # to filter mail from its own tools, and then misses the one message that mattered. Nothing
+    # is deleted: every one of those jobs still works and is still covered by its tests. This is
+    # the switch that decides whether anything calls them.
+    SCHEDULED_EMAIL_ENABLED: bool = False
+    # The manager's "things waiting for your decision", each weekday morning. Its own switch
+    # because it is the only scheduled mail that unblocks somebody else's work instead of
+    # reporting on it.
+    APPROVAL_REMINDER_EMAIL: bool = False
+    # Email for anything other than an invitation.
+    #
+    # Off: the firm wants email used to get new people into the workspace and for nothing else.
+    # Notifications still reach people -- in the app, and as browser push -- they just do not also
+    # arrive as mail. Invitations, and chasing an invitation nobody accepted, are unaffected.
+    UPDATE_EMAIL_ENABLED: bool = False
     # A task someone types in must carry an assignee, start and due dates, an estimate and a
     # priority. Tasks the system creates (templates, recurrences, imports, email) are exempt.
     REQUIRE_TASK_DETAILS: bool = True
@@ -65,6 +87,11 @@ class Settings(BaseSettings):
     OAUTH_REDIRECT_BASE: str = "http://localhost:8000"
     # Encrypts stored calendar tokens (any long random string). Without it, a key is derived from the OAuth secrets.
     CALENDAR_TOKEN_KEY: Optional[str] = None
+    # The assistant's AI fallback (services/work/ai_assistant.py): any OpenAI-compatible chat API.
+    # Without AI_API_KEY the assistant keeps to its phrase rules.
+    AI_BASE_URL: str = "https://openrouter.ai/api/v1"
+    AI_MODEL: Optional[str] = None
+    AI_API_KEY: Optional[str] = None
     
     class Config:
         env_file = ".env"

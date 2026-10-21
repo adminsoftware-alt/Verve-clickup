@@ -227,6 +227,15 @@ def set_members(
         if missing:
             raise Invalid(f"Team members must be workspace members: {', '.join(missing)}")
     current = set(db.scalars(select(TeamMember.user_id).where(TeamMember.team_id == team.id)))
+    added = set(wanted) - current
+    if added:
+        # Someone who has left (access turned off) can't join a Team. Those already in one stay
+        # until removed, so saving a Team they're still listed in keeps working.
+        left = list(db.scalars(select(WorkspaceMember.user_id).where(
+            WorkspaceMember.workspace_id == access.workspace_id, WorkspaceMember.user_id.in_(added),
+            WorkspaceMember.deactivated_at.is_not(None))))
+        if left:
+            raise Invalid(f"These people have left and can't be added to a Team: {', '.join(sorted(left))}")
     for uid in current - set(wanted):
         db.delete(db.get(TeamMember, (team.id, uid)))
     for uid in set(wanted) - current:

@@ -1,9 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Archive, EyeOff, Zap, Settings2, Star, Tag as TagIcon, ChevronDown, ChevronRight, CircleDot, Copy, Folder, FolderOpen, LayoutTemplate, List as ListIcon, Lock, MoreHorizontal, MoveRight, Pencil, Plus, Share2, Trash2, Users, Blocks, Compass, Mail, Timer, Rows3, UserRound } from 'lucide-react';
+import { Archive, EyeOff, Zap, Settings2, Star, Tag as TagIcon, ChevronDown, ChevronRight, CircleDot, Copy, Folder, FolderOpen, LayoutTemplate, List as ListIcon, Lock, MoreHorizontal, MoveRight, Pencil, Plus, Share2, Trash2, Users, Blocks, Compass, Mail, Timer, Rows3, Shield, UserRound, UserPlus } from 'lucide-react';
 import { ClickAppsDialog, DuplicateSpaceDialog, ListEmailDialog, SprintSettingsDialog } from './SpaceDialogs';
 import { spacesApi } from './spacesApi';
-import { SaveTemplateDialog, TemplateCenter } from './templates/Templates';
+// The sidebar is the shell, so anything it imports is in the first download. These two are
+// dialogs that open from a menu, so they wait until the menu is used.
+const SaveTemplateDialog = lazy(() => import('./templates/Templates').then((m) => ({ default: m.SaveTemplateDialog })));
+const TemplateCenter = lazy(() => import('./templates/Templates').then((m) => ({ default: m.TemplateCenter })));
+// Admin, likewise: only admins open it, and it brings the spreadsheet importer with it.
+const AdminLauncher = lazy(() => import('./teams/AdminPage').then((m) => ({ default: m.AdminLauncher })));
 import { useFavorites } from './Favorites';
 import { LocationSettingsDialog, TagManagerDialog } from './LocationSettings';
 import { AutomationsDialog } from './AutomationsDialog';
@@ -15,6 +20,8 @@ import { workApi, type FolderNode, type Level, type ListNode, type LocationKind,
 import { Menu, NameDialog, type MenuItem } from './ui';
 import { FEATURES } from '../config/features';
 import { ShareLocationDialog } from './ShareLocationDialog';
+import { AssignListDialog } from './AssignListDialog';
+import { CreateSpaceDialog } from './CreateSpace';
 import { notify } from '../components/notify';
 import { ask } from '../components/ask';
 
@@ -38,6 +45,7 @@ type Dialog =
   | { type: 'list-email'; id: string; name: string }
   | { type: 'templates'; kind?: TemplateKind; target?: string }
   | { type: 'settings'; kind: LocationKind; id: string }
+  | { type: 'assign'; node: ListNode }
   | { type: 'team'; kind: LocationKind; id: string; name: string; team: string | null }
   | { type: 'tags'; id: string; name: string; canEdit: boolean }
   | { type: 'automations'; kind: LocationKind; id: string; name: string; canManage: boolean };
@@ -47,6 +55,7 @@ export const SpacesSidebar: React.FC = () => {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [adminOpen, setAdminOpen] = useState(false);
   const favorites = useFavorites();
   // Hidden Spaces are a personal, per-browser choice, as in ClickUp's "Hide Space".
   const [hidden, setHidden] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('timetriq.hiddenSpaces') || '[]'); } catch { return []; } });
@@ -135,8 +144,7 @@ export const SpacesSidebar: React.FC = () => {
       return;
     }
     let created: { id: string };
-    if (dialog.what === 'space') created = await workApi.createSpace(workspace.id, name, isPrivate);
-    else if (dialog.what === 'folder') created = await workApi.createFolder(dialog.parent!, name, isPrivate);
+    if (dialog.what === 'folder') created = await workApi.createFolder(dialog.parent!, name, isPrivate);
     else created = await workApi.createList(dialog.parent!, name, isPrivate, assignees);
     if (dialog.parent) open(dialog.parent.id);
     await refresh();
@@ -167,6 +175,11 @@ export const SpacesSidebar: React.FC = () => {
       : []),
     ...(FEATURES.spaceMenuSettings && canEdit(node.permission_level)
       ? [{ label: kind === 'list' ? 'List info & dates' : `${kind === 'space' ? 'Space' : 'Folder'} settings`, icon: <Settings2 size={14} />, onClick: () => setDialog({ type: 'settings', kind, id: node.id }) }]
+      : []),
+    // Assigning a List hands it to people, which used to be a button on every List's header.
+    // It lives here now, beside the List's other actions, for anyone with full access to it.
+    ...(kind === 'list' && node.permission_level === 'full'
+      ? [{ label: 'Assign to people', icon: <UserPlus size={14} />, onClick: () => setDialog({ type: 'assign', node: node as ListNode }) }]
       : []),
     ...(FEATURES.spaceMenuTags && kind === 'space'
       ? [{ label: 'Tags', icon: <TagIcon size={14} />, onClick: () => setDialog({ type: 'tags', id: node.id, name: node.name, canEdit: canEdit(node.permission_level) }) }]
@@ -226,9 +239,8 @@ export const SpacesSidebar: React.FC = () => {
   ];
 
   const createItems = (parent: { kind: 'space' | 'folder'; id: string }, allowFolder: boolean): MenuItem[] => [
-    ...(isManager
-      ? [{ label: 'List', icon: <ListIcon size={14} />, onClick: () => setDialog({ type: 'create', what: 'list' as const, parent }) }]
-      : []),
+    // A List: anyone with full edit here (the menu only opens for them). A Folder: managers and admins.
+    { label: 'List', icon: <ListIcon size={14} />, onClick: () => setDialog({ type: 'create', what: 'list' as const, parent }) },
     ...(allowFolder && isManager
       ? [{ label: parent.kind === 'space' ? 'Folder' : 'Subfolder', icon: <Folder size={14} />, onClick: () => setDialog({ type: 'create', what: 'folder' as const, parent }) }]
       : []),
@@ -269,7 +281,7 @@ export const SpacesSidebar: React.FC = () => {
           isPrivate={folder.is_private}
           onToggle={() => toggle(folder.id)}
           isOpen={isOpen}
-          createItems={isManager && canManage(folder.permission_level) ? createItems({ kind: 'folder', id: folder.id }, !isSub) : undefined}
+          createItems={canManage(folder.permission_level) ? createItems({ kind: 'folder', id: folder.id }, !isSub) : undefined}
           actions={rowActions('folder', folder)}
         />
         {isOpen && (
@@ -302,7 +314,7 @@ export const SpacesSidebar: React.FC = () => {
           isPrivate={space.is_private}
           onToggle={() => toggle(space.id)}
           isOpen={isOpen}
-          createItems={isManager && canManage(space.permission_level) ? createItems({ kind: 'space', id: space.id }, true) : undefined}
+          createItems={canManage(space.permission_level) ? createItems({ kind: 'space', id: space.id }, true) : undefined}
           actions={rowActions('space', space)}
         />
         {isOpen && (
@@ -310,7 +322,7 @@ export const SpacesSidebar: React.FC = () => {
             {space.folders.map((f) => renderFolder(f, 1, false))}
             {space.lists.map((l) => renderList(l, 1))}
             {space.folders.length === 0 && space.lists.length === 0 && (
-              <div className="py-1 pl-10 text-xs text-gray-400">Empty — use + to add a List</div>
+              <div className="py-1 pl-10 text-xs text-gray-400">{canManage(space.permission_level) ? 'Empty — use + to add a List' : 'No Lists yet'}</div>
             )}
           </>
         )}
@@ -332,7 +344,7 @@ export const SpacesSidebar: React.FC = () => {
       <div className="mb-1 flex items-center justify-between pl-2.5 pr-1">
         <span className="side-head text-gray-400">Spaces</span>
         {workspace && canAddSpace && (
-          <button
+          <button aria-label="New Space"
             type="button"
             title="New Space"
             onClick={() => setDialog({ type: 'create', what: 'space' })}
@@ -444,6 +456,22 @@ export const SpacesSidebar: React.FC = () => {
         </Link>
       )}
 
+      {/* Admin, next to Teams & People rather than inside it, and only for the people who can
+          open it. The old route still answers so a bookmark does not break. */}
+      {/* Admin opens where you are: the options in a pop-up, the chosen one in a full window.
+          /admin still answers as a page, for bookmarks. */}
+      {workspace && isAdmin && (
+        <button
+          type="button"
+          onClick={() => setAdminOpen(true)}
+          aria-haspopup="dialog"
+          className={`side-row flex w-full items-center gap-2 pl-1.5 ${adminOpen || pathname.startsWith('/admin') ? 'is-active bg-brand-50 text-brand-700' : 'text-gray-500'}`}
+        >
+          <span className="w-4 shrink-0" aria-hidden /><Shield size={16} /> Admin
+        </button>
+      )}
+      {adminOpen && <Suspense fallback={null}><AdminLauncher onClose={() => setAdminOpen(false)} /></Suspense>}
+
       {workspace && FEATURES.archived && (
         <button
           type="button"
@@ -481,11 +509,20 @@ export const SpacesSidebar: React.FC = () => {
           onDone={(id) => { const kind = dialog.kind; setDialog(null); refresh().then(() => navigate(pathFor(kind, id))); }} />
       )}
       {FEATURES.automations && dialog?.type === 'automations' && <AutomationsDialog kind={dialog.kind} id={dialog.id} name={dialog.name} canManage={dialog.canManage} onClose={() => setDialog(null)} />}
+      {dialog?.type === 'assign' && (
+        <AssignListDialog
+          listId={dialog.node.id}
+          name={dialog.node.name}
+          current={dialog.node.assignee_ids ?? [dialog.node.assignee_id].filter((x): x is string => !!x)}
+          onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />
+      )}
       {dialog?.type === 'settings' && <LocationSettingsDialog kind={dialog.kind} id={dialog.id} onClose={() => setDialog(null)} />}
       {dialog?.type === 'tags' && <TagManagerDialog spaceId={dialog.id} spaceName={dialog.name} canEdit={dialog.canEdit} onClose={() => setDialog(null)} />}
       {dialog?.type === 'archived' && <ArchivedDialog onClose={() => setDialog(null)} onRestored={refresh} />}
-      {dialog?.type === 'save-template' && <SaveTemplateDialog kind={dialog.kind} id={dialog.id} name={dialog.name} onClose={() => setDialog(null)} />}
-      {dialog?.type === 'templates' && <TemplateCenter kind={dialog.kind} target={dialog.target} onClose={() => setDialog(null)} />}
+      <Suspense fallback={null}>
+        {dialog?.type === 'save-template' && <SaveTemplateDialog kind={dialog.kind} id={dialog.id} name={dialog.name} onClose={() => setDialog(null)} />}
+        {dialog?.type === 'templates' && <TemplateCenter kind={dialog.kind} target={dialog.target} onClose={() => setDialog(null)} />}
+      </Suspense>
       {dialog?.type === 'clickapps' && <ClickAppsDialog spaceId={dialog.id} name={dialog.name} canEdit={dialog.canManage} onClose={() => setDialog(null)} onSaved={refresh} />}
       {dialog?.type === 'duplicate-space' && (
         <DuplicateSpaceDialog spaceId={dialog.id} name={dialog.name} onClose={() => setDialog(null)}
@@ -494,7 +531,12 @@ export const SpacesSidebar: React.FC = () => {
       {dialog?.type === 'sprints' && <SprintSettingsDialog folderId={dialog.id} name={dialog.name} onClose={() => setDialog(null)} onSaved={refresh} />}
       {FEATURES.listEmail && dialog?.type === 'list-email' && <ListEmailDialog listId={dialog.id} name={dialog.name} onClose={() => setDialog(null)} />}
 
-      {(dialog?.type === 'create' || dialog?.type === 'rename') && (
+      {dialog?.type === 'create' && dialog.what === 'space' && workspace && (
+        <CreateSpaceDialog workspaceId={workspace.id} onClose={() => setDialog(null)}
+          onUseTemplates={() => setDialog({ type: 'templates', kind: 'space' })}
+          onCreated={(id) => { setDialog(null); refresh().then(() => navigate(pathFor('space', id))); }} />
+      )}
+      {((dialog?.type === 'create' && dialog.what !== 'space') || dialog?.type === 'rename') && (
         <NameDialog
           title={dialog.type === 'rename' ? 'Rename' : `New ${dialog.what === 'space' ? 'Space' : dialog.what === 'folder' ? 'Folder' : 'List'}`}
           initial={dialog.type === 'rename' ? dialog.name : ''}
@@ -515,6 +557,28 @@ export const SpacesSidebar: React.FC = () => {
 };
 
 // --- one row of the tree -----------------------------------------------------
+
+/**
+ * A long name loses its middle, not its end. Eleven Lists called "Variant Task List - …" all
+ * looked the same when the part that tells them apart was the part cut off, so the last piece
+ * (after the final " - ", or the last few characters) always stays; the full name is the tooltip.
+ */
+function splitName(name: string): [string, string] {
+  if (name.length <= 24) return [name, ''];
+  const cut = name.lastIndexOf(' - ');
+  const tail = cut > 0 && name.length - cut <= 22 ? name.slice(cut) : name.slice(-10);
+  return [name.slice(0, name.length - tail.length), tail];
+}
+
+const RowName: React.FC<{ name: string; className: string }> = ({ name, className }) => {
+  const [head, tail] = splitName(name);
+  return (
+    <span className={`flex min-w-0 flex-1 ${className}`} title={name}>
+      <span className="min-w-0 truncate">{head}</span>
+      {tail && <span className="min-w-0 max-w-[65%] shrink-0 truncate whitespace-pre">{tail}</span>}
+    </span>
+  );
+};
 
 const Row: React.FC<{
   to?: string;
@@ -546,7 +610,7 @@ const Row: React.FC<{
         )}
       </span>
       <span className="flex shrink-0 items-center">{icon}</span>
-      <span className={`min-w-0 flex-1 truncate ${bold ? 'font-medium text-gray-800' : 'text-gray-700'}`}>{name}</span>
+      <RowName name={name} className={bold ? 'font-medium text-gray-800' : 'text-gray-700'} />
       {isPrivate && <Lock size={12} className="shrink-0 text-gray-400" />}
       <span className="flex shrink-0 items-center gap-0.5">
         {/* Hover actions stay visible while one of their menus is open. */}

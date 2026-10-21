@@ -37,6 +37,8 @@ export interface CardConfig {
   include_subtasks: boolean;
   include_closed: boolean;
   filters: Filters;
+  /** What the card was built to filter by; "Clear all filters" puts `filters` back to this. */
+  base_filters?: Filters | null;
   measure: Measure;
   fn: 'count' | 'sum' | 'avg' | 'min' | 'max';
   unit: string | null;
@@ -67,6 +69,51 @@ export interface DashboardSummary {
   standard?: 'my_work' | 'team' | 'company' | null;
 }
 export interface Dashboard extends DashboardSummary { filters: Filters; auto_refresh: boolean; cards: Card[] }
+
+/** A person whose own Dashboard the viewer may open, with the figures that say whom to look at. */
+export interface PersonBoard {
+  user: UserRef; designation: string | null; department: string | null; teams: string[]; pending: boolean;
+  open: number; overdue: number; due_today: number; dashboard_id: string | null;
+}
+
+/** One task named in a highlight. */
+export interface InsightTask {
+  id: string; name: string; list_id: string; priority: number | null; due_date: string | null; assignees: UserRef[];
+  days_late?: number; days_idle?: number; tracked?: number; estimate?: number; waiting_on?: string;
+}
+export interface InsightSection { count: number; tasks: InsightTask[] }
+/**
+ * What needs attention on a board, worked out from the same tasks as its cards. What a card
+ * already says -- due today, overdue, hours this week, finished work -- is not repeated here.
+ */
+export interface Insights {
+  /** Whose board: the viewer's own, one other person's, a Team's, or the whole company. */
+  who: 'me' | 'person' | 'team' | 'everyone';
+  who_name: string | null;
+  open: number;
+  // Your day.
+  starts_today: InsightSection; late_start: InsightSection; over_estimate: InsightSection;
+  recurring_this_week: InsightSection; stuck: InsightSection; urgent_soon: InsightSection;
+  blocked_by_late: InsightSection;
+  next_week: { count: number; estimate: number } | null;
+  running_timers: { user: UserRef; task_id: string; task_name: string; list_id: string; since: string }[];
+  mentions_unread: number;
+  reminders_today: { title: string; at: string; task_id: string | null }[];
+  no_due_date: number; no_estimate: number; unassigned: number;
+  logged_yesterday: number;
+  capacity_yesterday: number | null;
+  // Your Team (empty on a board about one person).
+  people_behind: { user: UserRef; overdue: number }[];
+  overloaded: { user: UserRef; planned: number; capacity: number }[];
+  no_time_yesterday: UserRef[]; no_time_yesterday_count?: number;
+  timesheets_waiting: { user: UserRef; period_start: string; period_end: string }[];
+  timesheets_missing: UserRef[]; timesheets_missing_count?: number;
+  // The firm.
+  birthdays: UserRef[];
+  anniversaries: { user: UserRef; years: number }[];
+  holidays_this_week: { name: string; day: string }[];
+  goals_behind: { id: string; name: string; progress: number; expected: number }[];
+}
 
 export interface Segment { key: string; label: string; color: string; value: number }
 export interface CardData {
@@ -121,6 +168,14 @@ export const dashApi = {
   layout: (id: string, cards: { id: string; width: number; height: number }[]) =>
     request<Dashboard>('PUT', `/dashboards/${id}/layout`, { cards }),
   data: (id: string) => request<CardData[]>('GET', `/dashboards/${id}/data`, undefined, tz()),
+  /** Whose own Dashboards the viewer may open -- admins: everyone; Team leads: their people. */
+  people: (workspaceId: string) => request<PersonBoard[]>('GET', `/workspaces/${workspaceId}/dashboards/people`, undefined, tz()),
+  /** Someone's own Dashboard, read-only, exactly as they see it; made now if they have never opened it. */
+  personBoard: (workspaceId: string, userId: string) =>
+    request<Dashboard>('GET', `/workspaces/${workspaceId}/people/${encodeURIComponent(userId)}/dashboard`),
+  /** Clear the board's filters and put every card back to the filters it was built with. */
+  resetFilters: (id: string) => request<Dashboard>('POST', `/dashboards/${id}/reset-filters`),
+  insights: (id: string) => request<Insights>('GET', `/dashboards/${id}/insights`, undefined, tz()),
 
   addCard: (id: string, body: { type: CardType; title?: string; config: Partial<CardConfig>; width?: number; height?: number }) =>
     request<Card>('POST', `/dashboards/${id}/cards`, body),
@@ -145,7 +200,6 @@ export const dashApi = {
   runs: (id: string) => request<ReportRun[]>('GET', `/dashboards/${id}/report-runs`),
   run: (runId: string) => request<ReportRun & { html: string }>('GET', `/report-runs/${runId}`),
   forView: (viewId: string) => request<Dashboard | null>('GET', `/views/${viewId}/dashboard`),
-  customiseView: (viewId: string) => request<Dashboard>('POST', `/views/${viewId}/dashboard`),
   messages: (id: string, cardId: string) => request<DiscussionMessage[]>('GET', `/dashboards/${id}/cards/${cardId}/messages`),
   postMessage: (id: string, cardId: string, body: string) => request<DiscussionMessage[]>('POST', `/dashboards/${id}/cards/${cardId}/messages`, { body }),
   deleteMessage: (messageId: string) => request('DELETE', `/dashboard-messages/${messageId}`),

@@ -84,8 +84,8 @@ const Calendar: React.FC<{ ws: string }> = ({ ws }) => {
   return (
     <div className="mx-auto max-w-5xl">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <button type="button" title="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={16} /></button>
-        <button type="button" title="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={16} /></button>
+        <button aria-label="Previous month" type="button" title="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={16} /></button>
+        <button aria-label="Next month" type="button" title="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={16} /></button>
         <h2 className="mr-2 text-sm font-semibold text-gray-800">{month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h2>
         <select aria-label="Filter by client" value={client} onChange={(e) => setClient(e.target.value)} className={input}><option value="">All clients</option>{clients.map((c) => <option key={c}>{c}</option>)}</select>
         <select aria-label="Filter by authority" value={authority} onChange={(e) => setAuthority(e.target.value)} className={input}><option value="">All authorities</option>{authorities.map((a) => <option key={a}>{a}</option>)}</select>
@@ -167,7 +167,7 @@ const Clients: React.FC<{ ws: string }> = ({ ws }) => {
       {adding && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30" onMouseDown={() => setAdding(false)}>
           <form role="dialog" aria-label="Client obligations" onSubmit={save} onMouseDown={(e) => e.stopPropagation()} className="max-h-[90vh] w-[40rem] max-w-[calc(100vw-2rem)] space-y-3 overflow-y-auto rounded-xl bg-white p-5 shadow-xl">
-            <div className="flex items-center"><h3 className="font-semibold text-gray-900">A client's obligations</h3><button type="button" title="Close" onClick={() => setAdding(false)} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button></div>
+            <div className="flex items-center"><h3 className="font-semibold text-gray-900">A client's obligations</h3><button aria-label="Close" type="button" title="Close" onClick={() => setAdding(false)} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button></div>
             <div className="grid grid-cols-2 gap-3">
               <label className="text-xs font-medium text-gray-600">Client's List<select aria-label="Client List" value={form.list_id} onChange={(e) => { const l = lists.find((x) => x.id === e.target.value); setForm({ ...form, list_id: e.target.value, client_name: form.client_name || l?.name || '' }); }} className={`mt-1 block w-full ${input}`}>
                 <option value="">Choose…</option>{lists.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}</select></label>

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     HiddenSpace,
+    LocationKind,
     PermissionLevel,
     Share,
     SidebarSection,
@@ -77,9 +78,13 @@ def set_clickapps(space: Space, changes: Dict[str, bool]) -> None:
 
 
 def _can_approve(access: Access, space: Space) -> bool:
+    """Admins, whoever made the Space, and anyone it was shared with at full. Not every member: on a
+    public Space everyone resolves to full, and that let any colleague read who asked to join what."""
     if can_manage_workspace(access.role) or space.created_by == access.user_id:
         return True
-    return access.level([space_node(space)]) == PermissionLevel.full
+    key = (LocationKind.space, space.id)
+    granted = access.shares.get(key) or access.team_shares.get(key)
+    return granted == PermissionLevel.full and access.level([space_node(space)]) == PermissionLevel.full
 
 
 def browse(db: Session, access: Access) -> List[sp.BrowseSpace]:

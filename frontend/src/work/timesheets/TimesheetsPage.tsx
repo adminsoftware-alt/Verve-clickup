@@ -38,20 +38,31 @@ export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
   const loadSettings = useCallback(() => { if (workspace) sheetApi.settings(workspace.id).then(setSettings).catch(() => undefined); }, [workspace]);
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
-  const tabs = [
-    // An admin is not filling in a timesheet of their own; the question they come here with is
-    // whose hours are missing. The page still answers at /timesheets if they want theirs.
-    { key: 'mine', label: 'My timesheet', to: '/timesheets', show: !isAdmin },
-    { key: 'all', label: 'All timesheets', to: '/timesheets/all', show: isAdmin || led.length > 0 },
-    { key: 'approvals', label: 'Approvals', to: '/timesheets/approvals', show: isAdmin || !!settings?.approvals_enabled },
-  ];
-  const shown = tabs.filter((t) => t.show);
+  // One page, called the same thing for everybody.
+  //
+  // There were three tabs sitting under a heading that already said "Timesheets", so the word
+  // appeared twice before any hours did. Approvals has gone with them: the firm has admins and
+  // employees and nobody in between, so there was no longer anyone for a timesheet to be approved
+  // *by* -- see LEAVE_APPROVALS_ENABLED and the two-tier roles. An admin who wants somebody's
+  // hours opens them from that person in Teams & People, which is where their name already is.
+  //
+  // Every route still answers, and the tab strip is one flag away if the firm ever wants it back.
+  const shown = FEATURES.timesheetTabs
+    ? [
+      { key: 'mine', label: 'My timesheet', to: '/timesheets', show: !isAdmin },
+      { key: 'all', label: 'All timesheets', to: '/timesheets/all', show: isAdmin || led.length > 0 },
+      { key: 'approvals', label: 'Approvals', to: '/timesheets/approvals', show: isAdmin || !!settings?.approvals_enabled },
+    ].filter((t) => t.show)
+    : [];
   const active = tab === 'person' ? 'all' : tab;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-gray-50/70">
-      <header className="flex items-center gap-6 border-b border-gray-200 bg-white px-6">
-        <span className="flex items-center gap-2 py-3 text-[15px] text-gray-800"><Clock size={17} /> Timesheets</span>
+      {/* Wraps, and with less air between things on a phone. As one unwrapped row with 24px gaps
+          it was 58px wider than a 390px screen, which put Settings off the right edge where
+          nothing could reach it. */}
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-gray-200 bg-white px-4 sm:gap-x-6 sm:px-6">
+        <span className="flex items-center gap-2 py-3 text-[15px] text-gray-800"><Clock size={17} /> Timesheet</span>
         {/* One tab is not a choice, and next to the heading it reads as the same word twice. */}
         {shown.length > 1 && (
           <>
@@ -68,13 +79,18 @@ export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
         {/* Hours, the week's shape and approvals are company policy, not a personal
             preference, so the whole dialog belongs to owners and admins -- Team leads included. */}
         {isAdmin && (
-          <button type="button" onClick={() => setShowSettings(true)} className="ml-auto flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-            <Settings size={14} /> Settings
+          <button
+            type="button" onClick={() => setShowSettings(true)} aria-label="Timesheet settings"
+            className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <Settings size={14} /> <span className="hidden sm:inline">Settings</span>
           </button>
         )}
       </header>
-      <main className="min-h-0 flex-1 overflow-auto px-6 py-6">
-        {tab === 'all' ? <AllTimesheets /> : tab === 'approvals' ? <Approvals settings={settings} /> : isAdmin ? <AllTimesheets /> : <SheetPage />}
+      <main className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
+        {/* An admin keeps no week of their own, so "My timesheet" is everyone's for them; one
+            person's sheet (/timesheets/people/:id) is that person's for everybody. */}
+        {tab === 'all' ? <AllTimesheets /> : tab === 'approvals' ? <Approvals settings={settings} /> : tab === 'mine' && isAdmin ? <AllTimesheets /> : <SheetPage />}
       </main>
       {showSettings && settings && isAdmin && <SettingsDialog settings={settings} onClose={() => setShowSettings(false)} onSaved={loadSettings} />}
     </div>
@@ -175,7 +191,7 @@ const SheetPage: React.FC = () => {
     (own || !v.mineOnly) && (v.key === 'timesheet' || FEATURES.timesheetExtraViews)
   ));
   const deleteRow = async (row: SheetRow) => {
-    if (row.total_seconds && !await ask.confirm({ danger: true, title: `Delete all ${hours(row.total_seconds)} tracked on “${row.task.name}” this week?` })) return;
+    if (row.total_seconds && !await ask.confirm({ danger: true, title: `Remove “${row.task.name}” from this week's timesheet? The ${hours(row.total_seconds)} tracked on it this week is deleted; the task itself stays.` })) return;
     run(() => sheetApi.deleteRow(workspace!.id, { user_id: whose, task_id: row.task.id, start: sheet.period_start }));
   };
 
@@ -332,7 +348,7 @@ const DecisionDialog: React.FC<{ kind: keyof typeof DIALOG_TEXT; summary: string
         <h3 className="font-semibold text-gray-900">{text.title}</h3>
         <p className="mt-1 text-sm text-gray-600">{summary}</p>
         <p className="mt-1 text-xs text-gray-500">{text.hint}</p>
-        <textarea autoFocus value={comment} onChange={(e) => setComment(e.target.value)} rows={3} placeholder={text.required ? 'Reason (required)' : 'Comment (optional)'} className="mt-3 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
+        <textarea autoFocus aria-label={text.required ? 'Reason (required)' : 'Comment (optional)'} value={comment} onChange={(e) => setComment(e.target.value)} rows={3} placeholder={text.required ? 'Reason (required)' : 'Comment (optional)'} className="mt-3 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
         <div className="mt-3 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
           <button type="button" disabled={busy || (text.required && !comment.trim())} onClick={async () => { setBusy(true); try { await onConfirm(comment.trim()); } finally { setBusy(false); } }} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">{text.button}</button>

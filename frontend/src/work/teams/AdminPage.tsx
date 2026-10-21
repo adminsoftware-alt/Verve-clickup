@@ -1,13 +1,20 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, FileSpreadsheet, History, KeyRound, ListChecks, Mail, RotateCcw, Save, ShieldBan, Trash2, UserMinus, UserPlus, Wallet } from 'lucide-react';
-import { Avatar } from '../ui';
-import { peopleApi, type AuditEvent, type BlockedEmail, type JoinerPlan, type JoinerRule, type SignInRules } from './peopleApi';
-import { useHub } from './TeamsHub';
+import {
+  ChevronLeft, ChevronRight, Clock, FileSpreadsheet, History, ListChecks, RotateCcw, Save, ShieldBan, ShieldCheck, Trash2,
+  UserMinus, UserPlus, Wallet, X,
+} from 'lucide-react';
+import { Avatar, Portal } from '../ui';
+import { DrawInPlace } from './inlineDialog';
+import { peopleApi, type AuditEvent, type BlockedEmail, type JoinerPlan, type JoinerRule, type Person, type TeamFull } from './peopleApi';
+import { HubContext, useHub, type Hub } from './TeamsHub';
+import { useMe, useWork } from '../WorkContext';
+import type { Role } from '../api';
 import { AddPersonDialog } from './PersonDialogs';
 import { ImportPeopleDialog } from './AdminDialogs';
 import { RemovePersonSection } from './RemovePerson';
 import { RunningCosts } from './RunningCosts';
+import { WorkingHoursSection } from './WorkingHours';
 import { ask } from '../../components/ask';
 import { FEATURES } from '../../config/features';
 
@@ -15,83 +22,276 @@ const card = 'rounded-xl border border-gray-200 bg-white p-5';
 const input = 'rounded-md border border-gray-300 px-2 py-1.5 text-sm';
 const primary = 'flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50';
 
-const Section: React.FC<{ id: string; icon: React.ReactNode; title: string; hint: string; children: React.ReactNode }> = ({ id, icon, title, hint, children }) => (
-  <section id={id} aria-label={title} className={card}>
-    <h3 className="flex items-center gap-2 text-base font-semibold text-gray-900">{icon}{title}</h3>
-    <p className="mb-4 mt-0.5 text-sm text-gray-500">{hint}</p>
-    {children}
-  </section>
-);
+/** Set while a section is shown inside an Admin window, which already carries its title. */
+const InWindow = React.createContext(false);
 
-/** Workspace administration for owners and admins. */
+const Section: React.FC<{ id: string; icon: React.ReactNode; title: string; hint: string; children: React.ReactNode }> = ({ id, icon, title, hint, children }) => {
+  const inWindow = React.useContext(InWindow);
+  if (inWindow) return <section id={id} aria-label={title}>{children}</section>;
+  return (
+    <section id={id} aria-label={title} className={card}>
+      <h3 className="flex items-center gap-2 text-base font-semibold text-gray-900">{icon}{title}</h3>
+      <p className="mb-4 mt-0.5 text-sm text-gray-500">{hint}</p>
+      {children}
+    </section>
+  );
+};
+
+/**
+ * The people, teams and roles the Admin sections read, for wherever Admin is opened from: the
+ * /admin page, or the launcher in the sidebar. The sections were written against the Teams hub,
+ * so this supplies the same shape.
+ */
+function useAdminHub(): { hub: Hub; error: string | null; ready: boolean } {
+  const { workspace, hierarchy, refresh } = useWork();
+  const me = useMe();
+  const [people, setPeople] = useState<Person[]>([]);
+  const [teams, setTeams] = useState<TeamFull[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const ws = workspace?.id ?? '';
+  const role = hierarchy?.role;
+  const isAdmin = role === 'owner' || role === 'admin';
+
+  const reload = useCallback(async () => {
+    if (!ws || !isAdmin) return;
+    try {
+      const [p, t] = await Promise.all([peopleApi.list(ws), peopleApi.teams(ws)]);
+      setPeople(p);
+      setTeams(t);
+    } catch (e) { setError((e as Error).message); }
+  }, [ws, isAdmin]);
+  useEffect(() => { reload(); }, [reload]);
+
+  const hub: Hub = useMemo(() => ({
+    ws, people, teams, me: me ?? '', isAdmin,
+    // Only the owner makes admins; nobody makes a second owner.
+    roles: (role === 'owner' ? ['member', 'admin'] : ['member']) as Role[],
+    reload: async () => { await reload(); refresh(); },
+    openPerson: () => undefined,
+  }), [ws, people, teams, me, isAdmin, role, reload, refresh]);
+  return { hub, error, ready: !!workspace };
+}
+
+/** Admin as its own page, for the /admin address and bookmarks to it. */
+export const AdminStandalone: React.FC = () => {
+  const { hub, error, ready } = useAdminHub();
+  if (!ready) return null;
+  if (!hub.isAdmin) return <p className="p-10 text-center text-sm text-gray-500">Only owners and admins can see this page.</p>;
+  return (
+    <HubContext.Provider value={hub}>
+      {error && <p className="mx-auto mt-4 max-w-5xl rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      <AdminPage />
+    </HubContext.Provider>
+  );
+};
+
+// --- the options ---------------------------------------------------------------------------------------------
+
+/** Everything an admin can do, one option each. Each opens on its own, when it is wanted. */
+type Action = 'add' | 'import' | 'remove' | 'hours' | 'costs' | 'audit' | 'blocked' | 'joiner';
+
+interface Option {
+  key: Action; title: string; line: string; Icon: React.ElementType;
+  tone: 'brand' | 'sky' | 'emerald' | 'violet' | 'amber' | 'slate' | 'red';
+  group: 'People' | 'Workspace';
+}
+
+const TONES: Record<Option['tone'], { chip: string; ring: string }> = {
+  brand: { chip: 'bg-brand-50 text-brand-600', ring: 'hover:border-brand-300 hover:ring-brand-500/10' },
+  sky: { chip: 'bg-sky-50 text-sky-600', ring: 'hover:border-sky-300 hover:ring-sky-500/10' },
+  emerald: { chip: 'bg-emerald-50 text-emerald-600', ring: 'hover:border-emerald-300 hover:ring-emerald-500/10' },
+  violet: { chip: 'bg-violet-50 text-violet-600', ring: 'hover:border-violet-300 hover:ring-violet-500/10' },
+  amber: { chip: 'bg-amber-50 text-amber-600', ring: 'hover:border-amber-300 hover:ring-amber-500/10' },
+  slate: { chip: 'bg-slate-100 text-slate-600', ring: 'hover:border-slate-300 hover:ring-slate-500/10' },
+  red: { chip: 'bg-red-50 text-red-600', ring: 'hover:border-red-300 hover:ring-red-500/10' },
+};
+
+const OPTIONS: Option[] = [
+  { key: 'add', title: 'Add a person', line: 'Set someone up with their profile', Icon: UserPlus, tone: 'brand', group: 'People' },
+  { key: 'remove', title: 'Remove a person', line: 'Offboard someone and hand over their work', Icon: UserMinus, tone: 'red', group: 'People' },
+  { key: 'import', title: 'Import from a spreadsheet', line: 'Add or update many people at once', Icon: FileSpreadsheet, tone: 'emerald', group: 'People' },
+  { key: 'hours', title: 'Working hours', line: 'Days and hours for the company, Teams and people', Icon: Clock, tone: 'amber', group: 'People' },
+  { key: 'audit', title: 'Audit logs', line: 'Who changed what, and when', Icon: History, tone: 'slate', group: 'Workspace' },
+  { key: 'costs', title: 'Running costs', line: 'What the application costs to run', Icon: Wallet, tone: 'violet', group: 'Workspace' },
+];
+
+/** The options this workspace offers: the six, plus two that come back with their flags. */
+const options = (): Option[] => [
+  ...OPTIONS,
+  ...(FEATURES.blockedAddresses ? [{ key: 'blocked', title: 'Blocked addresses', line: 'Emails that may not be added back', Icon: ShieldBan, tone: 'red', group: 'Workspace' } as Option] : []),
+  ...(FEATURES.joinerChecklistSection ? [{ key: 'joiner', title: 'Joiner checklist', line: 'Tasks made for each new joiner', Icon: ListChecks, tone: 'emerald', group: 'Workspace' } as Option] : []),
+];
+
+// --- the full window -----------------------------------------------------------------------------------------
+
+/**
+ * One option, opened across nearly the whole screen: room for the audit log's history, the costs
+ * tables and the offboarding steps, rather than a pop-up that scrolls inside itself.
+ */
+const AdminWindow: React.FC<{ action: Action; onBack: () => void; onClose: () => void }> = ({ action, onBack, onClose }) => {
+  const { ws, people, teams, me, roles, reload } = useHub();
+  const option = options().find((o) => o.key === action)!;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onBack(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onBack]);
+  return (
+    <Portal>
+      <div className="admin-fade fixed inset-0 z-[125] bg-gray-900/40 backdrop-blur-sm" onMouseDown={onClose} />
+      <div
+        role="dialog" aria-modal="true" aria-label={option.title}
+        className="admin-grow fixed inset-2 z-[126] flex flex-col overflow-hidden rounded-2xl bg-gray-50 shadow-2xl ring-1 ring-black/5 sm:inset-6 lg:inset-x-[max(1.5rem,calc((100vw-80rem)/2))]"
+      >
+        <header className="flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-3 sm:px-6">
+          <button type="button" onClick={onBack} className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">
+            <ChevronLeft size={16} /> All options
+          </button>
+          <span className="h-5 w-px bg-gray-200" aria-hidden />
+          <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${TONES[option.tone].chip}`}><option.Icon size={17} /></span>
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-semibold text-gray-900">{option.title}</h2>
+            <p className="hidden truncate text-xs text-gray-500 sm:block">{option.line}</p>
+          </div>
+          <button type="button" aria-label="Close Admin" onClick={onClose} className="ml-auto rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><X size={18} /></button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8">
+          <div className="mx-auto max-w-5xl rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-7">
+            <DrawInPlace.Provider value>
+              <InWindow.Provider value>
+                {action === 'add' && <AddPersonDialog ws={ws} people={people} teams={teams} roles={roles} onClose={onBack} onDone={() => { reload(); }} />}
+                {action === 'import' && <ImportPeopleDialog ws={ws} onClose={onBack} onDone={() => { reload(); }} />}
+                {action === 'remove' && <RemovePersonSection ws={ws} people={people} teams={teams} me={me} onChanged={reload} />}
+                {action === 'hours' && <WorkingHoursSection ws={ws} />}
+                {action === 'costs' && <RunningCosts ws={ws} />}
+                {action === 'audit' && <AuditSection ws={ws} />}
+                {action === 'blocked' && <BlockedSection ws={ws} />}
+                {action === 'joiner' && <JoinerPlanSection ws={ws} />}
+              </InWindow.Provider>
+            </DrawInPlace.Provider>
+          </div>
+        </div>
+      </div>
+    </Portal>
+  );
+};
+
+// --- the launcher, from the sidebar --------------------------------------------------------------------------
+
+/**
+ * What "Admin" in the sidebar opens: the options in a pop-up, and the chosen one in a full window.
+ * Choosing goes straight from one to the other; "All options" comes back.
+ */
+export const AdminLauncher: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { hub, error } = useAdminHub();
+  const [action, setAction] = useState<Action | null>(null);
+  if (!hub.isAdmin) return null;
+  return (
+    <HubContext.Provider value={hub}>
+      {action
+        ? <AdminWindow action={action} onBack={() => setAction(null)} onClose={onClose} />
+        : <AdminMenu error={error} onPick={setAction} onClose={onClose} />}
+    </HubContext.Provider>
+  );
+};
+
+const AdminMenu: React.FC<{ error: string | null; onPick: (a: Action) => void; onClose: () => void }> = ({ error, onPick, onClose }) => {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <Portal>
+      <div className="admin-fade fixed inset-0 z-[125] flex items-center justify-center bg-gray-900/40 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+        <div
+          role="dialog" aria-modal="true" aria-label="Admin"
+          onMouseDown={(e) => e.stopPropagation()}
+          className="admin-pop flex max-h-[90vh] w-[min(94vw,46rem)] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5"
+        >
+          <header className="bg-gradient-to-br from-brand-600 to-brand-700 px-6 pb-5 pt-5 text-white">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15"><ShieldCheck size={20} /></span>
+              <div>
+                <h2 className="text-lg font-semibold">Admin</h2>
+                <p className="text-sm text-white/75">What would you like to do?</p>
+              </div>
+              <button type="button" aria-label="Close" onClick={onClose} className="ml-auto rounded-lg p-1.5 text-white/70 hover:bg-white/10 hover:text-white"><X size={18} /></button>
+            </div>
+          </header>
+          {error && <p className="mx-6 mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
+            {(['People', 'Workspace'] as const).map((group) => (
+              <section key={group} aria-label={group} className="mb-3 last:mb-0">
+                <h3 className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400">{group}</h3>
+                <ul className="grid gap-1 sm:grid-cols-2">
+                  {options().filter((o) => o.group === group).map((o) => (
+                    <li key={o.key}>
+                      <button type="button" onClick={() => onPick(o.key)}
+                        className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-gray-50">
+                        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${TONES[o.tone].chip}`}><o.Icon size={18} /></span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-semibold text-gray-900">{o.title}</span>
+                          <span className="block truncate text-xs text-gray-500">{o.line}</span>
+                        </span>
+                        <ChevronRight size={16} className="shrink-0 text-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-500" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Portal>
+  );
+};
+
+// --- the /admin page -----------------------------------------------------------------------------------------
+
+/** The same options as a page, for the /admin address. Choosing one opens the same full window. */
 export const AdminPage: React.FC = () => {
-  const { ws, isAdmin } = useHub();
+  const { isAdmin } = useHub();
+  const [open, setOpen] = useState<Action | null>(null);
   if (!isAdmin) return <p className="p-10 text-center text-sm text-gray-500">Only owners and admins can see this page.</p>;
   return (
-    <div className="mx-auto max-w-5xl space-y-5 p-6">
-      <h2 className="text-lg font-semibold text-gray-900">Admin</h2>
-      <PeopleSection />
-      <CostsSection ws={ws} />
-      <EmailSection ws={ws} />
-      <SignInSection ws={ws} />
-      <BlockedSection ws={ws} />
-      {FEATURES.joinerChecklistSection && <JoinerPlanSection ws={ws} />}
-      <AuditSection ws={ws} />
+    <div className="mx-auto max-w-6xl p-6">
+      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gradient-to-br from-white via-white to-brand-50/60 p-6 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm"><ShieldCheck size={22} /></span>
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-gray-900">Admin</h2>
+            <p className="text-sm text-gray-500">Manage people, access and the workspace.</p>
+          </div>
+        </div>
+      </div>
+
+      {(['People', 'Workspace'] as const).map((group) => (
+        <section key={group} aria-label={group} className="mt-7">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">{group}</h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {options().filter((o) => o.group === group).map((o) => (
+              <button
+                key={o.key} type="button" onClick={() => setOpen(o.key)}
+                className={`group flex flex-col items-start gap-3 rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md hover:ring-4 ${TONES[o.tone].ring}`}
+              >
+                <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${TONES[o.tone].chip}`}><o.Icon size={19} /></span>
+                <span>
+                  <span className="block text-[15px] font-semibold text-gray-900">{o.title}</span>
+                  <span className="mt-0.5 block text-[13px] text-gray-500">{o.line}</span>
+                </span>
+                <span className="mt-auto flex items-center gap-1 text-xs font-medium text-gray-400 group-hover:text-gray-700">Open <ChevronRight size={13} /></span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
+
+      {open && <AdminWindow action={open} onBack={() => setOpen(null)} onClose={() => setOpen(null)} />}
     </div>
   );
 };
-
-// --- joining and leaving --------------------------------------------------------------------------------------
-
-/**
- * The two ends of someone's time here.
- *
- * Adding someone was a button on a list of people; removing them was a menu item on their own
- * panel, a click from the controls you press every day. Offboarding hands over live work, moves
- * other people's reporting lines and can bar an address for good -- that belongs here, with room
- * to say what it does, not next to "Edit profile".
- */
-const PeopleSection: React.FC = () => {
-  const { ws, people, teams, me, roles, reload } = useHub();
-  const [dialog, setDialog] = useState<'add' | 'import' | null>(null);
-  return (
-    <Section id="people" icon={<UserPlus size={17} className="text-brand-600" />} title="People"
-      hint="Adding someone who is joining, and taking off someone who is leaving.">
-      <div className={card}>
-        <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={() => setDialog('add')} className={primary}><UserPlus size={14} /> Add person</button>
-          <button type="button" onClick={() => setDialog('import')} className="flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50">
-            <FileSpreadsheet size={14} /> Import from a spreadsheet
-          </button>
-        </div>
-      </div>
-
-      {/* Coloured as what it is. The rest of Admin is grey because the rest of Admin can be
-          undone; this hands over live work and can bar an address for good, and it should read
-          that way from across the room rather than at step three. */}
-      <div className="mt-5 overflow-hidden rounded-xl border border-red-200 bg-red-50/40">
-        <h4 className="flex items-center gap-1.5 border-b border-red-200 bg-red-50 px-4 py-2.5 text-[13px] font-semibold text-red-800">
-          <UserMinus size={15} className="text-red-600" /> Removing someone
-          <span className="ml-auto font-normal text-[11px] uppercase tracking-wide text-red-500">Careful</span>
-        </h4>
-        <div className="p-4">
-          <RemovePersonSection ws={ws} people={people} teams={teams} me={me} onChanged={reload} />
-        </div>
-      </div>
-
-      {dialog === 'add' && <AddPersonDialog ws={ws} people={people} teams={teams} roles={roles} onClose={() => setDialog(null)} onDone={() => { reload(); }} />}
-      {dialog === 'import' && <ImportPeopleDialog ws={ws} onClose={() => setDialog(null)} onDone={() => { setDialog(null); reload(); }} />}
-    </Section>
-  );
-};
-
-/** What the firm pays to keep this running, on every scale the question gets asked in. */
-const CostsSection: React.FC<{ ws: string }> = ({ ws }) => (
-  <Section id="costs" icon={<Wallet size={17} className="text-brand-600" />} title="Running costs"
-    hint="What this application costs to run — per day, per month, per year, and per person. Figures you record; usage the app measures.">
-    <div className={card}><RunningCosts ws={ws} /></div>
-  </Section>
-);
 
 // --- barred addresses ----------------------------------------------------------------------------------------
 
@@ -169,72 +369,6 @@ const BlockedSection: React.FC<{ ws: string }> = ({ ws }) => {
             </ul>
           )}
       </div>
-    </Section>
-  );
-};
-
-// --- email ---------------------------------------------------------------------------------------------------
-
-const EmailSection: React.FC<{ ws: string }> = ({ ws }) => {
-  const [status, setStatus] = useState<{ configured: boolean; host: string | null; sender: string | null } | null>(null);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => { peopleApi.emailStatus(ws).then(setStatus).catch(() => undefined); }, [ws]);
-  const test = async () => {
-    setMsg(null);
-    try { await peopleApi.emailTest(ws); setMsg({ ok: true, text: 'Test email sent to you. Check your inbox.' }); } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
-  };
-  return (
-    <Section id="email" icon={<Mail size={17} className="text-brand-600" />} title="Email" hint="Invitations, scheduled reports, reminders and digests are sent from the company mail server.">
-      {status && (
-        <p className="text-sm text-gray-700">
-          {status.configured
-            ? <>Sending through <b>{status.host}</b> as <b>{status.sender ?? 'the configured account'}</b>.</>
-            : <>Email is <b>not set up</b>. Ask whoever runs the server to add <code className="rounded bg-gray-100 px-1">SMTP_HOST</code>, <code className="rounded bg-gray-100 px-1">SMTP_PORT</code>, <code className="rounded bg-gray-100 px-1">SMTP_USER</code>, <code className="rounded bg-gray-100 px-1">SMTP_PASSWORD</code> and <code className="rounded bg-gray-100 px-1">SMTP_FROM</code> to the backend settings, then restart it. Until then, copy the sign-in link to share invitations.</>}
-        </p>
-      )}
-      <button type="button" onClick={test} className="mt-3 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Send me a test email</button>
-      {msg && <p className={`mt-2 text-sm ${msg.ok ? 'text-emerald-700' : 'text-red-700'}`} role="status">{msg.text}</p>}
-    </Section>
-  );
-};
-
-// --- sign-in rules ------------------------------------------------------------------------------------------
-
-const SignInSection: React.FC<{ ws: string }> = ({ ws }) => {
-  const [rules, setRules] = useState<SignInRules | null>(null);
-  const [domains, setDomains] = useState('');
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => { peopleApi.signInRules(ws).then((r) => { setRules(r.rules); setDomains(r.rules.allowed_email_domains.join(', ')); }).catch(() => undefined); }, [ws]);
-  if (!rules) return null;
-  const save = async () => {
-    setMsg(null);
-    const body = { ...rules, allowed_email_domains: domains.split(/[\s,;]+/).map((d) => d.trim()).filter(Boolean) };
-    try {
-      const out = await peopleApi.saveSignInRules(ws, body);
-      setRules(out.rules);
-      setDomains(out.rules.allowed_email_domains.join(', '));
-      setMsg({ ok: true, text: out.locked_out.length ? `Saved. These people can't get in until they meet the rules: ${out.locked_out.join(', ')}.` : 'Saved. Everyone meets the rules.' });
-    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
-  };
-  const box = (key: keyof Omit<SignInRules, 'allowed_email_domains'>, label: string, hint: string) => (
-    <label className="flex items-start gap-2 text-sm text-gray-700">
-      <input type="checkbox" className="mt-1" checked={rules[key]} onChange={(e) => setRules({ ...rules, [key]: e.target.checked })} />
-      <span>{label}<span className="block text-xs text-gray-500">{hint}</span></span>
-    </label>
-  );
-  return (
-    <Section id="sign-in" icon={<KeyRound size={17} className="text-brand-600" />} title="Sign-in rules" hint="Who may use this workspace, and how they must sign in. You can't save rules that would lock yourself out.">
-      <label className="block text-sm font-medium text-gray-700">Allowed email domains
-        <input aria-label="Allowed email domains" value={domains} onChange={(e) => setDomains(e.target.value)} placeholder="verveadvisory.com" className={`mt-1 block w-full ${input}`} />
-        <span className="text-xs font-normal text-gray-500">Leave empty to allow any address an admin adds.</span>
-      </label>
-      <div className="mt-3 space-y-2">
-        {box('allow_outside_guests', 'Guests may use other domains', 'e.g. a client or consultant with their own email.')}
-        {box('require_google_sign_in', 'Require signing in with Google', 'Blocks email-and-password sign-ins.')}
-        {box('require_two_step', 'Require two-step verification', 'Needs Firebase multi-factor sign-in turned on for the project; people without it are blocked.')}
-      </div>
-      <button type="button" onClick={save} className={`mt-4 ${primary}`}><Save size={14} /> Save rules</button>
-      {msg && <p className={`mt-2 text-sm ${msg.ok ? 'text-emerald-700' : 'text-red-700'}`} role="status">{msg.text}</p>}
     </Section>
   );
 };
@@ -422,7 +556,23 @@ const QuizLine: React.FC<{ ws: string }> = ({ ws }) => {
 
 // --- audit log ----------------------------------------------------------------------------------------------------
 
-const FILTERS: [string, string][] = [['', 'Everything'], ['person.', 'People'], ['workspace.', 'Workspace'], ['space.', 'Spaces'], ['share.', 'Sharing'], ['team.', 'Teams'], ['automation.', 'Automations']];
+/**
+ * What the log can be narrowed to, and only things this workspace actually does.
+ *
+ * "Automations" has gone: the feature is switched off, so the filter sat there promising a kind of
+ * event that can no longer happen. And "Spaces" now covers Folders and Lists too -- deleting
+ * either was recorded all along as folder.deleted and list.deleted, and the old single-prefix
+ * filter matched neither, so the two most destructive things an admin can do were findable under
+ * "Everything" and nowhere else.
+ */
+const FILTERS: [string, string][] = [
+  ['', 'Everything'],
+  ['person.', 'People'],
+  ['space.,folder.,list.', 'Spaces & Lists'],
+  ['share.', 'Sharing'],
+  ['team.', 'Teams'],
+  ['workspace.', 'Workspace'],
+];
 
 const detail = (e: AuditEvent): string => {
   const d = e.data as Record<string, unknown>;
@@ -431,7 +581,6 @@ const detail = (e: AuditEvent): string => {
   if (e.action === 'share.revoked') return `from ${d.with}`;
   if (e.action === 'person.offboarded') return `${d.tasks_handed_over} tasks handed over, ${d.joiner_tasks_deleted} deleted`;
   if (e.action === 'person.updated' && Array.isArray(d.fields)) return (d.fields as string[]).join(', ').replace(/_/g, ' ');
-  if (e.action.startsWith('automation.')) return String(d.rule ?? '');
   if (e.action === 'workspace.sign_in_rules' && Array.isArray(d.locked_out) && d.locked_out.length) return `${d.locked_out.length} people now blocked`;
   return '';
 };

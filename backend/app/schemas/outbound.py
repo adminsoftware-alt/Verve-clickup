@@ -54,13 +54,6 @@ class DigestTask(BaseModel):
     due_date: Optional[datetime]
 
 
-class DigestLeave(BaseModel):
-    start_date: date
-    end_date: date
-    type: str
-    status: str
-
-
 class DigestPerson(BaseModel):
     user: UserOut
     overdue: int
@@ -69,7 +62,6 @@ class DigestPerson(BaseModel):
     tracked_seconds: int
     capacity_seconds: int
     timesheet_status: Optional[str]
-    leave: List[DigestLeave]
 
 
 class TeamDigest(BaseModel):

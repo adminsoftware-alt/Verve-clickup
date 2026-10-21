@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models import (
-    EmailLog, LeaveRequest, LeaveType, Notification, PushSubscription, Space, Status, StatusGroup, Task,
+    EmailLog, Notification, PushSubscription, Space, Status, StatusGroup, Task,
     TaskAssignee, TaskList, Team, TeamMember, TimeEntry, User, Workspace, WorkspaceMember, WorkspaceRole,
 )
 from app.schemas import outbound as o
@@ -33,7 +33,7 @@ from app.services.work.access import Access
 from app.services.work.errors import Invalid, NotFound
 
 log = logging.getLogger(__name__)
-WHATSAPP_KINDS = {"assigned", "mentioned", "escalation", "leave_request", "leave_decision", "timesheet_reminder", "reminder", "automation"}
+WHATSAPP_KINDS = {"assigned", "mentioned", "escalation", "timesheet_reminder", "reminder", "automation"}
 FRESH = timedelta(minutes=30)  # push and WhatsApp only for news, never a backlog
 
 
@@ -101,8 +101,6 @@ def describe(db: Session, n: Notification) -> Tuple[str, str]:
         "due_date": "changed the due date",
         "escalation": f"Escalation: {d.get('message') or d.get('rule') or 'a task needs attention'}",
         "automation": f"Automation: {d.get('rule', '')}",
-        "leave_request": f"asked for {d.get('type')} leave, {d.get('from')} to {d.get('to')}",
-        "leave_decision": f"{'approved' if d.get('status') == 'approved' else 'declined'} your {d.get('type')} leave, {d.get('from')} to {d.get('to')}",
         "timesheet_reminder": f"Your timesheet shows {round((d.get('tracked') or 0) / 3600, 1)}h of {round((d.get('expected') or 0) / 3600, 1)}h this week",
         "reminder": "Reminder",
         "space_join_request": f"asked to join the {d.get('space')} Space",
@@ -118,8 +116,6 @@ def _link(n: Notification) -> str:
     base = settings.APP_URL.rstrip("/")
     if n.task_id:
         return f"{base}/inbox"
-    if n.kind.startswith("leave_"):
-        return f"{base}/leave"
     if n.kind == "timesheet_reminder":
         return f"{base}/timesheets"
     return f"{base}/inbox"
@@ -309,22 +305,8 @@ def address_is_dead(db: Session, workspace_id: uuid.UUID, email: str) -> bool:
     return len(recent) >= BOUNCE_LIMIT and not any(r.sent for r in recent)
 
 
-def on_leave(db: Session, member: WorkspaceMember, day: date) -> bool:
-    """Is this person on approved leave today?
-
-    A digest that arrives on somebody's holiday is how an app teaches people to mute it. The
-    leave module already knows, and the chasing emails are exactly the ones worth holding: the
-    work is late, and the person responsible is on a beach and cannot do anything about it.
-    """
-    from app.services.work.leave import is_away
-
-    return is_away(db, member.workspace_id, member.user_id, day, day)
-
-
 def _skip(db: Session, member: WorkspaceMember, user: User, local: datetime) -> Optional[str]:
     """Why this person should not be emailed right now, if they should not be."""
-    if on_leave(db, member, local.date()):
-        return "on leave"
     if address_is_dead(db, member.workspace_id, user.email):
         return f"the address has refused the last {BOUNCE_LIMIT} messages"
     return None
@@ -397,7 +379,11 @@ def run_instant(db: Session, now: Optional[datetime] = None) -> int:
         if member is not None and n.kind in WHATSAPP_KINDS:
             whatsapp(member, f"{title}: {line}" if title != "Verve Workflow" else line)
         n.pushed_at = now
-        if member is not None and member.email_notifications == "instant" and n.emailed_at is None:
+        # Email is for invitations now, and nothing else. The push above and the WhatsApp beside it
+        # are untouched -- this job is what delivers a notification at all, so switching the whole
+        # job off would take the bell with it. Only the mail is held back.
+        if (settings.UPDATE_EMAIL_ENABLED and member is not None
+                and member.email_notifications == "instant" and n.emailed_at is None):
             emails.setdefault((n.workspace_id, n.user_id), []).append(n)
     for (ws_id, uid), items in emails.items():
         user = db.get(User, uid)
@@ -414,6 +400,25 @@ def _local(member: WorkspaceMember, now: datetime) -> datetime:
         return now.astimezone(ZoneInfo(member.timezone or "Asia/Kolkata"))
     except (ZoneInfoNotFoundError, ValueError):
         return now.astimezone(ZoneInfo("Asia/Kolkata"))
+
+
+def _highlights(db: Session, access: Access, local: datetime) -> List[str]:
+    """The Highlights of this person's home Dashboard, as the sentences the panel shows.
+
+    The digest already lists what is due and overdue, so those are not repeated -- the same rule
+    the panel keeps with the cards. A board that cannot be read is no reason to skip the email."""
+    from app.schemas import dashboards as dsch
+    from app.services.work.dashboards import insights, service, standard
+    from app.services.work.dashboards.engine import Engine
+
+    try:
+        with db.begin_nested():
+            opened = service.home_dashboard(db, access)
+            engine = Engine(db, access, local.tzinfo, dsch.Filters.model_validate(opened.dashboard.filters or {}),  # type: ignore[arg-type]
+                            scope=standard.scope_of(opened.dashboard), me=standard.me_of(opened.dashboard))
+            return insights.sentences(insights.compute(engine, service.cards_of(db, opened.dashboard.id)))[:10]
+    except Exception:  # noqa: BLE001 -- the digest still goes without them
+        return []
 
 
 def run_daily_digests(db: Session, now: Optional[datetime] = None) -> int:
@@ -441,11 +446,13 @@ def run_daily_digests(db: Session, now: Optional[datetime] = None) -> int:
             Notification.workspace_id == m.workspace_id, Notification.user_id == m.user_id, Notification.category == "primary",
             Notification.read_at.is_(None), Notification.cleared_at.is_(None), Notification.emailed_at.is_(None),
             Notification.created_at >= now - timedelta(days=2)).order_by(Notification.created_at.desc()).limit(20)))
-        if not due and not unread:
+        highlights = _highlights(db, access, local)
+        if not due and not unread and not highlights:
             continue
         base = settings.APP_URL.rstrip("/")
         rows = [(t.name, "Overdue" if t.is_overdue else "Due today", f"{base}/l/{t.list_id}?task={t.id}") for t in due[:20]]
         rows += [(*describe(db, n), _link(n)) for n in unread]
+        rows += [("Highlight", line, f"{base}/") for line in highlights]
         if m.email_notifications == "daily" and _email(
                 user.email, f"Your day: {len(due)} due, {len(overdue)} overdue", rows,
                 f"Good morning. {len(due)} task{'s' if len(due) != 1 else ''} due today or overdue, and {len(unread)} new update{'s' if len(unread) != 1 else ''}."):
@@ -682,12 +689,13 @@ def run_friday_recaps(db: Session, now: Optional[datetime] = None) -> int:
 
 
 def run_approval_reminders(db: Session, now: Optional[datetime] = None) -> int:
-    """Each weekday morning: leave and timesheets waiting on this manager, if there are any.
+    """Each weekday morning: timesheets waiting on this manager, if there are any.
 
     Only when there is something. A daily "you have nothing to approve" is how a person learns to
-    delete the message without reading the subject.
+    delete the message without reading the subject. Leave requests used to appear here too; with
+    leave gone a timesheet is the only thing a manager is asked to decide.
     """
-    from app.db.models import LeaveRequest, TimesheetSubmission
+    from app.db.models import TimesheetSubmission
 
     now = now or datetime.now(timezone.utc)
     sent = 0
@@ -706,14 +714,6 @@ def run_approval_reminders(db: Session, now: Optional[datetime] = None) -> int:
             continue
 
         rows: List[Tuple[str, str, str]] = []
-        for r in db.scalars(select(LeaveRequest).where(
-                LeaveRequest.workspace_id == m.workspace_id, LeaveRequest.status == "pending",
-                LeaveRequest.approver_id == m.user_id).order_by(LeaveRequest.start_date).limit(15)):
-            who = db.get(User, r.user_id)
-            waited = (now - r.created_at).days
-            rows.append((f"{(who.display_name or who.email) if who else 'Someone'} — leave",
-                         f"{r.start_date:%d %b} to {r.end_date:%d %b}, {r.days:g} day(s)"
-                         + (f", waiting {waited} days" if waited else ""), f"{base}/leave"))
         # Timesheets: whoever leads their Team, which is what the approvals screen uses.
         theirs = set(_team_of(db, m.workspace_id, m.user_id))
         if theirs:
@@ -733,18 +733,17 @@ def run_approval_reminders(db: Session, now: Optional[datetime] = None) -> int:
     return sent
 
 
-# --- who is away, and whose week is empty -------------------------------------------------------------
+# --- whose week is empty -------------------------------------------------------------------------
 
 
 def run_manager_heads_up(db: Session, now: Optional[datetime] = None) -> int:
-    """Monday: who in your team is away this week, and who logged nothing last week.
+    """Monday: who in your team logged nothing last week.
 
-    Two facts a manager otherwise finds out by being surprised. They travel together because they
-    answer the same question -- is anybody's week about to go wrong -- and because two emails on a
-    Monday morning is one email too many.
+    This used to carry who was away as well, read from the leave requests. With leave gone there
+    is no record of who is off, so the email is the half that is still knowable: somebody who
+    logged nothing either did nothing or recorded nothing, and a manager wants to know which
+    before the month closes.
     """
-    from app.services.work.leave import LIVE
-
     now = now or datetime.now(timezone.utc)
     sent = 0
     base = settings.APP_URL.rstrip("/")
@@ -764,29 +763,16 @@ def run_manager_heads_up(db: Session, now: Optional[datetime] = None) -> int:
         if already_sent(db, m.workspace_id, user.id, "heads_up", period):
             continue
 
-        week_start, week_end = local.date(), local.date() + timedelta(days=6)
+        week_start = local.date()
         rows: List[Tuple[str, str, str]] = []
-        from app.db.models import LeaveRequest
 
-        for r in db.scalars(select(LeaveRequest).where(
-                LeaveRequest.workspace_id == m.workspace_id, LeaveRequest.user_id.in_(theirs),
-                LeaveRequest.status.in_(LIVE), LeaveRequest.start_date <= week_end,
-                LeaveRequest.end_date >= week_start).order_by(LeaveRequest.start_date)):
-            who = db.get(User, r.user_id)
-            rows.append((f"{(who.display_name or who.email) if who else 'Someone'} is away",
-                         f"{r.start_date:%d %b} to {r.end_date:%d %b}"
-                         + (" (not yet approved)" if r.status == "pending" else ""), f"{base}/leave"))
-
-        # Last week's silence. Somebody who logged nothing either did nothing or recorded nothing,
-        # and a manager wants to know which before the month closes.
+        # Last week's silence.
         last_start = datetime.combine(week_start - timedelta(days=7), time.min, local.tzinfo)
         last_end = datetime.combine(week_start, time.min, local.tzinfo)
         for uid in theirs:
             member = db.get(WorkspaceMember, (m.workspace_id, uid))
             if member is None or member.deactivated_at is not None:
                 continue
-            if is_away_all_week(db, m.workspace_id, uid, last_start.date(), last_end.date() - timedelta(days=1)):
-                continue  # they were on leave; an empty timesheet is the right answer
             logged = _logged_seconds(db, m.workspace_id, uid, last_start, last_end)
             if logged:
                 continue
@@ -796,30 +782,12 @@ def run_manager_heads_up(db: Session, now: Optional[datetime] = None) -> int:
 
         if not rows:
             continue
-        away = sum(1 for r in rows if "is away" in r[0])
-        subject = f"Your week: {away} away, {len(rows) - away} with no hours logged"
+        subject = f"Your week: {len(rows)} with no hours logged"
         if _once(db, m, user, "heads_up", period, subject, rows,
-                 "Before the week starts, two things about your team:", now=now):
+                 "Before the week starts, one thing about your team:", now=now):
             sent += 1
     db.flush()
     return sent
-
-
-def is_away_all_week(db: Session, workspace_id: uuid.UUID, user_id: str, start: date, end: date) -> bool:
-    """Approved leave covering every working day of the span."""
-    from app.db.models import LeaveRequest
-
-    day = start
-    while day <= end:
-        if day.weekday() < 5:
-            covered = db.scalars(select(LeaveRequest.id).where(
-                LeaveRequest.workspace_id == workspace_id, LeaveRequest.user_id == user_id,
-                LeaveRequest.status == "approved", LeaveRequest.start_date <= day,
-                LeaveRequest.end_date >= day)).first()
-            if covered is None:
-                return False
-        day += timedelta(days=1)
-    return True
 
 
 # --- the people who have never been through the door -----------------------------------------------
@@ -896,7 +864,7 @@ def _team_of(db: Session, workspace_id: uuid.UUID, user_id: str) -> List[str]:
 def team_digest(db: Session, access: Access, today: Optional[date] = None) -> o.TeamDigest:
     """Last week and the week ahead for each person the caller manages or leads."""
     from app.services.work import mywork
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
     from app.services.work.timesheets import current_submission, period_of
 
     today = today or datetime.now(ZoneInfo("Asia/Kolkata")).date()
@@ -916,17 +884,11 @@ def team_digest(db: Session, access: Access, today: Optional[date] = None) -> o.
             TimeEntry.user_id == uid, TimeEntry.started_at >= since, TimeEntry.started_at < until)) or 0
         period_start, _ = period_of(db, access.workspace_id, last_monday)
         sub = current_submission(db, access.workspace_id, uid, period_start)
-        leave = []
-        for r in db.scalars(select(LeaveRequest).where(
-                LeaveRequest.workspace_id == access.workspace_id, LeaveRequest.user_id == uid, LeaveRequest.status.in_(("pending", "approved")),
-                LeaveRequest.start_date <= today + timedelta(days=13), LeaveRequest.end_date >= today)):
-            kind = db.get(LeaveType, r.type_id) if r.type_id else None
-            leave.append(o.DigestLeave(start_date=r.start_date, end_date=r.end_date, type=kind.name if kind else "Leave", status=r.status))
         out.append(o.DigestPerson(
             user=s.UserOut.model_validate(user), overdue=len(overdue),
             overdue_tasks=[o.DigestTask(id=t.id, name=t.name, list_id=t.list_id, due_date=t.due_date) for t in sorted(overdue, key=lambda t: t.due_date)[:5]],
             done_last_week=len(done), tracked_seconds=int(tracked), capacity_seconds=sum(capacity.get(uid, [])),
-            timesheet_status=sub.status if sub else None, leave=leave,
+            timesheet_status=sub.status if sub else None,
         ))
     out.sort(key=lambda p: (-p.overdue, (p.user.display_name or p.user.email).lower()))
     return o.TeamDigest(week_start=last_monday, week_end=last_week[-1], people=out)
@@ -950,10 +912,9 @@ def run_team_digests(db: Session, now: Optional[datetime] = None) -> int:
         base = settings.APP_URL.rstrip("/")
         rows = [((p.user.display_name or p.user.email),
                  f"{p.overdue} overdue · {p.done_last_week} done · {round(p.tracked_seconds / 3600, 1)}h of {round(p.capacity_seconds / 3600, 1)}h logged"
-                 + (f" · timesheet {p.timesheet_status}" if p.timesheet_status else "")
-                 + ("".join(f" · {lv.type} leave {lv.start_date:%d %b}–{lv.end_date:%d %b}" for lv in p.leave)),
+                 + (f" · timesheet {p.timesheet_status}" if p.timesheet_status else ""),
                  f"{base}/team-week") for p in digest.people]
-        if user and _email(user.email, f"Your team's week ({digest.week_start:%d %b} – {digest.week_end:%d %b})", rows, "How your team did last week, and who is away soon:"):
+        if user and _email(user.email, f"Your team's week ({digest.week_start:%d %b} – {digest.week_end:%d %b})", rows, "How your team did last week:"):
             sent += 1
     db.flush()
     return sent

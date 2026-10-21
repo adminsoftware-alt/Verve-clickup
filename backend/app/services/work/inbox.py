@@ -21,6 +21,7 @@ from app.db.models import (
 from app.schemas import collab as c
 from app.schemas import work as s
 from app.services.work import events
+from app.core.config import settings as config
 from app.services.work.access import Access, chain_for_task, open_task
 from app.services.work.errors import Forbidden, Invalid, NotFound
 from app.db.models import PermissionLevel
@@ -37,7 +38,6 @@ KIND_GROUPS: Dict[str, List[str]] = {
     "dates": ["due_date"],
     "shared": ["shared", "space_join_request", "space_join_decision"],
     "reminders": ["reminder", "timesheet_reminder", "escalation", "automation"],
-    "leave": ["leave_request", "leave_decision"],
     "task_detail": ["attachment", "checklist_item", "custom_field"],
 }
 
@@ -192,7 +192,8 @@ def bulk(db: Session, access: Access, tab: str, action: str) -> int:
 def settings(db: Session, access: Access) -> List[c.SettingRow]:
     row = db.get(NotificationSetting, (access.workspace_id, access.user_id))
     muted = row.muted if row else {}
-    return [c.SettingRow(kind=k, label=label, enabled=not muted.get(k)) for k, label in events.KIND_LABELS.items()]
+    return [c.SettingRow(kind=k, label=label, enabled=not muted.get(k))
+            for k, label in events.KIND_LABELS.items()]
 
 
 def save_settings(db: Session, access: Access, data: c.SettingsIn) -> List[c.SettingRow]:
@@ -240,7 +241,19 @@ def list_reminders(db: Session, access: Access, state: str) -> List[c.ReminderOu
     return [_reminder_out(db, access, r) for r in db.scalars(q.limit(300))]
 
 
+# A reminder set "now" from a slow form lands a moment in the past; one for 2020 is a mistake.
+REMINDER_SLACK = timedelta(minutes=5)
+
+
+def _ensure_ahead(when: datetime) -> None:
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    if when < _now() - REMINDER_SLACK:
+        raise Invalid("A reminder has to be for a time that has not passed yet")
+
+
 def create_reminder(db: Session, access: Access, data: c.ReminderIn) -> c.ReminderOut:
+    _ensure_ahead(data.remind_at)
     target = data.user_id or access.user_id
     member = db.get(WorkspaceMember, (access.workspace_id, target))
     if member is None:
@@ -274,6 +287,7 @@ def update_reminder(db: Session, access: Access, reminder_id: uuid.UUID, data: c
     if data.title is not None:
         r.title = data.title
     if data.remind_at is not None:
+        _ensure_ahead(data.remind_at)
         r.remind_at = data.remind_at
         r.notified_at = None
     if data.done is not None:

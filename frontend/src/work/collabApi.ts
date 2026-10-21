@@ -2,7 +2,7 @@
 // and moving/duplicating/archiving locations and tasks (/api/v2).
 import { auth } from '../core/firebase';
 import type { CopyParts } from './task/CopyParts';
-import { API_V2, ApiError, request, type LocationKind, type Status, type StatusGroup, type TaskDetail, type TeamRef, type UserRef, type ListNode, type Hierarchy } from './api';
+import { API_V2, ApiError, request, upload as sendForm, type LocationKind, type Status, type StatusGroup, type TaskDetail, type TeamRef, type UserRef, type ListNode, type Hierarchy } from './api';
 
 export interface Reaction { emoji: string; count: number; mine: boolean; users: string[] }
 export interface Comment {
@@ -22,10 +22,14 @@ export interface Attachment { id: string; filename: string; content_type: string
 export type InboxTab = 'primary' | 'other' | 'later' | 'cleared' | 'all';
 export type InboxDue = 'overdue' | 'today' | 'week' | 'none';
 /** What the Inbox is narrowed to. Empty lists and nulls mean "everything". */
-export interface InboxFilters { groups: string[]; priority: number[]; due: InboxDue | null; unread: boolean }
-export const NO_INBOX_FILTERS: InboxFilters = { groups: [], priority: [], due: null, unread: false };
+// No "unread" here any more. The Inbox already separates what you have read from what you have
+// not -- that is what the Primary / Other / Later tabs and the unread dot are for -- so a filter
+// for it was a second way to say the same thing, sitting among filters that say different ones.
+// The server still understands the parameter; nothing sends it.
+export interface InboxFilters { groups: string[]; priority: number[]; due: InboxDue | null }
+export const NO_INBOX_FILTERS: InboxFilters = { groups: [], priority: [], due: null };
 export const inboxFilterCount = (f: InboxFilters) =>
-  f.groups.length + f.priority.length + (f.due ? 1 : 0) + (f.unread ? 1 : 0);
+  f.groups.length + f.priority.length + (f.due ? 1 : 0);
 export interface InboxItem {
   id: string; kind: string; category: 'primary' | 'other'; actor: UserRef | null; task: TaskRef | null;
   comment: { id: string; body: string } | null; reminder: { id: string; title: string; remind_at: string } | null;
@@ -37,17 +41,16 @@ export interface Reminder { id: string; title: string; task: TaskRef | null; rem
 
 const seg = (kind: LocationKind) => (kind === 'space' ? 'spaces' : kind === 'folder' ? 'folders' : 'lists');
 
+/**
+ * One file, through the shared multipart sender.
+ *
+ * This used to fetch with the Firebase token itself, so under a local testing sign-in -- which has
+ * no Firebase user -- every attachment failed with "Not signed in" while everything else worked.
+ */
 async function upload<T>(path: string, file: File): Promise<T> {
-  const user = auth.currentUser;
-  if (!user) throw new ApiError(401, 'Not signed in');
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`${API_V2}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${await user.getIdToken()}` }, body: form });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, (typeof data.detail === 'string' && data.detail) || `Upload failed (${res.status})`);
-  }
-  return res.json();
+  return sendForm<T>('POST', path, form);
 }
 
 /** Download an attachment with the user's token, then open or save it. */
@@ -114,7 +117,6 @@ export const collabApi = {
       group: f.groups.length ? f.groups.join(',') : undefined,
       priority: f.priority.length ? f.priority.join(',') : undefined,
       due: f.due ?? undefined,
-      unread: f.unread ? true : undefined,
     }),
   counts: (ws: string) => request<InboxCounts>('GET', `/workspaces/${ws}/inbox/counts`),
   updateNotification: (id: string, body: Partial<{ read: boolean; cleared: boolean; saved: boolean; snoozed_until: string; unsnooze: boolean }>) =>

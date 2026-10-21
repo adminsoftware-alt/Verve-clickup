@@ -54,7 +54,13 @@ def people_load(
     """Planned hours per day for these people, against the hours they have."""
     days = max(1, min(days, MAX_DAYS))
     window = [start + timedelta(days=i) for i in range(days)]
-    wanted = list(dict.fromkeys(user_ids))[:20]
+    # Someone's load and hours are theirs to see, their Team lead's and an admin's -- the same
+    # people whose time and workload they may see. Anyone else is left out, not refused, so the
+    # assignee picker still shows what it may.
+    from app.services.work.timetracking import time_visible_people
+
+    visible = time_visible_people(db, access)
+    wanted = [uid for uid in dict.fromkeys(user_ids) if visible is None or uid in visible][:20]
     planned: Dict[str, List[int]] = {uid: [0] * days for uid in wanted}
     if not wanted:
         return {"days": [d.isoformat() for d in window], "rows": []}
@@ -74,6 +80,9 @@ def people_load(
         ):
             by_task.setdefault(task_id, []).append(user_id)
 
+        from app.services.work.working_time import working_weekdays
+
+        weekdays = working_weekdays(db, access.workspace_id, wanted)
         inside = set(window)
         for task in open_now:
             who = by_task.get(task.id)
@@ -82,15 +91,15 @@ def people_load(
                 continue  # work nobody sized or dated cannot be placed in a day
             end = task.due_date.date()
             begin = task.start_date.date() if task.start_date else end
-            by_day = spread(estimate, begin, end)
             share = len(who)
             for uid in who:
+                by_day = spread(estimate, begin, end, weekdays.get(uid))
                 row = planned[uid]
                 for i, day in enumerate(window):
                     if day in inside:
                         row[i] += by_day.get(day, 0) // share
 
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
 
     capacity = daily_capacity(db, access.workspace_id, wanted, window)
     fallback = [CAPACITY_SECONDS if d.weekday() < 5 else 0 for d in window]

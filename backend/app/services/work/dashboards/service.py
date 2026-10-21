@@ -208,8 +208,9 @@ def create_dashboard(db: Session, access: Access, data: d.DashboardCreate) -> Op
         name=data.name,
         owner_id=access.user_id,
         team_id=data.team_id,
-        # A Team dashboard shows the Team's work: its people, as one view.
-        filters={"assignees": [f"team:{data.team_id}"]} if data.team_id else {},
+        # No filters to begin with. A Team dashboard is still only the Team's work, but that is its
+        # scope (standard.scope_of), not a filter somebody has to notice and leave alone.
+        filters={},
     )
     db.add(dash)
     db.flush()
@@ -235,6 +236,31 @@ def update_dashboard(db: Session, opened: OpenedDashboard, data: d.DashboardUpda
     db.flush()
 
 
+def reset_filters(db: Session, opened: OpenedDashboard) -> None:
+    """Clear every filter on the board: its own, and whatever each card was narrowed by since it
+    was built. A card goes back to the filters it was made with, not to none -- see
+    CardConfig.base_filters.
+
+    The one thing kept is a stat tile's window when the period bar put it there ("due" or "done"
+    set to "period"): that bar retitles the tile too, so undoing only the filter would leave a
+    tile called "Due this month" counting today.
+    """
+    _require(opened, PermissionLevel.edit, "change this Dashboard")
+    opened.dashboard.filters = {}
+    for card in cards_of(db, opened.dashboard.id):
+        config = d.CardConfig.model_validate(card.config)
+        base = (config.base_filters or d.Filters()).model_copy(deep=True)
+        if card.type == "calculation":
+            if config.filters.due == "period":
+                base.due = "period"
+            if config.filters.done == "period":
+                base.done = "period"
+        if base != config.filters:
+            config.filters = base
+            card.config = config.model_dump(mode="json")
+    db.flush()
+
+
 def delete_dashboard(db: Session, opened: OpenedDashboard) -> None:
     _require(opened, PermissionLevel.full, "delete this Dashboard")
     db.delete(opened.dashboard)
@@ -253,8 +279,12 @@ def duplicate_dashboard(db: Session, opened: OpenedDashboard, data: d.DashboardD
         filters=dict(source.filters or {}),
         auto_refresh=source.auto_refresh,
     )
-    if data.team_id and data.team_id != source.team_id:
-        copy.filters = {**copy.filters, "assignees": [f"team:{data.team_id}"]}
+    if not data.team_id:
+        # A copy of somebody's own board is not "My work" any more, so it has no scope of its own;
+        # say whose work it was copied from in the one place that can, the filter.
+        base = standard.scope_of(source)
+        if base and source.standard == standard.MY_WORK and "assignees" not in copy.filters:
+            copy.filters = {**copy.filters, "assignees": base}
     db.add(copy)
     db.flush()
     for card in cards_of(db, source.id):
@@ -330,6 +360,10 @@ def duplicate_card(db: Session, opened: OpenedDashboard, card_id: uuid.UUID) -> 
 
 def delete_card(db: Session, opened: OpenedDashboard, card_id: uuid.UUID) -> None:
     _require(opened, PermissionLevel.edit, "remove cards")
+    # Taking a card off is an admin's call: a manager or member who can edit a board may add and
+    # arrange cards, but the cards everyone relies on don't disappear on one person's say.
+    if not opened.standing.is_admin:
+        raise Forbidden("Only an admin can delete a card")
     db.delete(_card(db, opened, card_id))
     db.flush()
 
@@ -369,11 +403,18 @@ def sharing(db: Session, opened: OpenedDashboard) -> d.DashboardSharingOut:
     return d.DashboardSharingOut(your_level=opened.level.value, shares=out)
 
 
+def _require_admin_to_share(opened: OpenedDashboard) -> None:
+    # Who sees whose figures is decided centrally: a manager handing their Team board to the
+    # whole firm, or a member sharing their own numbers, is a call for an admin to make. And an
+    # admin can make it for any board they can open -- they only *view* other people's boards,
+    # so the usual "share up to your own level" would leave them unable to share at all.
+    if not opened.standing.is_admin:
+        raise Forbidden("Only an admin can share a Dashboard")
+
+
 def grant(db: Session, opened: OpenedDashboard, data: d.DashboardShareCreate) -> s.ShareOut:
-    _require(opened, PermissionLevel.edit, "share this Dashboard")
+    _require_admin_to_share(opened)
     level = PermissionLevel(data.level)
-    if not at_least(opened.level, level):
-        raise Forbidden("You can only grant access up to your own level")
     access = opened.access
     user: Optional[User] = None
     team: Optional[Team] = None
@@ -403,12 +444,10 @@ def grant(db: Session, opened: OpenedDashboard, data: d.DashboardShareCreate) ->
 
 
 def revoke(db: Session, opened: OpenedDashboard, share_id: uuid.UUID) -> None:
-    _require(opened, PermissionLevel.edit, "change sharing")
+    _require_admin_to_share(opened)
     share = db.get(DashboardShare, share_id)
     if share is None or share.dashboard_id != opened.dashboard.id:
         raise NotFound("Share not found")
-    if not at_least(opened.level, share.level):
-        raise Forbidden("You cannot remove access higher than your own")
     db.delete(share)
     db.flush()
 

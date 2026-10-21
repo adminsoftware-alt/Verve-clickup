@@ -23,16 +23,17 @@ def test_overview_cannot_be_added_or_deleted(api, space):
     assert api.delete(f"/views/{overview['id']}", "owner").status_code == 400
 
 
-def test_views_are_added_in_order_and_the_required_one_cannot_be_deleted(api, folderless_list):
-    path = f"/lists/{folderless_list['id']}/views"
+def test_views_are_added_in_order_and_the_required_one_cannot_be_deleted(api, space, folderless_list):
+    # A List keeps its one List view; other views go on the Space or Folder.
+    assert api.post(f"/lists/{folderless_list['id']}/views", "owner", {"type": "calendar"}).status_code == 400
+    path = f"/spaces/{space['id']}/views"
     ok(api.post(path, "owner", {"type": "calendar"}), 201)
     ok(api.post(path, "owner", {"type": "dashboard", "name": "Review"}), 201)
     views = ok(api.get(path, "owner"))
-    assert [v["name"] for v in views] == ["List", "Calendar", "Review"]
-    required = views[0]
-    assert api.delete(f"/views/{required['id']}", "owner").status_code == 400
-    ok(api.delete(f"/views/{views[1]['id']}", "owner"), 204)
-    assert [v["name"] for v in ok(api.get(path, "owner"))] == ["List", "Review"]
+    assert [v["name"] for v in views] == ["Overview", "List", "Calendar", "Review"]
+    assert api.delete(f"/views/{views[1]['id']}", "owner").status_code == 400
+    ok(api.delete(f"/views/{views[2]['id']}", "owner"), 204)
+    assert [v["name"] for v in ok(api.get(path, "owner"))] == ["Overview", "List", "Review"]
 
 
 def test_view_only_access_cannot_add_views(api, folderless_list):

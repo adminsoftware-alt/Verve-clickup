@@ -129,6 +129,17 @@ export interface Hierarchy {
 }
 
 export interface Status { id: string; name: string; color: string; group: StatusGroup; orderindex: number }
+
+/**
+ * Still to do.
+ *
+ * Both "done" and "closed" are finished: a Status in the done group has been completed whether or
+ * not anything archived it. Testing only for "closed" counts finished work as outstanding, which is
+ * how the assistant came to report more open tasks than My Tasks showed for the same person.
+ */
+export const isOpen = (t: { status: { group: StatusGroup } }) => t.status.group !== 'closed' && t.status.group !== 'done';
+/** Finished, either way round. */
+export const isDone = (t: { status: { group: StatusGroup } }) => !isOpen(t);
 export interface StatusSet { source: { kind: LocationKind; id: string }; inherited: boolean; statuses: Status[] }
 export interface Tag { id: string; name: string; fg_color: string; bg_color: string }
 
@@ -311,8 +322,12 @@ export const workApi = {
   /** Who can be given work here: the people who can open this Space, Folder or List. */
   assignable: (kind: LocationKind, id: string) => request<UserRef[]>('GET', `/${seg(kind)}/${id}/assignable`),
 
-  createSpace: (workspaceId: string, name: string, is_private = false) =>
-    request<{ id: string }>('POST', `/workspaces/${workspaceId}/spaces`, { name, is_private }),
+  /** A new Space; everything but the name is optional (see CreateSpace.tsx for the two steps). */
+  createSpace: (workspaceId: string, space: {
+    name: string; description?: string; color?: string; icon?: string; is_private?: boolean;
+    default_permission?: 'view' | 'comment' | 'edit' | 'full';
+    statuses?: { name: string; color: string; group: StatusGroup }[]; views?: ViewType[]; clickapps?: Record<string, boolean>;
+  }) => request<{ id: string }>('POST', `/workspaces/${workspaceId}/spaces`, space),
   createFolder: (parent: { kind: 'space' | 'folder'; id: string }, name: string, is_private = false) =>
     request<{ id: string }>('POST', `/${seg(parent.kind)}/${parent.id}/folders`, { name, is_private }),
   /** `assignees` hands the List over as it is made: they get full access and it appears for them. */
@@ -334,7 +349,6 @@ export const workApi = {
   deleteTask: (id: string) => request('DELETE', `/tasks/${id}`),
 
   views: (kind: LocationKind, id: string) => request<View[]>('GET', `/${seg(kind)}/${id}/views`),
-  createView: (kind: LocationKind, id: string, type: ViewType, isPrivate = false) => request<View>('POST', `/${seg(kind)}/${id}/views`, { type, private: isPrivate }),
   deleteView: (id: string) => request('DELETE', `/views/${id}`),
   updateView: (id: string, body: { name?: string; settings?: Record<string, unknown>; orderindex?: number; private?: boolean; protected?: boolean; is_default?: boolean }) =>
     request<View>('PATCH', `/views/${id}`, body),

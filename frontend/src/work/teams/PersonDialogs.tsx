@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Briefcase, Building2, Cake, Calendar, Camera, ClipboardCheck, Copy, Crown, Hash, Heart, LogOut, Mail, MapPin, Phone, Power, Send, Trash2, UserPlus, Users, X } from 'lucide-react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { DrawInPlace } from './inlineDialog';
+import { Link, useNavigate } from 'react-router-dom';
+import { Briefcase, Building2, Cake, Calendar, Camera, ClipboardCheck, Clock, Copy, Crown, Hash, Heart, LayoutDashboard, LogOut, Mail, MapPin, Phone, Power, Send, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { JoinerDialog, OffboardDialog } from './AdminDialogs';
 import type { Role, Task } from '../api';
 import { Avatar, Portal, StatusDot, formatDue, useEscapeToClose } from '../ui';
@@ -8,16 +9,20 @@ import { peopleApi, personName, type Person, type PersonInput, type TeamFull } f
 import { ask } from '../../components/ask';
 import { FEATURES } from '../../config/features';
 import { PersonHistory, PersonHistoryHeading } from './PersonHistory';
+import { AddressField } from './AddressField';
 
 /** The three rungs the firm uses. The API refuses anything outside them, so a spreadsheet
  *  carrying a 4 is an error rather than a quietly invented fourth level. */
 export const LEVELS = [1, 2, 3];
 
-export const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member', limited: 'Limited member', guest: 'Guest' };
+export { ROLE_LABEL, accessOf, type Access } from './access';
+import { ROLE_LABEL, accessOf } from './access';
 
 const Modal: React.FC<{ title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }> = ({ title, onClose, wide, children }) => {
   const ref = useRef<HTMLDivElement>(null);
   useEscapeToClose(ref, onClose);
+  // Inside the Admin window, which carries the title and the close button itself.
+  if (useContext(DrawInPlace)) return <div ref={ref} role="region" aria-label={title} className="mx-auto w-full max-w-2xl">{children}</div>;
   return (
     <Portal>
       <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30" onMouseDown={onClose}>
@@ -25,7 +30,7 @@ const Modal: React.FC<{ title: string; onClose: () => void; wide?: boolean; chil
           className={`flex max-h-[90vh] ${wide ? 'w-[40rem]' : 'w-[30rem]'} max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white p-5 shadow-xl`}>
           <div className="mb-3 flex items-center">
             <h3 className="font-semibold text-gray-900">{title}</h3>
-            <button type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </div>
           {children}
         </div>
@@ -96,7 +101,9 @@ const ProfileFields: React.FC<{
       </>
     )}
     <Field label="Phone"><input aria-label="Phone" value={form.phone ?? ''} onChange={(e) => set({ phone: e.target.value })} className={inputCls} /></Field>
-    <Field label="Location"><input aria-label="Location" value={form.location ?? ''} onChange={(e) => set({ location: e.target.value })} placeholder="e.g. Bengaluru" className={inputCls} /></Field>
+    <div className="col-span-2 text-xs font-medium text-gray-600">Address
+      <div className="mt-1"><AddressField value={form.address} onChange={(address, city) => set({ address, location: city })} /></div>
+    </div>
     {adminFields && (
       <div className="col-span-2 text-xs font-medium text-gray-600" role="group" aria-label="Teams">Teams
         <TeamPicker teams={teams} value={form.team_ids ?? []} onChange={(team_ids) => set({ team_ids })} />
@@ -120,7 +127,7 @@ const SignInLink: React.FC<{ link: string }> = ({ link }) => {
 export const AddPersonDialog: React.FC<{
   ws: string; people: Person[]; teams: TeamFull[]; roles: Role[]; onClose: () => void; onDone: (p: Person) => void;
 }> = ({ ws, people, teams, roles, onClose, onDone }) => {
-  const [form, setForm] = useState<PersonInput>({ role: 'member', team_ids: [], send_invite: false });
+  const [form, setForm] = useState<PersonInput>({ role: 'member', team_ids: [] });
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ person: Person; emailed: boolean; email_problem: string | null; link: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -140,12 +147,10 @@ export const AddPersonDialog: React.FC<{
         <div className="text-sm text-gray-700" role="status">
           <p><b>{personName(done.person)}</b> is added{done.person.designation ? ` as ${done.person.designation}` : ''}. You can put them in teams and give them tasks now.</p>
           <p className="mt-2 text-gray-600">They sign in with Google using <b>{done.person.user.email}</b>; their account links up automatically.</p>
-          {done.emailed && <p className="mt-2 text-emerald-700">An invitation email is on its way.</p>}
-          {done.email_problem && <p className="mt-2 text-amber-700">{done.email_problem}</p>}
           <div className="mt-4 flex items-center justify-between">
             <SignInLink link={done.link} />
             <div className="flex gap-2">
-              <button type="button" onClick={() => { setDone(null); setForm({ role: 'member', team_ids: [], send_invite: false }); }} className="rounded-md px-3 py-1.5 text-sm text-brand-700 hover:bg-brand-50">Add another</button>
+              <button type="button" onClick={() => { setDone(null); setForm({ role: 'member', team_ids: [] }); }} className="rounded-md px-3 py-1.5 text-sm text-brand-700 hover:bg-brand-50">Add another</button>
               <button type="button" onClick={onClose} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white">Done</button>
             </div>
           </div>
@@ -154,10 +159,6 @@ export const AddPersonDialog: React.FC<{
         <div className="min-h-0 overflow-auto">
           <p className="mb-3 text-xs text-gray-500">Add someone who's joining, with their details. No email is needed to get started — they appear as “Pending” until they first sign in.</p>
           <ProfileFields form={form} set={(p) => setForm((f) => ({ ...f, ...p }))} people={people} teams={teams} roles={roles} showEmail showRole adminFields />
-          <label className="mt-3 flex items-center gap-2 text-sm text-gray-700">
-            <input type="checkbox" checked={!!form.send_invite} onChange={(e) => setForm((f) => ({ ...f, send_invite: e.target.checked }))} />
-            Also email them an invitation
-          </label>
           {/* The joiner checklist is not a decision to make while typing someone's name in --
               it is HR's, afterwards, from the person's own page. The plan, the tasks it makes and
               the leaver rules that match it are all untouched. */}
@@ -178,69 +179,30 @@ export const AddPersonDialog: React.FC<{
   );
 };
 
-// --- invite by email ----------------------------------------------------------------------------------
-
-export const InviteDialog: React.FC<{ ws: string; teams: TeamFull[]; roles: Role[]; onClose: () => void; onDone: () => void }> = ({ ws, teams, roles, onClose, onDone }) => {
-  const [emails, setEmails] = useState('');
-  const [role, setRole] = useState<Role>('member');
-  const [teamIds, setTeamIds] = useState<string[]>([]);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<Awaited<ReturnType<typeof peopleApi.invite>> | null>(null);
-  const list = emails.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
-  const bad = list.filter((x) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
-  const send = async () => {
-    setError(null);
-    try {
-      const out = await peopleApi.invite(ws, { emails: list, role, team_ids: teamIds, message: message.trim() || undefined });
-      setResult(out);
-      onDone();
-    } catch (e) { setError((e as Error).message); }
-  };
-  return (
-    <Modal title="Invite by email" onClose={onClose}>
-      {result ? (
-        <div className="text-sm text-gray-700" role="status">
-          <p>{result.people.length} {result.people.length === 1 ? 'person' : 'people'} invited.{result.emailed ? ' Invitations are on their way.' : ''}</p>
-          {result.email_problem && <p className="mt-2 text-amber-700">{result.email_problem}</p>}
-          {result.problems.map((p) => <p key={p} className="mt-1 text-xs text-red-700">{p}</p>)}
-          <div className="mt-4 flex items-center justify-between"><SignInLink link={result.link} />
-            <button type="button" onClick={onClose} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white">Done</button></div>
-        </div>
-      ) : (
-        <>
-          <label className="block text-xs font-medium text-gray-600">Email addresses
-            <textarea aria-label="Email addresses" rows={3} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="one@verveadvisory.com, two@verveadvisory.com" className={inputCls} />
-          </label>
-          {bad.length > 0 && <p className="mt-1 text-xs text-red-600">Not an email: {bad.join(', ')}</p>}
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <label className="block text-xs font-medium text-gray-600">Role
-              <select aria-label="Invite role" value={role} onChange={(e) => setRole(e.target.value as Role)} className={inputCls}>
-                {roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-              </select>
-            </label>
-          </div>
-          <div className="mt-3 text-xs font-medium text-gray-600" role="group" aria-label="Add to teams">Add to teams<TeamPicker teams={teams} value={teamIds} onChange={setTeamIds} /></div>
-          <label className="mt-3 block text-xs font-medium text-gray-600">Personal note (optional)
-            <textarea rows={2} value={message} onChange={(e) => setMessage(e.target.value)} className={inputCls} />
-          </label>
-          {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-          <div className="mt-4 flex justify-end gap-2">
-            <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-            <button type="button" disabled={!list.length || bad.length > 0} onClick={send} className="flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"><Send size={14} /> Send invitations</button>
-          </div>
-        </>
-      )}
-    </Modal>
-  );
-};
-
 // --- a person's profile -------------------------------------------------------------------------------
 
 export const PersonPanel: React.FC<{
   ws: string; person: Person; people: Person[]; teams: TeamFull[]; me: string; isAdmin: boolean; roles: Role[];
   onClose: () => void; onChanged: () => void; onOpenPerson: (id: string) => void;
 }> = ({ ws, person, people, teams, me, isAdmin, roles, onClose, onChanged, onOpenPerson }) => {
+  const navigate = useNavigate();
+  // 'idle' until asked, then 'looking', then 'none' if they have not got one yet.
+  const [board, setBoard] = useState<'idle' | 'looking' | 'none'>('idle');
+
+  /** Open the Dashboard this person sees when they open the app.
+   *
+   *  Found by owner rather than by a route of its own: the server already shares every personal
+   *  Dashboard with admins at view, and the list it returns names who each one belongs to. There
+   *  was nothing to add on the server -- only a way in from the person.
+   */
+  const openDashboard = async (userId: string) => {
+    // Their board as they see it, under the "Viewing" bar -- made there if they never opened it,
+    // so there is no longer a "they have not got one yet" to say.
+    setBoard('idle');
+    onClose();
+    navigate(`/dashboards/people/${encodeURIComponent(userId)}`);
+  };
+
   const ref = useRef<HTMLElement>(null);
   useEscapeToClose(ref, onClose);
   const [editing, setEditing] = useState(false);
@@ -267,14 +229,14 @@ export const PersonPanel: React.FC<{
     setForm({
       name: person.user.display_name ?? '', designation: person.designation ?? '', level: person.level, department: person.department ?? '',
       manager_id: person.manager_id, phone: person.phone ?? '', employee_code: person.employee_code ?? '',
-      date_of_joining: person.date_of_joining, location: person.location ?? '', team_ids: person.team_ids, role: person.role,
+      date_of_joining: person.date_of_joining, location: person.location ?? '', address: person.address ?? '', team_ids: person.team_ids, role: person.role,
       date_of_birth: person.date_of_birth, marriage_anniversary: person.marriage_anniversary, takes_interviews: person.takes_interviews,
     });
     setEditing(true);
   };
   const save = async () => {
     setError(null);
-    const body: PersonInput = isAdmin ? { ...form } : { name: form.name, phone: form.phone, location: form.location };
+    const body: PersonInput = isAdmin ? { ...form } : { name: form.name, phone: form.phone, location: form.location, address: form.address };
     if (!isAdmin || person.role === 'owner' || body.role === person.role) delete body.role;
     try { await peopleApi.update(ws, person.user.id, body); setEditing(false); setHistoryKey((k) => k + 1); onChanged(); } catch (e) { setError((e as Error).message); }
   };
@@ -322,7 +284,7 @@ export const PersonPanel: React.FC<{
               <Avatar user={person.user} size={48} />
               {canEdit && (
                 <>
-                  <button type="button" title="Change photo" onClick={() => photoRef.current?.click()}
+                  <button aria-label="Change photo" type="button" title="Change photo" onClick={() => photoRef.current?.click()}
                     className="absolute -bottom-1 -right-1 rounded-full border border-gray-200 bg-white p-1 text-gray-500 shadow-sm hover:text-gray-800"><Camera size={11} /></button>
                   <input ref={photoRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="Upload photo" className="hidden"
                     onChange={(e) => { photo(e.target.files?.[0]); e.target.value = ''; }} />
@@ -333,16 +295,43 @@ export const PersonPanel: React.FC<{
               <h2 className="truncate text-lg font-semibold text-gray-900">{personName(person)}</h2>
               <p className="text-sm text-gray-500">{person.designation || 'No designation'}{person.department ? ` · ${person.department}` : ''}</p>
               <div className="mt-1 flex flex-wrap gap-1.5 text-[11px]">
-                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-700">{ROLE_LABEL[person.role]}</span>
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-700">{accessOf(person.role, person.user.id, teams)}</span>
                 {person.pending && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">Pending — hasn't signed in yet</span>}
                 {left && <span className="rounded-full bg-red-100 px-2 py-0.5 text-red-800">Access turned off</span>}
               </div>
             </div>
-            <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
           </header>
           <div className="min-h-0 flex-1 overflow-auto p-5">
             {error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
             {note && <p className="mb-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{note}</p>}
+            {/* Their work, from here.
+                An admin could already open anybody's personal Dashboard -- the server shares every
+                one of them at view -- but only by finding it among ten rows in the Dashboards list
+                all called "My work". The way in was missing, not the permission. Opening it shows
+                exactly what that person sees on their own home page, read-only. */}
+            {!editing && isAdmin && person.user.id !== me && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                <button
+                  type="button" onClick={() => openDashboard(person.user.id)} disabled={board === 'looking'}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:border-brand-300 hover:bg-brand-50/50 disabled:opacity-50"
+                >
+                  <LayoutDashboard size={14} className="text-brand-600" />
+                  {board === 'looking' ? 'Opening…' : 'Their Dashboard'}
+                </button>
+                <Link
+                  to={`/timesheets/people/${encodeURIComponent(person.user.id)}`} onClick={onClose}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-700 no-underline hover:border-brand-300 hover:bg-brand-50/50"
+                >
+                  <Clock size={14} className="text-brand-600" /> Their timesheet
+                </Link>
+              </div>
+            )}
+            {board === 'none' && (
+              <p className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                They have no personal Dashboard yet. It is made the first time they open the app.
+              </p>
+            )}
             {editing ? (
               <>
                 <ProfileFields form={form} set={(p) => setForm((f) => ({ ...f, ...p }))} people={people} teams={teams} self={person.user.id}
@@ -359,7 +348,7 @@ export const PersonPanel: React.FC<{
                 {info(<Hash size={14} />, 'Employee code', person.employee_code)}
                 {info(<Calendar size={14} />, 'Joining date', person.date_of_joining ? new Date(`${person.date_of_joining}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : null)}
                 {info(<Phone size={14} />, 'Phone', person.phone)}
-                {info(<MapPin size={14} />, 'Location', person.location)}
+                {info(<MapPin size={14} />, 'Address', person.address ? <span className="whitespace-pre-line">{person.address}</span> : null)}
                 {info(<Building2 size={14} />, 'Department', person.department)}
                 {info(<Cake size={14} />, 'Birthday', person.date_of_birth ? new Date(`${person.date_of_birth}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : null)}
                 {info(<Heart size={14} />, 'Anniversary', person.marriage_anniversary ? new Date(`${person.marriage_anniversary}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : null)}
@@ -368,7 +357,9 @@ export const PersonPanel: React.FC<{
                   <span className="flex flex-wrap items-center gap-1">
                     {person.team_ids.map((id) => { const t = teams.find((x) => x.id === id); return t ? <Link key={id} to={`/people/teams/${id}`} onClick={onClose} className="rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700 no-underline">{t.name}</Link> : null; })}
                     {person.team_ids.length === 0 && <span className="text-xs text-gray-400">No team</span>}
-                    {canEdit && !left && (
+                    {/* An admin's: the server refuses a change of Team from anyone else, the person
+                        themselves included, so offering it to them only ended in an error. */}
+                    {isAdmin && !left && (
                       <button type="button" onClick={() => { setMovingTeam(!movingTeam); setMoveNote(null); }}
                         className="rounded-full border border-dashed border-gray-300 px-2 py-0.5 text-xs text-gray-600 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700">
                         {movingTeam ? 'Cancel' : 'Move…'}
@@ -376,7 +367,7 @@ export const PersonPanel: React.FC<{
                     )}
                   </span>
                 ))}
-                {movingTeam && canEdit && (
+                {movingTeam && isAdmin && (
                   <div className="mb-2 ml-6 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-2.5">
                     <span className="text-xs text-gray-600">Move to</span>
                     <select

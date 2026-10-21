@@ -38,11 +38,11 @@ from app.db.models import (
 )
 from app.schemas import timesheets as t
 from app.schemas import work as s
-from app.services.work.access import Access, chain_for_task, open_task
+from app.services.work.access import Access, chain_for_task, open_task, tracking_level
 from app.services.work.errors import Forbidden, Invalid, NotFound
 from app.services.work.permissions import can_manage_workspace
 from app.services.work.timelocks import LOCKED, ensure_unlocked
-from app.services.work.timetracking import tags_for, time_visible_people
+from app.services.work.timetracking import ensure_not_future, tags_for, time_visible_people
 
 DEFAULT_CAPACITY = [8 * 3600] * 5 + [0, 0]  # Monday first
 DAY = timedelta(days=1)
@@ -105,11 +105,14 @@ def update_settings(db: Session, access: Access, data: t.SettingsIn) -> t.Settin
 
 
 def capacity_of(db: Session, workspace_id: uuid.UUID, user_id: str) -> Tuple[List[int], bool]:
-    """Seconds of capacity per weekday (Monday first), and whether it is the person's own."""
-    own = db.get(MemberCapacity, (workspace_id, user_id))
-    if own is not None:
-        return list(own.capacity_seconds), True
-    return list(settings_row(db, workspace_id).capacity_seconds), False
+    """Seconds of capacity per weekday (Monday first), and whether it is the person's own.
+
+    Not their own means their Team's week or the company's -- working_time.weekly_hours decides.
+    """
+    from app.services.work.working_time import weekly_hours
+
+    seconds, source, _ = weekly_hours(db, workspace_id, [user_id])[user_id]
+    return seconds, source == "person"
 
 
 def set_capacity(db: Session, access: Access, user_id: str, data: t.CapacityIn) -> t.CapacityOut:
@@ -359,7 +362,7 @@ def timesheet(
     else:
         out_rows.sort(key=lambda r: r.added_at, reverse=descending)
 
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
 
     capacity = daily_capacity(db, access.workspace_id, [user_id], days)[user_id]  # hours less holidays and leave
     sub = current_submission(db, access.workspace_id, user_id, first)
@@ -384,6 +387,20 @@ def timesheet(
     )
 
 
+def _may_track(db: Session, access: Access, task: Task) -> bool:
+    """May they record hours against this task?
+
+    One answer for all three places below -- the grid, adding a row, and the picker that offers the
+    tasks you can track against. They were three copies of the same literal, and when employees
+    became read-and-comment on work that is not theirs, fixing the rule in timetracking.py left the
+    whole timesheet refusing with a 403 because these three were never looked at.
+
+    Edit, read from their standing before the employee cap: see access.tracking_level.
+    """
+    level = tracking_level(db, access, task)
+    return level is not None and level.at_least(PermissionLevel.edit)
+
+
 def set_cell(db: Session, access: Access, data: t.CellIn) -> None:
     """Make one task's tracked time on one day equal `seconds`."""
     user_id = data.user_id or access.user_id
@@ -392,10 +409,11 @@ def set_cell(db: Session, access: Access, data: t.CellIn) -> None:
     opened = open_task(db, access.user_id, data.task_id, PermissionLevel.view)
     if opened.access.workspace_id != access.workspace_id:
         raise NotFound("Task not found")
-    if not opened.level.at_least(PermissionLevel.edit):
+    if not _may_track(db, access, opened.obj):
         raise Forbidden("You need edit access to a task to track time on it")
     day_start, day_end = _at(data.day, tz), _at(data.day + DAY, tz)
     ensure_unlocked(db, access.workspace_id, user_id, day_start, access.role)
+    today = datetime.now(timezone.utc).astimezone(tz).date()
     cell = list(
         db.scalars(
             select(TimeEntry).where(
@@ -409,8 +427,12 @@ def set_cell(db: Session, access: Access, data: t.CellIn) -> None:
     )
     current = sum(e.duration_seconds or 0 for e in cell)
     if data.seconds > current:
+        # Taking time off a day ahead is tidying up; adding to one is recording work not yet done.
+        if data.day > today:
+            raise Invalid("Time can only be logged for days that have already started")
         extra = data.seconds - current
         begin = _new_entry_start(data.day, tz, extra, day_start, day_end)
+        ensure_not_future(begin + timedelta(seconds=extra))
         db.add(TimeEntry(
             task_id=data.task_id, user_id=user_id, started_at=begin, ended_at=begin + timedelta(seconds=extra),
             duration_seconds=extra, created_by=access.user_id,
@@ -445,7 +467,11 @@ def _new_entry_start(day: date, tz: ZoneInfo, seconds: int, day_start: datetime,
     The one thing it cannot do is run past midnight, so an entry long enough to overflow the day
     is pulled back until it fits.
     """
-    here = datetime.now(timezone.utc).astimezone(tz)
+    now = datetime.now(timezone.utc)
+    here = now.astimezone(tz)
+    if day == here.date():
+        # Today the hour just typed is the hour just worked: it ends now, not an hour from now.
+        return max(now.replace(second=0, microsecond=0) - timedelta(seconds=seconds), day_start)
     begin = datetime.combine(day, time(here.hour, here.minute), tz).astimezone(timezone.utc)
     if seconds >= (day_end - day_start).total_seconds():
         return day_start
@@ -457,7 +483,7 @@ def add_row(db: Session, access: Access, data: t.RowIn) -> None:
     opened = open_task(db, access.user_id, data.task_id, PermissionLevel.view)
     if opened.access.workspace_id != access.workspace_id:
         raise NotFound("Task not found")
-    if not opened.level.at_least(PermissionLevel.edit):
+    if not _may_track(db, access, opened.obj):
         raise Forbidden("You need edit access to a task to track time on it")
     first, _ = period_of(db, access.workspace_id, data.start)
     if db.get(TimesheetRow, (user_id, data.task_id, first)) is None:
@@ -502,13 +528,27 @@ def pickable_tasks(db: Session, access: Access, query: str, limit: int = 20) -> 
     )
     if query.strip():
         q = q.where(Task.name.ilike(f"%{query.strip()}%"))
-    candidates = list(db.scalars(q.order_by(Task.updated_at.desc()).limit(200)))
+    # Your own open work first, then other open work, then anything finished: the task you are
+    # about to log time on is almost always one of yours that is still going, and a list led by
+    # last week's closed tasks from somebody else's List buried it.
+    from sqlalchemy import case
+
+    from app.db.models import StatusGroup, TaskAssignee
+
+    mine = (
+        select(TaskAssignee.task_id)
+        .where(TaskAssignee.task_id == Task.id, TaskAssignee.user_id == access.user_id)
+        .exists()
+    )
+    finished = Status.group.in_([StatusGroup.done, StatusGroup.closed])
+    rank = case((~finished & mine, 0), (~finished, 1), (mine, 2), else_=3)
+    q = q.join(Status, Status.id == Task.status_id)
+    candidates = list(db.scalars(q.order_by(rank, Task.updated_at.desc()).limit(200)))
     statuses = {st.id: st for st in db.scalars(select(Status).where(Status.id.in_({x.status_id for x in candidates})))} if candidates else {}
     locate = _Locator(db)
     out = []
     for task in candidates:
-        level = access.level(chain_for_task(db, task))
-        if level is None or not level.at_least(PermissionLevel.edit):
+        if not _may_track(db, access, task):
             continue
         out.append(t.PickTask(id=task.id, name=task.name, status=s.StatusOut.model_validate(statuses[task.status_id]), location=locate.of(task.list_id)))
         if len(out) >= limit:
@@ -569,7 +609,7 @@ def all_timesheets(db: Session, access: Access, any_day: date, tz: ZoneInfo, tea
             )
         )
     }
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
 
     capacities = daily_capacity(db, access.workspace_id, [u.id for u in people], days)
     out = []
@@ -724,7 +764,7 @@ def run_timesheet_reminders(db: Session, now: Optional[datetime] = None) -> int:
     """On the reminder day and hour, nudge people whose timesheet so far is short of their working hours. Once a week each."""
     from app.db.models import Notification, Workspace, WorkspaceRole
     from app.services.work import events
-    from app.services.work.leave import daily_capacity
+    from app.services.work.working_time import daily_capacity
 
     now = now or datetime.now(timezone.utc)
     sent = 0

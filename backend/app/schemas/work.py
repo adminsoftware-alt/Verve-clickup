@@ -82,6 +82,7 @@ class MemberUpdate(BaseModel):
 
 Email = Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")]
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]
+Address = Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]
 
 
 class PersonCreate(BaseModel):
@@ -98,6 +99,7 @@ class PersonCreate(BaseModel):
     employee_code: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
     date_of_joining: Optional[date] = None
     location: Optional[ShortText] = None
+    address: Optional[Address] = None
     date_of_birth: Optional[date] = None
     marriage_anniversary: Optional[date] = None
     takes_interviews: bool = False
@@ -121,6 +123,7 @@ class PersonUpdate(BaseModel):
     employee_code: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
     date_of_joining: Optional[date] = None
     location: Optional[ShortText] = None
+    address: Optional[Address] = None
     date_of_birth: Optional[date] = None
     marriage_anniversary: Optional[date] = None
     takes_interviews: Optional[bool] = None
@@ -140,6 +143,7 @@ class PersonOut(BaseModel):
     employee_code: Optional[str] = None
     date_of_joining: Optional[date] = None
     location: Optional[str] = None
+    address: Optional[str] = None
     date_of_birth: Optional[date] = None
     marriage_anniversary: Optional[date] = None
     takes_interviews: bool = False
@@ -333,6 +337,12 @@ class LocationUpdate(BaseModel):
 class SpaceCreate(LocationCreate):
     description: Optional[str] = Field(default=None, max_length=5000)
     icon: Optional[str] = Field(default=None, max_length=64)
+    # Step two of ClickUp's Create a Space ("Define your workflow"). Left out, a Space gets the
+    # defaults: To do / In progress / Complete, the required views, and every ClickApp's default.
+    default_permission: Optional[PermissionLevel] = None
+    statuses: Optional[List["StatusIn"]] = Field(default=None, min_length=2, max_length=50)
+    views: Optional[List[ViewType]] = Field(default=None, max_length=12, description="Views added after the required ones")
+    clickapps: Optional[Dict["ClickAppName", bool]] = None
 
 
 TaskPrefix = Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=10, pattern=r"^[A-Za-z0-9]+$")]
@@ -350,6 +360,7 @@ class SpaceUpdate(LocationUpdate):
     task_prefix: Optional[TaskPrefix] = None
     clickapps: Optional[Dict[ClickAppName, bool]] = None
     discoverable: Optional[bool] = None
+    default_permission: Optional[PermissionLevel] = None
 
 
 class FolderCreate(LocationCreate):
@@ -406,6 +417,7 @@ class SpaceOut(LocationOut):
     task_prefix: Optional[str] = None
     clickapps: Dict[str, bool] = Field(default_factory=dict)
     discoverable: bool = False
+    default_permission: Optional[PermissionLevel] = None
 
 
 class FolderOut(LocationOut):

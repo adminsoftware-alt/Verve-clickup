@@ -1,7 +1,29 @@
 import { auth, db } from '../core/firebase';
 import { collection, doc, setDoc, getDoc, onSnapshot, query, getDocs } from 'firebase/firestore';
 
-export type PresenceStatus = 'Available' | 'Busy' | 'In Meeting' | 'Focus Mode' | 'Break' | 'On Leave' | 'Work From Home' | 'In Office' | 'Offline';
+export type PresenceStatus =
+  | 'Available' | 'Busy' | 'In Meeting' | 'Focus Mode' | 'Do Not Disturb' | 'Break' | 'Lunch'
+  | 'Work From Home' | 'In Office' | 'Client Visit' | 'Travelling' | 'In Training' | 'Sick Leave'
+  | 'On Leave' | 'Offline';
+
+/** Every status and its dot colour, in the order the picker offers them. */
+export const PRESENCE_COLORS: Record<PresenceStatus, string> = {
+  'Available': '#10B981',
+  'Busy': '#EF4444',
+  'In Meeting': '#F59E0B',
+  'Focus Mode': '#8B5CF6',
+  'Do Not Disturb': '#B91C1C',
+  'Break': '#3B82F6',
+  'Lunch': '#F97316',
+  'Work From Home': '#14B8A6',
+  'In Office': '#2563EB',
+  'Client Visit': '#0EA5E9',
+  'Travelling': '#6366F1',
+  'In Training': '#A855F7',
+  'Sick Leave': '#EC4899',
+  'On Leave': '#6B7280',
+  'Offline': '#9CA3AF',
+};
 export type WorkingLocation = 'Office' | 'Remote' | 'Client Site' | 'Business Travel';
 
 export interface UserPresence {

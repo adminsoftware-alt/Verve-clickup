@@ -5,11 +5,46 @@
 // asks them in order -- how often, what triggers it, what the copy looks like -- so the rule can
 // be read back as a sentence before it is saved.
 import { Calendar, Repeat } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { Recurrence, Status } from './api';
 import { Select } from './Select';
 import { Portal } from './ui';
+
+/**
+ * A fixed popover that stays on screen: it measures itself and moves up when it would run off
+ * the bottom, and scrolls inside when the window is shorter than it. The repeat panel is taller
+ * than the calendar it replaces, so opened low in a dialog its Save button ended up off screen.
+ */
+export const OnScreen: React.FC<{
+  top: number; left: number; label: string; className?: string; width?: number;
+  panelRef?: React.RefObject<HTMLDivElement | null>; children: React.ReactNode;
+}> = ({ top, left, label, className = '', width, panelRef, children }) => {
+  const own = useRef<HTMLDivElement | null>(null);
+  const [y, setY] = useState(top);
+  useLayoutEffect(() => {
+    const fit = () => {
+      const h = own.current?.offsetHeight ?? 0;
+      setY(Math.max(8, Math.min(top, window.innerHeight - h - 8)));
+    };
+    fit();
+    // The panel grows as options are switched on ("Until…", "Update status to"); keep it fitted.
+    const watch = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null;
+    if (own.current) watch?.observe(own.current);
+    window.addEventListener('resize', fit);
+    return () => { watch?.disconnect(); window.removeEventListener('resize', fit); };
+  }, [top]);
+  return (
+    <div
+      ref={(node) => { own.current = node; if (panelRef) (panelRef as React.MutableRefObject<HTMLDivElement | null>).current = node; }}
+      role="dialog" aria-label={label} onMouseDown={(e) => e.stopPropagation()}
+      style={{ position: 'fixed', top: y, left, width, maxHeight: 'calc(100vh - 16px)' }}
+      className={`overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl ${className}`}
+    >
+      {children}
+    </div>
+  );
+};
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const INITIALS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
@@ -20,7 +55,7 @@ const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const UNIT = { daily: 'day', weekly: 'week', monthly: 'month', yearly: 'year', days_after: 'day' } as const;
 
 export function describeRecurrence(r: Recurrence | null): string {
-  if (!r) return 'Does not repeat';
+  if (!r) return 'Not recurring';
   let text: string;
   if (r.frequency === 'days_after') {
     text = `${r.interval} day${r.interval === 1 ? '' : 's'} after it is done`;
@@ -372,10 +407,7 @@ export const RecurrenceEditor: React.FC<{
     const r = anchor.current?.getBoundingClientRect();
     if (r) {
       const width = 384;
-      setPos({
-        top: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - 520)),
-        left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)),
-      });
+      setPos({ top: r.bottom + 6, left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) });
     }
     setOpen(true);
   };
@@ -391,12 +423,9 @@ export const RecurrenceEditor: React.FC<{
       {open && (
         <Portal>
           <div className="fixed inset-0 z-[125]" onMouseDown={() => setOpen(false)}>
-            <div
-              role="dialog" aria-label="Recurring" onMouseDown={(e) => e.stopPropagation()}
-              className="fixed overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl" style={pos}
-            >
+            <OnScreen top={pos.top} left={pos.left} label="Recurring">
               <RecurrencePanel value={value} dueDate={dueDate} statuses={statuses} onCancel={() => setOpen(false)} onSave={onSave} />
-            </div>
+            </OnScreen>
           </div>
         </Portal>
       )}

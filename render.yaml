@@ -1,0 +1,42 @@
+# Render Blueprint for the Verve Workflow API (FastAPI). The frontend is on Vercel and the
+# database on Supabase; this only runs the backend.
+#
+# Values marked `sync: false` are secrets: Render asks for them when the Blueprint is first
+# applied, and they never live in this public repository. Two files go in as Secret Files
+# (service -> Environment -> Secret Files), which Render mounts under /etc/secrets/:
+#   firebase.json  the Firebase Admin service-account key
+#   vapid.json     the Web Push keys from backend/.vapid.json, so existing push subscriptions keep working
+services:
+  - type: web
+    name: verve-workflow-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    # Migrations first, so a deploy that adds a column never serves requests before the column exists.
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: DATABASE_URL
+        sync: false
+      - key: FIREBASE_CREDENTIALS_PATH
+        value: /etc/secrets/firebase.json
+      - key: VAPID_FILE
+        value: /etc/secrets/vapid.json
+      - key: FRONTEND_URL
+        value: https://verve-clickup.vercel.app
+      - key: APP_URL
+        value: https://verve-clickup.vercel.app
+      # Never true here: it lets anyone sign in as anyone.
+      - key: DEV_LOGIN
+        value: "false"
+      - key: AI_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: AI_MODEL
+        value: nvidia/nemotron-3-super-120b-a12b:free
+      - key: AI_API_KEY
+        sync: false

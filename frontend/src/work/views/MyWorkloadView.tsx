@@ -15,7 +15,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, CalendarOff, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, Circle, Droplets, Flag,
-  FolderTree, Gauge, Layers, ListOrdered, Timer, TrendingUp, TriangleAlert,
+  FolderTree, Gauge, Layers, Timer, TriangleAlert,
 } from 'lucide-react';
 
 import { useWork } from '../WorkContext';
@@ -179,31 +179,6 @@ export const MyWorkloadView: React.FC<{
     });
   };
 
-  /**
-   * The three things a person actually asks of their own week: what is taking the most of it,
-   * which days have tipped over, and where there is still room.
-   *
-   * All three come off the same numbers as the grid; they are here because a grid answers
-   * "how much on each day" and none of these are that question.
-   */
-  const insights = useMemo(() => {
-    const heaviest = tasks.slice(0, 4);
-    const bottlenecks = dates.map((d, i) => ({
-      date: d,
-      planned: row?.scheduled_seconds[i] ?? 0,
-      capacity: row?.capacity_seconds[i] ?? 0,
-    })).filter((x) => x.capacity > 0 && x.planned > x.capacity);
-    // Only days still to come: room in a day that has already gone is not room.
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    const open = dates.map((d, i) => ({
-      date: d,
-      planned: row?.scheduled_seconds[i] ?? 0,
-      capacity: row?.capacity_seconds[i] ?? 0,
-    })).filter((x) => x.capacity > 0 && x.date >= startOfToday && x.planned < x.capacity / 2);
-    return { heaviest, bottlenecks, open: open.slice(0, 5) };
-  }, [tasks, dates, row]);
-
   const months = useMemo(() => {
     const out: { label: string; span: number }[] = [];
     for (const d of dates) {
@@ -257,8 +232,8 @@ export const MyWorkloadView: React.FC<{
         >
           Today
         </button>
-        <button type="button" title="Earlier" onClick={() => step(-1)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
-        <button type="button" title="Later" onClick={() => step(1)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
+        <button aria-label="Earlier" type="button" title="Earlier" onClick={() => step(-1)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
+        <button aria-label="Later" type="button" title="Later" onClick={() => step(1)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
         <span className="text-sm font-medium text-gray-700">
           {start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – {
             new Date(start.getTime() + (days - 1) * DAY_MS).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
@@ -299,7 +274,7 @@ export const MyWorkloadView: React.FC<{
       </div>
 
       {!data ? <TaskRowsSkeleton rows={5} /> : (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div>
         <div className="min-w-0">
           <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm" role="table" aria-label="My workload">
             {/* Which months these days belong to. */}
@@ -412,13 +387,12 @@ export const MyWorkloadView: React.FC<{
               );
             }) : (
               <div className="px-3 py-8 text-center text-sm text-gray-400">
-                {all.length ? 'Nothing matches these filters.' : 'Nothing of yours falls in these days.'}
+                {all.length ? 'Nothing matches these filters.' : ''}
               </div>
             ))}
           </div>
 
-          <p className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-400">
-            Each task's estimate is spread evenly over the working days between its start and due dates.
+          <p className="mt-2 flex flex-wrap items-center justify-end gap-3 text-xs text-gray-400">
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded bg-teal-400" />under 80%</span>
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded bg-amber-400" />80–100%</span>
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded bg-red-500" />over capacity</span>
@@ -431,103 +405,23 @@ export const MyWorkloadView: React.FC<{
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               {data.unscheduled.length > 0 && (
                 <Aside icon={<CalendarOff size={13} />} title={`${data.unscheduled.length} with no dates`}
-                  note="Give these a start and due date and they will take their place in the week."
                   items={data.unscheduled} onOpenTask={onOpenTask} />
               )}
               {data.no_estimate.length > 0 && (
                 <Aside icon={<Timer size={13} />} title={`${data.no_estimate.length} with no estimate`}
-                  note="Scheduled, but with no size there is nothing to spread across the days."
                   items={data.no_estimate} onOpenTask={onOpenTask} />
               )}
             </div>
           )}
         </div>
-
-        <aside className="min-w-0" aria-label="Personal insights">
-          <h3 className="mb-2 text-base font-semibold text-gray-900">Personal insights</h3>
-          <div className="space-y-3">
-            <Insight Icon={ListOrdered} tint="text-brand-600" title="Heaviest work"
-              note="What is taking the most of these days.">
-              {insights.heaviest.length === 0 ? (
-                <Quiet>Nothing of yours falls in this period.</Quiet>
-              ) : (
-                <ul className="space-y-1">
-                  {insights.heaviest.map(({ t, total }) => (
-                    <li key={t.id}>
-                      <button type="button" onClick={() => onOpenTask(t.id)}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-gray-50">
-                        <StatusDot status={t.status} size={10} />
-                        <span className="min-w-0 flex-1 truncate text-[13px] text-gray-700">{t.name}</span>
-                        <span className="shrink-0 text-[12px] font-medium text-gray-900">{hoursShort(total)}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Insight>
-
-            <Insight Icon={TriangleAlert} tint="text-red-600" title="Daily bottlenecks"
-              note="Days with more planned than you have.">
-              {insights.bottlenecks.length === 0 ? (
-                <p className="px-2 py-1 text-[13px] font-medium text-teal-700">No day has tipped over.</p>
-              ) : (
-                <ul className="space-y-1">
-                  {insights.bottlenecks.map((b) => (
-                    <li key={b.date.toISOString()} className="flex items-center gap-2 rounded-md bg-red-50 px-2 py-1.5">
-                      <span className="min-w-0 flex-1 truncate text-[13px] text-red-900">
-                        {b.date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })}
-                      </span>
-                      <span className="shrink-0 text-[12px] font-semibold text-red-700">
-                        +{hoursShort(b.planned - b.capacity)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Insight>
-
-            <Insight Icon={TrendingUp} tint="text-teal-600" title="Open slots"
-              note="Days still to come that are under half booked.">
-              {insights.open.length === 0 ? (
-                <Quiet>Nothing spare in the days ahead.</Quiet>
-              ) : (
-                <ul className="space-y-1">
-                  {insights.open.map((o) => (
-                    <li key={o.date.toISOString()} className="flex items-center gap-2 rounded-md bg-teal-50 px-2 py-1.5">
-                      <span className="min-w-0 flex-1 truncate text-[13px] text-teal-900">
-                        {o.date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })}
-                      </span>
-                      <span className="shrink-0 text-[12px] font-semibold text-teal-700">
-                        {hoursShort(o.capacity - o.planned)} free
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Insight>
-          </div>
-        </aside>
+        {/* "Personal insights" stood in a column on the right: heaviest work, overloaded days,
+            open slots. The week above already shows all three -- the glasses fill, tip red and
+            sit empty -- so the grid now has the full width it needs. */}
         </div>
       )}
     </div>
   );
 };
-
-const Insight: React.FC<{
-  Icon: React.ElementType; tint: string; title: string; note: string; children: React.ReactNode;
-}> = ({ Icon, tint, title, note, children }) => (
-  <section className="rounded-xl border border-gray-200 bg-white px-3 py-3 shadow-sm">
-    <h4 className="flex items-center gap-2 text-[15px] font-semibold text-gray-900">
-      <Icon size={16} className={tint} /> {title}
-    </h4>
-    <p className="mb-2 mt-0.5 text-[12px] text-gray-500">{note}</p>
-    {children}
-  </section>
-);
-
-const Quiet: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <p className="px-2 py-1 text-[13px] text-gray-400">{children}</p>
-);
 
 /** One day, as a container filling up. Over capacity it is full and red, with the spill named. */
 const Glass: React.FC<{ planned: number; capacity: number }> = ({ planned, capacity }) => {
@@ -603,12 +497,11 @@ const Stat: React.FC<{
 };
 
 const Aside: React.FC<{
-  icon: React.ReactNode; title: string; note: string;
+  icon: React.ReactNode; title: string;
   items: { id: string; name: string }[]; onOpenTask: (id: string) => void;
-}> = ({ icon, title, note, items, onOpenTask }) => (
+}> = ({ icon, title, items, onOpenTask }) => (
   <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2">
     <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">{icon}{title}</p>
-    <p className="mt-0.5 text-[11px] text-amber-700/90">{note}</p>
     <ul className="mt-1.5 space-y-0.5">
       {items.slice(0, 6).map((t) => (
         <li key={t.id}>

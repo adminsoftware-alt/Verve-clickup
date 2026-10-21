@@ -8,7 +8,6 @@ export interface Delivery {
 export interface DigestPerson {
   user: UserRef; overdue: number; overdue_tasks: { id: string; name: string; list_id: string; due_date: string | null }[];
   done_last_week: number; tracked_seconds: number; capacity_seconds: number; timesheet_status: string | null;
-  leave: { start_date: string; end_date: string; type: string; status: string }[];
 }
 export interface TeamDigest { week_start: string; week_end: string; people: DigestPerson[] }
 export interface Obligation {

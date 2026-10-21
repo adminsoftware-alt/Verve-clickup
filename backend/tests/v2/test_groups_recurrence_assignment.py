@@ -232,8 +232,8 @@ def test_a_manager_hands_a_list_to_someone_in_their_team(api, org):
     row = next(r for r in workload["rows"] if r["user"] and r["user"]["id"] == "member")
     assert sum(row["scheduled_seconds"]) > 0
     ok(api.patch(f"/tasks/{t['id']}", "member", {"status_id": closed_status(api, lst, "member")["id"]}))
-    # The workspace owner did not create or assign it, so this private List is hidden from them too.
-    assert api.get(f"/lists/{lst['id']}/tasks", "owner").status_code == 404
+    # The workspace owner did not create or assign it, but admins open private Lists.
+    ok(api.get(f"/lists/{lst['id']}/tasks", "owner"))
     assert ok(api.get(f"/tasks/{t['id']}/time", "lead"))["total_seconds"] == HOUR  # the lead sees their team's time
 
 

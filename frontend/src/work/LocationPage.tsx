@@ -1,15 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Activity, Calendar, CalendarRange, ChevronRight, ClipboardList, Columns3, FileSpreadsheet, FileText, Folder, GanttChart, Globe, History, Home, Layers, LayoutDashboard, List as ListIcon, ListPlus, Lock, Map as MapIcon, MessagesSquare, MoreHorizontal, Network, Pencil, Plus, PenTool, Search, Share2, Shield, Star, Table2, Upload, UserPlus, Users, X } from 'lucide-react';
+import { Activity, ArrowDownToLine, Calendar, CalendarRange, ChevronRight, ClipboardList, Columns3, FileSpreadsheet, FileText, Folder, GanttChart, Globe, History, Home, LayoutDashboard, List as ListIcon, ListPlus, Lock, Map as MapIcon, MessagesSquare, Network, PenTool, Plus, Share2, Table2, Upload, Users } from 'lucide-react';
 import { useWork, useMe } from './WorkContext';
 import { workApi, type CustomField, type Dependency, type FolderNode, type ListNode, type LocationKind, type Recurrence, type SpaceNode, type Status, type Task, type TaskGroup, type TaskInput, type UserRef, type View, type ViewType } from './api';
-import { DateRange } from './DateField';
+import { DateField } from './DateField';
 import { FieldEditor } from './fields/FieldValue';
 import { TaskRowsSkeleton } from './Skeleton';
 import { Menu, NameDialog, PRIORITIES, Portal, StatusDot, formatDue, fromDateInput } from './ui';
 import { DurationInput } from './DurationInput';
 import { Select } from './Select';
-import { FavoriteStar, useFavorites } from './Favorites';
 import { TaskPanel } from './TaskPanel';
 import { ListView } from './views/ListView';
 import { CalendarView } from './views/CalendarView';
@@ -19,16 +18,17 @@ import { WorkloadView } from './views/WorkloadView';
 import { BoardView } from './views/BoardView';
 import { OverviewView } from './views/OverviewView';
 import { useRunningTimer } from './RunningTimer';
-import { rememberList } from './recent';
+import { rememberPlace } from './recent';
 import { ShareDialog } from './ShareDialog';
 import { useLeadership } from './dashboards/dialogs';
 import { GroupsDialog } from './GroupsDialog';
-import { AssignListDialog } from './AssignListDialog';
 import { AssigneePicker } from './task/AssigneePicker';
 import { RecurrenceEditor } from './RecurrenceEditor';
 import { NO_GROUP, buildGroups, type GroupBy } from './views/grouping';
 import { applyFilters, readSettings, sameSettings, sortTasks, COLUMNS, type ViewSettings } from './views/viewSettings';
 import { FilterPanel } from './views/FilterPanel';
+import { FieldsButton, ShowButton } from './views/QuickControls';
+import { GroupByButton } from './views/ViewControls';
 import { BulkBar } from './views/BulkBar';
 import { TableView } from './views/TableView';
 import { TeamView } from './views/TeamView';
@@ -39,14 +39,12 @@ import { FormBuilder } from './views/FormView';
 import { FieldsDialog } from './fields/FieldsDialog';
 import { ImportDialog } from './templates/ImportDialog';
 import { TemplateCenter } from './templates/Templates';
-import { Avatar, AvatarStack } from './ui';
 import { FEATURES } from '../config/features';
 import { notify } from '../components/notify';
 import { DocView } from './views/DocView';
 import { WhiteboardView } from './views/WhiteboardView';
 import { MindMapView } from './views/MindMapView';
 import { MapView } from './views/MapView';
-import { ask } from '../components/ask';
 import { ChatView } from './views/ChatView';
 import { EmbedView } from './views/EmbedView';
 import { SprintBar } from './views/SprintBar';
@@ -72,11 +70,6 @@ const VIEW_META: Record<ViewType, { label: string; icon: React.ReactNode }> = {
   chat: { label: 'Chat', icon: <MessagesSquare size={14} /> },
   embed: { label: 'Embed', icon: <Globe size={14} /> },
 };
-// The views offered in "+ View". The rest are built and still open where they already exist;
-// they come back to this menu with FEATURES.extraViewTypes.
-const CORE_VIEWS: ViewType[] = ['dashboard', 'table', 'team', 'calendar', 'workload'];
-const EXTRA_VIEWS: ViewType[] = ['list', 'board', 'gantt', 'timeline', 'activity', 'form', 'doc', 'whiteboard', 'mind_map', 'map', 'chat', 'embed'];
-const ADDABLE: ViewType[] = FEATURES.extraViewTypes ? [...CORE_VIEWS, ...EXTRA_VIEWS] : CORE_VIEWS;
 // Views that bring their own data and controls instead of the shared task toolbar.
 const SELF_CONTAINED: ViewType[] = ['overview', 'dashboard', 'workload', 'activity', 'form', 'doc', 'whiteboard', 'chat', 'embed'];
 
@@ -110,7 +103,6 @@ export const LocationPage: React.FC = () => {
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [statuses, setStatuses] = useState<Status[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
   const [openTask, setOpenTask] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [newTaskList, setNewTaskList] = useState<string | null>(null);
@@ -123,7 +115,6 @@ export const LocationPage: React.FC = () => {
   const [managingFields, setManagingFields] = useState(false);
   const [importing, setImporting] = useState(false);
   const [templatesFor, setTemplatesFor] = useState<string | null>(null);
-  const [assigning, setAssigning] = useState(false);
   const [publicView, setPublicView] = useState<View | null>(null);
   const me = useMe();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -144,13 +135,13 @@ export const LocationPage: React.FC = () => {
   useEffect(() => { setSettings(savedSettings); setSelected(new Set()); }, [savedSettings]);
   const dirty = !sameSettings(settings, savedSettings);
   const update = <K extends keyof ViewSettings>(key: K, value: ViewSettings[K]) => setSettings((prev) => ({ ...prev, [key]: value }));
-  const groupBy: GroupBy = settings.groupBy;
-  // Me mode is personal: remembered per view in this browser, never saved into the view.
-  const meKey = `timetriq.me.${activeView?.id ?? ''}`;
-  // "Me" was a toggle in the toolbar. Filtering by assignee says the same thing in the one
-  // place people now look, so the toggle went and only the remembered state is read.
-  const [meMode, setMeModeState] = useState(false);
-  useEffect(() => { try { setMeModeState(localStorage.getItem(meKey) === '1'); } catch { setMeModeState(false); } }, [meKey]);
+  // Lists no longer offer "Group by"; one saved with another grouping goes back to status.
+  const groupBy: GroupBy = activeView?.type === 'list' ? 'status' : settings.groupBy;
+  // Subtasks on or off, per view in this browser.
+  const subKey = `timetriq.subtasks.${activeView?.id ?? ''}`;
+  const [showSubtasks, setShowSubtasksState] = useState(true);
+  useEffect(() => { try { setShowSubtasksState(localStorage.getItem(subKey) !== '0'); } catch { setShowSubtasksState(true); } }, [subKey]);
+  const setShowSubtasks = (on: boolean) => { setShowSubtasksState(on); try { localStorage.setItem(subKey, on ? '1' : '0'); } catch { /* ignore */ } };
   const saveView = async () => {
     if (!activeView) return;
     try {
@@ -197,7 +188,9 @@ export const LocationPage: React.FC = () => {
   useEffect(() => { if (reachable) loadTasks(); }, [loadTasks, reachable]);
   // Starting or stopping a timer changes the Time tracked totals on screen.
   useEffect(() => { if (reachable && timerVersion > 0) loadTasks(); }, [timerVersion]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (reachable && kind === 'list') rememberList(id); }, [reachable, kind, id]);
+  // Every Space, Folder and List page counts as visited, whether it was opened from the sidebar,
+  // a link in a message or a bookmark -- the place shows up under Recent in search either way.
+  useEffect(() => { if (reachable) rememberPlace(kind, id); }, [reachable, kind, id]);
   // Statuses edited from the sidebar: re-read them (tasks may have been remapped too).
   useEffect(() => {
     const again = () => { if (reachable) loadTasks(); };
@@ -225,28 +218,7 @@ export const LocationPage: React.FC = () => {
 
   const selectView = (view: View) => setSearchParams({ v: view.id });
 
-  const addView = async (type: ViewType, isPrivate = false) => {
-    try {
-      const view = await workApi.createView(kind, id, type, isPrivate);
-      setViews((prev) => [...prev, view]);
-      selectView(view);
-    } catch (e) {
-      notify.error(e);
-    }
-  };
-
-  const favorites = useFavorites();
-  const isWorkspaceAdmin = hierarchy?.role === 'owner' || hierarchy?.role === 'admin';
   const canEditHere = located?.node.permission_level === 'edit' || located?.node.permission_level === 'full';
-  const patchView = async (view: View, body: Parameters<typeof workApi.updateView>[1]) => {
-    try {
-      const saved = await workApi.updateView(view.id, body);
-      if (body.is_default) await loadViews();
-      else setViews((prev) => prev.map((v) => (v.id === saved.id ? saved : v)));
-    } catch (e) {
-      notify.error(e);
-    }
-  };
   // Drag a view tab onto another to put it there.
   const draggingView = useRef<string | null>(null);
   const dropView = async (target: View) => {
@@ -259,19 +231,11 @@ export const LocationPage: React.FC = () => {
     await Promise.all(order.map((vid, i) => workApi.updateView(vid, { orderindex: i + 1 }).catch(() => undefined)));
   };
 
-  const removeView = async (view: View) => {
-    if (!(await ask.confirm({ danger: true, title: `Delete the "${view.name}" view?` }))) return;
-    await workApi.deleteView(view.id);
-    setViews((prev) => prev.filter((v) => v.id !== view.id));
-    if (activeView?.id === view.id) setSearchParams({});
-  };
-
   const people = useMemo(() => members.map((m) => m.user), [members]);
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const searched = q ? tasks.filter((t) => t.name.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q)) : tasks;
-    return sortTasks(applyFilters(searched, settings.filters, me, meMode), settings.sort);
-  }, [tasks, search, settings.filters, settings.sort, me, meMode]);
+    const shown = showSubtasks ? tasks : tasks.filter((t) => !t.parent_id);
+    return sortTasks(applyFilters(shown, settings.filters, me, false), settings.sort);
+  }, [tasks, settings.filters, settings.sort, me, showSubtasks]);
   const makeGroups = useCallback(
     (roots: Task[]) => buildGroups(groupBy, roots, statuses, groups, people, taskTypes),
     [groupBy, statuses, groups, people, taskTypes],
@@ -304,9 +268,6 @@ export const LocationPage: React.FC = () => {
     (listId: string) => (locate('list', listId)?.path.slice(depth).map((c) => c.name).join(' / ') || listName(listId)),
     [locate, listName, depth],
   );
-  const visibleIds = useMemo(() => new Set(filtered.map((t) => t.id)), [filtered]);
-  const subtaskCount = filtered.filter((t) => t.parent_id && visibleIds.has(t.parent_id)).length;
-  const taskCount = filtered.length - subtaskCount;
 
   // What a new task gets from the group it's added in, e.g. "+ Add Task" under "High" sets High.
   const inputForGroup = (key: string): TaskInput => {
@@ -378,54 +339,40 @@ export const LocationPage: React.FC = () => {
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
       {/* Breadcrumb */}
-      <header className="border-b border-gray-200 px-6 pt-4">
-        <nav className="flex items-center gap-1.5 text-sm">
-          {located.path.map((crumb, i) => (
-            <React.Fragment key={crumb.id}>
-              {i > 0 && <ChevronRight size={14} className="text-gray-300" />}
-              <span className={`flex items-center gap-1.5 ${i === located.path.length - 1 ? 'text-lg font-semibold text-gray-900' : 'text-gray-500'}`}>
-                {crumb.kind === 'folder' && <Folder size={14} />}
-                {crumb.kind === 'list' && i === located.path.length - 1 && <ListIcon size={16} />}
-                {crumb.name}
-              </span>
-            </React.Fragment>
-          ))}
-          {located.node.is_private && <Lock size={14} className="ml-1 text-gray-400" />}
-          <FavoriteStar kind={kind} id={id} size={14} />
+      <header className="border-b border-gray-200 px-4 pt-4 sm:px-6">
+        {/* One line, whatever the names. Wrapping put Space, Folder and a long List name on a line
+            each on a phone; there the List's own name is enough, cut short with the full name on
+            hover, and the path above it comes back on a wider screen. */}
+        <nav className="flex min-w-0 items-center gap-1.5 text-sm">
+          {located.path.map((crumb, i) => {
+            const last = i === located.path.length - 1;
+            return (
+              <React.Fragment key={crumb.id}>
+                {i > 0 && <ChevronRight size={14} className="hidden shrink-0 text-gray-300 sm:block" />}
+                <span title={crumb.name} className={`min-w-0 items-center gap-1.5 ${last ? 'flex text-lg font-semibold text-gray-900' : 'hidden max-w-[12rem] text-gray-500 sm:flex'}`}>
+                  {crumb.kind === 'folder' && <Folder size={14} className="shrink-0" />}
+                  {crumb.kind === 'list' && last && <ListIcon size={16} className="shrink-0" />}
+                  <span className="truncate">{crumb.name}</span>
+                </span>
+              </React.Fragment>
+            );
+          })}
+          {located.node.is_private && <Lock size={14} className="ml-1 shrink-0 text-gray-400" />}
           {kind === 'list' && (() => {
             const lst = located.node as ListNode;
             return (lst.start_date || lst.due_date) ? (
-              <span className="ml-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600" title="List dates">
+              <span className="ml-1 hidden shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 sm:inline" title="List dates">
                 {lst.start_date ? formatDue(lst.start_date) : '…'} → {lst.due_date ? formatDue(lst.due_date) : '…'}
               </span>
             ) : null;
           })()}
-          {kind === 'list' && !isPersonal && (() => {
-            const node = located.node as ListNode;
-            const ids = node.assignee_ids ?? (node.assignee_id ? [node.assignee_id] : []);
-            const people = ids.map((uid) => members.find((m) => m.user.id === uid)?.user).filter((u): u is UserRef => !!u);
-            const canAssign = located.node.permission_level === 'full';
-            return (
-              <button
-                type="button"
-                disabled={!canAssign}
-                onClick={() => setAssigning(true)}
-                title={canAssign ? 'Assign this List to one or more people' : undefined}
-                className="ml-auto flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-default disabled:hover:bg-transparent"
-              >
-                {people.length === 0 ? <><UserPlus size={14} /> Assign</>
-                  : people.length === 1 ? <><Avatar user={people[0]} size={18} /> {people[0].display_name || people[0].email}</>
-                  : <><AvatarStack users={people} max={4} /> {people.length} people</>}
-              </button>
-            );
-          })()}
           {isPersonal ? (
-            <span className="ml-auto text-xs text-gray-400">Only you can see this List</span>
+            <span className="ml-auto hidden shrink-0 text-xs text-gray-400 sm:inline">Only you can see this List</span>
           ) : (
             <button
               type="button"
               onClick={() => setSharing(true)}
-              className={`${kind === 'list' ? '' : 'ml-auto '}flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50`}
+              className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"
             >
               <Share2 size={14} /> Share
             </button>
@@ -434,76 +381,42 @@ export const LocationPage: React.FC = () => {
 
         {/* Views bar */}
         <div className="mt-3 flex items-center gap-1">
-          {views.map((view) => {
-            const mine = view.created_by === me;
-            const canLock = mine || isWorkspaceAdmin;
-            const items = [
-              { label: 'Rename', icon: <Pencil size={14} />, onClick: async () => { const n = await ask.prompt('Rename view', view.name); if (n && n.trim() && n.trim() !== view.name) patchView(view, { name: n.trim() }); } },
-              { label: favorites.isFavorite('view', view.id) ? 'Remove from Favourites' : 'Add to Favourites', icon: <Star size={14} />, onClick: () => favorites.toggle('view', view.id) },
-              ...(!view.private && canEditHere ? [{ label: view.is_default ? 'Default view ✓' : 'Set as default view', icon: <Home size={14} />, onClick: () => patchView(view, { is_default: !view.is_default }) }] : []),
-              ...(!view.is_required && mine ? [{ label: view.private ? 'Share with everyone' : 'Make private (only you)', icon: <Lock size={14} />, onClick: () => patchView(view, { private: !view.private }) }] : []),
-              ...(canLock ? [{ label: view.protected ? 'Unprotect view' : 'Protect view', icon: <Shield size={14} />, onClick: () => patchView(view, { protected: !view.protected }) }] : []),
-              ...(!view.private && hierarchy?.role !== 'guest' ? [{ label: 'Share publicly…', icon: <Globe size={14} />, onClick: () => setPublicView(view) }] : []),
-              ...(!view.is_required ? [{ label: 'Delete view', icon: <X size={14} />, danger: true, onClick: () => removeView(view) }] : []),
-            ];
-            return (
-              <div
-                key={view.id}
-                draggable
-                onDragStart={() => { draggingView.current = view.id; }}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => dropView(view)}
-                className={`group flex items-center gap-1.5 border-b-2 px-2.5 pb-2 pt-1 text-sm ${activeView?.id === view.id ? 'border-brand-600 font-medium text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
-              >
-                <button type="button" onClick={() => selectView(view)} className="flex items-center gap-1.5">
-                  {VIEW_META[view.type].icon}
-                  {view.name}
-                  {view.private && <Lock size={11} className="text-gray-400" aria-label="Private view" />}
-                  {view.protected && <Shield size={11} className="text-gray-400" aria-label="Protected view" />}
-                </button>
-                <Menu label={`View options for ${view.name}`} align="left" items={items}
-                  trigger={<span className={`${activeView?.id === view.id ? 'inline' : 'hidden group-hover:inline'} rounded text-gray-400 hover:text-gray-700`}><MoreHorizontal size={13} /></span>} />
-              </div>
-            );
-          })}
-          <Menu
-            items={[
-              ...ADDABLE.map((type) => ({ label: VIEW_META[type].label, icon: VIEW_META[type].icon, onClick: () => addView(type) })),
-              { label: 'Private view (only you)…', icon: <Lock size={14} />, onClick: async () => { const t = await ask.prompt(`Which view? ${ADDABLE.join(', ')}`, ADDABLE[0]); if (t && (ADDABLE as string[]).includes(t)) addView(t as ViewType, true); } },
-            ]}
-            trigger={
-              <span className="ml-1 flex cursor-pointer items-center gap-1 rounded px-2 pb-2 pt-1 text-sm text-gray-500 hover:text-gray-800">
-                <Plus size={14} /> View
-              </span>
-            }
-          />
+          {/* One tab per kind of view: a second Calendar or Team tab made earlier is left out. The
+              tab menu (rename, favourite, default, share publicly) is gone; a tab is a tab. */}
+          {views.filter((view, i) => views.findIndex((v) => v.type === view.type && v.private === view.private) === i).map((view) => (
+            <div
+              key={view.id}
+              draggable
+              onDragStart={() => { draggingView.current = view.id; }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => dropView(view)}
+              className={`flex items-center gap-1.5 border-b-2 px-2.5 pb-2 pt-1 text-sm ${activeView?.id === view.id ? 'border-brand-600 font-medium text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+            >
+              <button type="button" onClick={() => selectView(view)} className="flex items-center gap-1.5">
+                {view.type !== 'list' && VIEW_META[view.type].icon}
+                {view.name}
+                {view.private && <Lock size={11} className="text-gray-400" aria-label="Private view" />}
+              </button>
+            </div>
+          ))}
+          {/* "+ View" is gone: a List is a List. Tabs made earlier still open. */}
         </div>
       </header>
 
       {/* Toolbar */}
       {activeView && !SELF_CONTAINED.includes(activeView.type) && (
         <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-6 py-2">
-          {/* Search first, because looking for one task by name is the commonest thing anyone
-              does here and it used to be the last control on the row. */}
-          <label className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50/70 px-2.5 py-1.5 transition-colors focus-within:border-brand-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-brand-100 hover:border-gray-300">
-            <Search size={14} className="shrink-0 text-gray-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search tasks"
-              aria-label="Search tasks"
-              className="w-32 bg-transparent text-sm placeholder:text-gray-400 focus:w-52 focus:outline-none"
-            />
-            {search && (
-              <button type="button" aria-label="Clear the search" onClick={() => setSearch('')} className="shrink-0 rounded-full p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700">
-                <X size={12} />
-              </button>
-            )}
-          </label>
-          <span className="whitespace-nowrap text-xs tabular-nums text-gray-400">
-            {taskCount} task{taskCount === 1 ? '' : 's'}
-            {subtaskCount > 0 && ` · ${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`}
-          </span>
+          {/* Left: how the list is laid out -- grouping, what is shown, which fields. ClickUp keeps
+              these on the bar rather than inside Filter, and so does this. */}
+          {/* A List is always grouped by status, so "Group by" is offered on a Board only. */}
+          {activeView.type === 'board' && (
+            <GroupByButton value={groupBy} onChange={(g) => update('groupBy', g)}
+              options={['status', 'assignee', 'priority', 'due', 'tags', 'group', 'type', 'none'] as GroupBy[]} />
+          )}
+          <ShowButton closed={settings.showClosed} onClosed={(on) => update('showClosed', on)} subtasks={showSubtasks} onSubtasks={setShowSubtasks} />
+          {(activeView.type === 'list' || activeView.type === 'table') && (
+            <FieldsButton hidden={settings.hidden} onChange={(h) => update('hidden', h)} fields={viewFields} />
+          )}
           {dirty && (
             <span className="ml-1 flex items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800" role="status">
               View changed
@@ -524,22 +437,11 @@ export const LocationPage: React.FC = () => {
               tasks={tasks}
               statuses={statuses}
               people={people}
-              view={{
-                ...(activeView.type === 'list' || activeView.type === 'board' ? {
-                  groupBy,
-                  groupOptions: ['status', 'assignee', 'priority', 'due', 'tags', 'group', 'type', 'none'] as GroupBy[],
-                  onGroupBy: (g: GroupBy) => update('groupBy', g),
-                } : {}),
-                hidden: settings.hidden,
-                onHidden: (h: string[]) => update('hidden', h),
-                showClosed: settings.showClosed,
-                onShowClosed: (on: boolean) => update('showClosed', on),
-              }}
             />
+            {/* The Assignees and "Me" buttons beside it are gone: Filter → Assignee does both. */}
             <Menu
-              label="More view options"
+              label="Export or import tasks"
               items={[
-                { label: `Task groups${groups.length ? ` (${groups.length})` : ''}`, icon: <Layers size={14} />, onClick: () => setManagingGroups(true) },
                 // Custom fields are set up per Space, in its own settings, rather than from
                 // every view that happens to show them.
                 ...(FEATURES.listCustomFields
@@ -552,7 +454,7 @@ export const LocationPage: React.FC = () => {
                 ] : []),
                 ...(canCreate ? [{ label: 'Import tasks', icon: <Upload size={14} />, onClick: () => setImporting(true) }] : []),
               ]}
-              trigger={<span className="flex rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><MoreHorizontal size={16} /></span>}
+              trigger={<span title="Export or import" className="flex rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><ArrowDownToLine size={16} /></span>}
             />
             {writableLists.length > 0 && (
               <button
@@ -579,7 +481,8 @@ export const LocationPage: React.FC = () => {
           <OverviewView
             kind={kind}
             node={located.node as SpaceNode | FolderNode}
-            canCreate={canShapeIt && located.node.permission_level === 'full'}
+            canCreate={located.node.permission_level === 'full'}
+            canAddFolder={canShapeIt && located.node.permission_level === 'full'}
             onAddList={() => setCreatingList(true)}
             onAddFolder={() => setCreatingFolder(true)}
           />
@@ -587,8 +490,12 @@ export const LocationPage: React.FC = () => {
           <div className="mx-auto mt-16 max-w-md text-center">
             <ListIcon size={32} className="mx-auto text-gray-300" />
             <h3 className="mt-3 text-base font-semibold text-gray-800">No Lists in this {kind === 'space' ? 'Space' : 'Folder'} yet</h3>
-            <p className="mt-1 text-sm text-gray-500">Tasks live inside Lists. Create a List to start adding tasks.</p>
-            {canShapeIt && located.node.permission_level === 'full' && (
+            <p className="mt-1 text-sm text-gray-500">
+              {located.node.permission_level === 'full'
+                ? 'Tasks live inside Lists. Create a List to start adding tasks.'
+                : 'Tasks live inside Lists. Ask an admin or your manager to add one here.'}
+            </p>
+            {located.node.permission_level === 'full' && (
               <button
                 type="button"
                 onClick={() => setCreatingList(true)}
@@ -709,7 +616,10 @@ export const LocationPage: React.FC = () => {
           lists={kind === 'list' ? [] : listChoices}
           listId={newTaskList}
           onClose={() => setNewTaskList(null)}
-          onCreate={async (listId, input) => { await createAndOpen(listId, input); setNewTaskList(null); }}
+          onCreate={async (listId, input) => {
+            await createAndOpen(listId, input);
+            setNewTaskList(null);
+          }}
           onTemplate={(listId) => { setNewTaskList(null); setTemplatesFor(listId); }}
         />
       )}
@@ -753,13 +663,6 @@ export const LocationPage: React.FC = () => {
         <GroupsDialog kind={kind} id={id} name={located.node.name} canEdit={located.node.permission_level === 'edit' || located.node.permission_level === 'full'}
           onClose={() => setManagingGroups(false)} onChanged={() => { workApi.groups(kind, id).then(setGroups).catch(() => undefined); loadTasks(); }} />
       )}
-      {assigning && kind === 'list' && (
-        <AssignListDialog
-          listId={id}
-          name={located.node.name}
-          current={(located.node as ListNode).assignee_ids ?? [(located.node as ListNode).assignee_id].filter((x): x is string => !!x)}
-          onClose={() => setAssigning(false)} onDone={() => { setAssigning(false); refreshTree(); }} />
-      )}
       {sharing && (
         <ShareDialog kind={kind} id={id} name={located.node.name} onClose={() => setSharing(false)} onChanged={refreshTree} />
       )}
@@ -802,6 +705,8 @@ const NewTaskDialog: React.FC<{
   const [description, setDescription] = useState('');
   const [statusId, setStatusId] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<Status[] | null>(null);
+  // Who can already open the List, so the picker can say who would need it shared first.
+  const [assignable, setAssignable] = useState<UserRef[] | null>(null);
   const [tags, setTags] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState('');
   const [knownTags, setKnownTags] = useState<string[]>([]);
@@ -811,7 +716,9 @@ const NewTaskDialog: React.FC<{
   const [fields, setFields] = useState<CustomField[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, unknown>>({});
   const [more, setMore] = useState(false);
-  const [again, setAgain] = useState(false);
+  // Set by the first try at saving: from then on each missing field says so under itself.
+  const [tried, setTried] = useState(false);
+  const nameBox = useRef<HTMLInputElement>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [touched, setTouched] = useState({ dates: false, estimate: false, priority: false });
   const [busy, setBusy] = useState(false);
@@ -847,6 +754,7 @@ const NewTaskDialog: React.FC<{
     workApi.statuses('list', target)
       .then((set) => { if (live) { setStatuses(set.statuses); setStatusId((prev) => prev ?? set.statuses[0]?.id ?? null); } })
       .catch(() => undefined);
+    workApi.assignable('list', target).then((a) => { if (live) setAssignable(a); }).catch(() => undefined);
     workApi.fields('list', target)
       .then((f) => { if (live) setFields(f); })
       .catch(() => undefined);
@@ -860,12 +768,25 @@ const NewTaskDialog: React.FC<{
   const uses = (name: keyof typeof apps, fallback = true) => apps[name] ?? fallback;
 
   const backwards = !!start && !!due && new Date(due) < new Date(start);
-  const ready = !!name.trim() && !!start && !!due && !backwards
-    && estimateSeconds !== null && estimateSeconds > 0 && assignees.length > 0;
+  const needsEstimate = uses('time_estimates');
+  // What is still missing, field by field. Shown under each one once saving has been tried.
+  const problems = {
+    name: name.trim() ? null : 'Give the task a name.',
+    status: statusId ? null : 'Pick a status.',
+    priority: !uses('priorities') || priority ? null : 'Pick a priority.',
+    assignees: assignees.length ? null : 'Choose an assignee.',
+    start: start ? null : 'Pick a start date.',
+    due: !due ? 'Pick an end date.' : backwards ? 'The end date is before the start date.' : null,
+    estimate: !needsEstimate || (estimateSeconds !== null && estimateSeconds > 0) ? null : 'Say how long it will take, e.g. 3, 2.30 or 45m.',
+  };
+  const ready = Object.values(problems).every((p) => p === null);
+  const problem = (key: keyof typeof problems) => (tried ? problems[key] : null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ready || busy) return;
+    if (busy) return;
+    setTried(true);
+    if (!ready) return;
     setBusy(true);
     setError(null);
     try {
@@ -881,16 +802,6 @@ const NewTaskDialog: React.FC<{
         ...(isPrivate ? { is_private: true } : {}),
         ...(Object.keys(fieldValues).length && uses('custom_fields') ? { custom_fields: fieldValues } : {}),
       });
-      if (again) {
-        // Keep the List, the dates, the people and the shape of the work; clear what is about
-        // this one task. Five near-identical tasks is the common case, not the exception.
-        setName('');
-        setDescription('');
-        setTags([]);
-        setFieldValues({});
-        setBusy(false);
-        return;
-      }
     } catch (err) {
       setError((err as Error).message);
       setBusy(false);
@@ -900,7 +811,12 @@ const NewTaskDialog: React.FC<{
   // One label style, one control height, one focus treatment. A create dialog that mixes three
   // of each reads as three dialogs stitched together, whatever the individual fields look like.
   const label = 'block text-[13px] font-medium text-gray-700';
-  const box = 'mt-1.5 flex h-9 items-center rounded-lg border border-gray-300 px-2 transition-colors hover:border-gray-400 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/15';
+  const ring = (bad: string | null) => (bad
+    ? 'border-red-400 hover:border-red-500 focus-within:border-red-500 focus-within:ring-red-500/15 focus:border-red-500 focus:ring-red-500/15'
+    : 'border-gray-300 hover:border-gray-400 focus-within:border-brand-500 focus-within:ring-brand-500/15 focus:border-brand-500 focus:ring-brand-500/15');
+  const box = (bad: string | null) => `mt-1.5 flex h-9 items-center rounded-lg border px-2 transition-colors focus-within:ring-2 ${ring(bad)}`;
+  const Req = () => <span className="ml-0.5 text-red-500" aria-hidden>*</span>;
+  const Err: React.FC<{ text: string | null }> = ({ text }) => (text ? <p role="alert" className="mt-1 text-xs text-red-600">{text}</p> : null);
   return (
     <Portal>
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 p-4" onMouseDown={onClose}>
@@ -919,20 +835,25 @@ const NewTaskDialog: React.FC<{
           {/* The body scrolls; the header and the buttons do not. On a laptop the old dialog ran
               off both ends of the screen, so "Create task" was below the fold. */}
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          <label className={label}>
-            Task name
-            <input
-              autoFocus value={name} onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Aditi Jain Monthly Review"
-              className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 px-3 text-sm transition-colors placeholder:text-gray-400 hover:border-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/15"
-            />
-          </label>
+          <div>
+            <label className={label}>
+              Task name<Req />
+              <input
+                ref={nameBox}
+                autoFocus value={name} onChange={(e) => setName(e.target.value)}
+                aria-required aria-invalid={!!problem('name')}
+                placeholder="e.g. Aditi Jain Monthly Review"
+                className={`mt-1.5 h-10 w-full rounded-lg border px-3 text-sm transition-colors placeholder:text-gray-400 focus:outline-none focus:ring-2 ${ring(problem('name'))}`}
+              />
+            </label>
+            <Err text={problem('name')} />
+          </div>
 
           {/* From here the fields run in the order the task panel shows them, so what someone
               fills in now is where they will look for it afterwards. */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <span className={label}>Status</span>
+              <span className={label}>Status<Req /></span>
               <div className="mt-1.5">
                 <Select
                   label="Status"
@@ -951,9 +872,10 @@ const NewTaskDialog: React.FC<{
                   }))}
                 />
               </div>
+              <Err text={problem('status')} />
             </div>
             <div hidden={!uses('priorities')}>
-              <span className={label}>Priority</span>
+              <span className={label}>Priority<Req /></span>
               <div className="mt-1.5">
                 <Select
                   label="Priority"
@@ -972,44 +894,55 @@ const NewTaskDialog: React.FC<{
                   }))}
                 />
               </div>
+              <Err text={problem('priority')} />
             </div>
           </div>
 
           <div>
-            <span className={label}>Who is doing it</span>
-            <div className="mt-1.5 min-h-9 rounded-lg border border-gray-300 py-1 transition-colors hover:border-gray-400 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/15">
+            <span className={label}>Assignee<Req /></span>
+            <div className={`mt-1.5 min-h-9 rounded-lg border py-1 transition-colors focus-within:ring-2 ${ring(problem('assignees'))}`}>
               <AssigneePicker
                 listId={target}
                 assignees={people.filter((m) => assignees.includes(m.user.id)).map((m) => m.user)}
-                assignable={null}
+                assignable={assignable}
                 editable
                 canShare
                 multiple
                 onChange={setAssignees}
-                onShared={() => undefined}
+                onShared={() => workApi.assignable('list', target).then(setAssignable).catch(() => undefined)}
               />
+            </div>
+            <Err text={problem('assignees')} />
+          </div>
+
+          {/* Start and end each under their own name, so nobody has to guess which half of a
+              range they are setting. */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <span className={label}>Start date<Req /></span>
+              <div className={box(problem('start'))}>
+                <DateField
+                  label="Start date" placeholder="Pick a start date" value={start} className="w-full"
+                  onChange={(iso) => { setStart(iso); setTouched((t) => ({ ...t, dates: true })); }}
+                />
+              </div>
+              <Err text={problem('start')} />
+            </div>
+            <div>
+              <span className={label}>End date<Req /></span>
+              <div className={box(problem('due'))}>
+                <DateField
+                  label="End date" placeholder="Pick an end date" value={due} overdue={backwards} className="w-full"
+                  onChange={(iso) => { setDue(iso); setTouched((t) => ({ ...t, dates: true })); }}
+                />
+              </div>
+              <Err text={problem('due') ?? (backwards ? 'The end date is before the start date.' : null)} />
             </div>
           </div>
 
-          {/* Start and due as one field, the way the task panel puts them -- and the way the
-              repeat rule is reached, from "Set Recurring" inside either picker. */}
-          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-4">
-            <div>
-              <span className={label}>Dates</span>
-              <div className={box}>
-                <DateRange
-                  start={start} due={due} overdue={backwards}
-                  onChange={(patch) => {
-                    if ('start_date' in patch) setStart(patch.start_date ?? null);
-                    if ('due_date' in patch) setDue(patch.due_date ?? null);
-                  }}
-                  recurrence={repeat} statuses={statuses}
-                  onRecurrence={async (value) => { setRepeat(value); }}
-                />
-              </div>
-            </div>
+          <div className="grid grid-cols-2 gap-4">
             <div hidden={!uses('time_estimates')}>
-              <span className={label}>Time estimate</span>
+              <span className={label}>Time estimate<Req /></span>
               {/* The same input as the task panel, so "3" offers 3h and 3m here too rather than
                   silently picking one of them. */}
               <div className="mt-1.5">
@@ -1018,24 +951,25 @@ const NewTaskDialog: React.FC<{
                   value={estimateSeconds}
                   placeholder="3, 2.30, 45m"
                   onChange={(seconds) => { setEstimateSeconds(seconds); setTouched((t) => ({ ...t, estimate: true })); setHint(null); }}
-                  className="h-9 w-full rounded-lg border border-gray-300 px-3 text-sm transition-colors placeholder:text-gray-400 hover:border-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/15"
+                  className={`h-9 w-full rounded-lg border px-3 text-sm transition-colors placeholder:text-gray-400 focus:outline-none focus:ring-2 ${ring(problem('estimate'))}`}
                 />
+              </div>
+              <Err text={problem('estimate')} />
+              {hint && !problem('estimate') && <p className="mt-1 text-xs text-gray-500">{hint}</p>}
+            </div>
+            {/* A field of its own rather than a row hidden at the foot of the date picker, where
+                it opened a panel taller than the space left below the dialog. */}
+            <div>
+              <span className={label}>Recurring <span className="font-normal text-gray-400">optional</span></span>
+              <div className="mt-1.5 flex h-9 items-center rounded-lg border border-gray-300 px-1 transition-colors hover:border-gray-400">
+                <RecurrenceEditor value={repeat} dueDate={due ?? start} statuses={statuses} disabled={false} onSave={async (value) => { setRepeat(value); }} />
+                {repeat && (
+                  <button type="button" aria-label="Stop recurring" title="Stop recurring" onClick={() => setRepeat(null)}
+                    className="shrink-0 rounded px-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600">&times;</button>
+                )}
               </div>
             </div>
           </div>
-          {hint && <p className="-mt-2 text-xs text-gray-500">{hint}</p>}
-          {backwards && <p className="-mt-2 text-xs text-red-600">The due date is before the start date.</p>}
-
-          {/* Repeat had its own row here as well as inside the date picker. Same flag as the
-              task panel, so the two say the same thing. */}
-          {FEATURES.taskRepeatField && (
-            <div>
-              <span className={label}>Repeat</span>
-              <div className="mt-1.5">
-                <RecurrenceEditor value={repeat} dueDate={due} statuses={statuses} disabled={false} onSave={async (value) => { setRepeat(value); }} />
-              </div>
-            </div>
-          )}
 
           <div hidden={!FEATURES.taskTagsField || !uses('tags')}>
             <span className={label}>Tags <span className="font-normal text-gray-400">optional</span></span>
@@ -1047,6 +981,7 @@ const NewTaskDialog: React.FC<{
                 </span>
               ))}
               <input
+                aria-label="Add a tag"
                 value={tagDraft}
                 onChange={(e) => setTagDraft(e.target.value)}
                 onKeyDown={(e) => {
@@ -1171,15 +1106,10 @@ const NewTaskDialog: React.FC<{
 
           <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-gray-100 bg-gray-50/70 px-5 py-3">
             {FEATURES.templates && <button type="button" onClick={() => onTemplate(target)} className="mr-auto rounded-md px-2 py-1.5 text-sm text-brand-600 hover:bg-brand-50">Use a template</button>}
-            {/* Keeps the List, dates, people and priority; clears the name, description, tags
-                and fields. Five near-identical tasks is the common case here. */}
-            <label className={`${FEATURES.templates ? '' : 'mr-auto '}flex items-center gap-1.5 text-xs text-gray-600`}>
-              <input type="checkbox" checked={again} onChange={(e) => setAgain(e.target.checked)} />
-              Create another
-            </label>
+            <span className={`${FEATURES.templates ? '' : 'mr-auto '}text-[11px] text-gray-400`}><span className="text-red-500">*</span> required</span>
             <button type="button" onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-200/70">Cancel</button>
-            <button type="submit" disabled={!ready || busy} className="btn-accent rounded-lg px-4 py-1.5 text-sm font-semibold shadow-sm transition-opacity disabled:opacity-50">
-              {busy ? 'Creating…' : 'Create task'}
+            <button type="submit" disabled={busy} className="btn-accent rounded-lg px-4 py-1.5 text-sm font-semibold shadow-sm transition-opacity disabled:opacity-50">
+              {busy ? 'Saving…' : 'Create task'}
             </button>
           </footer>
         </form>

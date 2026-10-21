@@ -31,7 +31,7 @@ export const AssignListDialog: React.FC<{ listId: string; name: string; current:
         <div role="dialog" aria-label="Assign List" onMouseDown={(e) => e.stopPropagation()} className="w-[28rem] max-w-[calc(100vw-2rem)] rounded-xl bg-white shadow-xl">
           <header className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
             <h3 className="truncate font-semibold text-gray-900">Assign “{name}”</h3>
-            <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
           </header>
           <div className="px-5 py-4">
             <p className="mb-3 text-xs text-gray-500">

@@ -33,6 +33,13 @@ export function parseTypedDate(input: string, now: Date = new Date()): Date | nu
     if (m[2].startsWith('w')) return addDays(today, 7 * n);
     const x = new Date(today); x.setMonth(x.getMonth() + n); return x;
   }
+  if (text === 'day after tomorrow') return addDays(today, 2);
+  // "this weekend" means the coming Saturday, and on a Saturday or Sunday it means today -- said
+  // on a Friday afternoon it is tomorrow, which is the answer somebody planning work expects.
+  if (text === 'weekend' || text === 'this weekend' || text === 'the weekend') {
+    return today.getDay() === 6 || today.getDay() === 0 ? today : addDays(today, 6 - today.getDay());
+  }
+  if (text === 'next weekend') return addDays(today, 6 - today.getDay() + (today.getDay() === 6 ? 7 : 7));
   if (text === 'next week') return addDays(today, 7 - ((today.getDay() + 6) % 7)); // next Monday
   if (text === 'end of week' || text === 'eow') return addDays(today, (5 - today.getDay() + 7) % 7); // Friday
   if (text === 'next month') return new Date(today.getFullYear(), today.getMonth() + 1, 1);

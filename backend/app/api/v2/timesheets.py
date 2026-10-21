@@ -104,7 +104,14 @@ def update_settings(workspace_id: uuid.UUID, data: t.SettingsIn, user: User = De
 
 @router.get("/workspaces/{workspace_id}/members/{user_id}/capacity", response_model=t.CapacityOut)
 def get_capacity(workspace_id: uuid.UUID, user_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    _access(db, user, workspace_id)
+    access = _access(db, user, workspace_id)
+    # Working hours follow the time rule: your own, your Team's as a lead, everyone's as an admin.
+    from app.services.work.errors import NotFound
+    from app.services.work.timetracking import time_visible_people
+
+    visible = time_visible_people(db, access)
+    if visible is not None and user_id not in visible:
+        raise NotFound("Person not found")
     seconds, custom = timesheets.capacity_of(db, workspace_id, user_id)
     return t.CapacityOut(capacity_seconds=seconds, is_custom=custom)
 

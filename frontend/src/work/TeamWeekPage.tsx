@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, CalendarRange, CheckCircle2, Clock, Plane, Users } from 'lucide-react';
+import { AlertTriangle, CalendarRange, CheckCircle2, Clock, Users } from 'lucide-react';
 import { useWork } from './WorkContext';
 import { Avatar } from './ui';
 import { outboundApi, type TeamDigest } from './outboundApi';
@@ -8,7 +8,7 @@ import { outboundApi, type TeamDigest } from './outboundApi';
 const h = (s: number) => `${Math.round((s / 3600) * 10) / 10}h`;
 const day = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 
-/** The manager's weekly digest, in the app: last week for each direct report and team member, and who is away soon. */
+/** The manager's weekly digest, in the app: last week for each direct report and team member. */
 export const TeamWeekPage: React.FC = () => {
   const { workspace } = useWork();
   const [digest, setDigest] = useState<TeamDigest | null>(null);
@@ -18,7 +18,7 @@ export const TeamWeekPage: React.FC = () => {
     <div className="flex h-full min-h-0 flex-col bg-white">
       <header className="border-b border-gray-200 px-6 py-4">
         <h1 className="flex items-center gap-2 text-lg font-semibold text-gray-900"><Users size={18} className="text-brand-600" /> My team's week</h1>
-        {digest && <p className="text-xs text-gray-500">Last week ({day(digest.week_start)} – {day(digest.week_end)}) for your direct reports and the Teams you lead, plus leave in the next two weeks. Also emailed on Mondays.</p>}
+        {digest && <p className="text-xs text-gray-500">Last week ({day(digest.week_start)} – {day(digest.week_end)}) for your direct reports and the Teams you lead.</p>}
       </header>
       <main className="min-h-0 flex-1 overflow-auto bg-gray-50/60 p-6">
         {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -47,17 +47,12 @@ export const TeamWeekPage: React.FC = () => {
                       ))}
                     </ul>
                   )}
-                  {p.leave.length > 0 && (
-                    <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-amber-800"><Plane size={12} />
-                      {p.leave.map((l, i) => <span key={i}>{l.type} {day(l.start_date)}{l.end_date !== l.start_date ? `–${day(l.end_date)}` : ''}{l.status === 'pending' ? ' (requested)' : ''}</span>)}
-                    </p>
-                  )}
                 </li>
               );
             })}
           </ul>
         )}
-        <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-gray-400"><CalendarRange size={12} /> Hours logged are compared with working hours, less holidays and approved leave.</p>
+        <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-gray-400"><CalendarRange size={12} /> Hours logged are compared with working hours, less company holidays.</p>
       </main>
     </div>
   );

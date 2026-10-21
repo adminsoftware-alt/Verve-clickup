@@ -48,33 +48,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        // Domain is valid, check/create user profile in Firestore
-        try {
-          const userRef = doc(db, 'users', u.uid);
-          const userSnap = await getDoc(userRef);
-          
-          if (!userSnap.exists()) {
-            const defaultRole = 'Employee';
-            const newUser = {
-              displayName: u.displayName || u.email?.split('@')[0] || 'User',
-              email: u.email,
-              role: defaultRole,
-              createdAt: serverTimestamp(),
-              lastLogin: serverTimestamp()
-            };
-            await setDoc(userRef, newUser);
-            setRole(defaultRole);
-          } else {
-            // Update last login
-            const userData = userSnap.data();
-            setRole(userData?.role || 'Employee');
-            await setDoc(userRef, { lastLogin: serverTimestamp() }, { merge: true });
+        // The Firestore profile is read and written without being waited for.
+        //
+        // This used to be awaited before setUser, which put two round-trips to Google's Firestore
+        // in front of the first pixel of every single page load. Measured on the production build,
+        // first contentful paint was 17.7 seconds, because Firestore is unreachable from here and
+        // the SDK waits out its own ten-second timeout before giving up. Even reachable it is a
+        // network hop to another continent before anything is drawn.
+        //
+        // And it was buying nothing. The role it fetches is the v1 role, read through hasRole(),
+        // whose only live caller adds an empty list of nav items; every other caller is behind a
+        // feature flag that is off, and RoleGuard is used nowhere. The role that decides what
+        // people can actually see comes from Postgres, through WorkContext.
+        //
+        // So the profile still gets created and lastLogin still gets stamped -- just not with the
+        // application held up behind it.
+        void (async () => {
+          try {
+            const userRef = doc(db, 'users', u.uid);
+            const userSnap = await getDoc(userRef);
+
+            if (!userSnap.exists()) {
+              const defaultRole = 'Employee';
+              await setDoc(userRef, {
+                displayName: u.displayName || u.email?.split('@')[0] || 'User',
+                email: u.email,
+                role: defaultRole,
+                createdAt: serverTimestamp(),
+                lastLogin: serverTimestamp(),
+              });
+              setRole(defaultRole);
+            } else {
+              setRole(userSnap.data()?.role || 'Employee');
+              await setDoc(userRef, { lastLogin: serverTimestamp() }, { merge: true });
+            }
+          } catch (error) {
+            // Offline, blocked by a firewall, or the project is gone: none of it should stop
+            // somebody using the app, because nothing reachable depends on the answer.
+            console.warn('Could not sync the v1 user profile; carrying on.', error);
           }
-        } catch (error) {
-          console.error("Error creating/updating user profile:", error);
-        }
+        })();
       }
-      
+
       setUser(u);
       setLoading(false);
     });

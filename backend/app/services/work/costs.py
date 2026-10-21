@@ -169,7 +169,7 @@ def suggestions() -> List[c.CostSuggestion]:
         c.CostSuggestion(name="File storage", category="storage", scales="per_gb",
                          why="Attachments on tasks. Priced per gigabyte, so enter the rate per GB."),
         c.CostSuggestion(name="Email sending", category="email",
-                         why="Invitations, reminders, digests and scheduled reports."),
+                         why="Invitations, and the occasional reminder. The scheduled digests were turned off, so this is a small line."),
         c.CostSuggestion(name="Firebase authentication", category="authentication",
                          why="Sign-in. Free below a generous monthly limit — record it as zero if you are under it."),
         c.CostSuggestion(name="Domain name", category="domain",

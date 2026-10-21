@@ -129,6 +129,7 @@ export const BoardView: React.FC<{
                 <form onSubmit={(e) => create(e, column.key)} className="rounded-lg border border-brand-300 bg-white p-2">
                   <input
                     autoFocus
+                    aria-label="New task name"
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onBlur={() => !draft && setAdding(null)}

@@ -130,7 +130,7 @@ export const ListEmailDialog: React.FC<{ listId: string; name: string; onClose: 
           <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5">
             <Mail size={14} className="text-gray-400" />
             <code className="min-w-0 flex-1 truncate text-sm" aria-label="List email address">{info.address}</code>
-            <button type="button" title="Copy" onClick={() => { navigator.clipboard?.writeText(info.address!).catch(() => undefined); setCopied(true); }}
+            <button aria-label="Copy" type="button" title="Copy" onClick={() => { navigator.clipboard?.writeText(info.address!).catch(() => undefined); setCopied(true); }}
               className="rounded p-1 text-gray-500 hover:bg-gray-200"><Copy size={13} /></button>
           </div>
           {copied && <p className="mt-1 text-xs text-emerald-700">Copied</p>}

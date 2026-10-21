@@ -20,9 +20,8 @@ from app.db.models.hierarchy import Folder, ListAssignee, Space, TaskList
 from app.db.models.notify import (
     AutomationRun, ClientCompliance, ComplianceObligation, ComplianceTask, EmailLog, PushSubscription,
 )
-from app.db.models.leave import (
-    BillingRate, ClientFee, Holiday, ImportedRecord, LeaveAdjustment, LeavePolicy, LeaveRequest, LeaveType,
-)
+from app.db.models.importing import ImportedRecord
+from app.db.models.working_time import Holiday
 from app.db.models.planning import Automation, CalendarFeed, LineupItem, TimeBlock
 from app.db.models.share import Share
 from app.db.models.spaces_extra import (
@@ -74,14 +73,8 @@ __all__ = [
     "ComplianceTask",
     "EmailLog",
     "PushSubscription",
-    "BillingRate",
-    "ClientFee",
     "Holiday",
     "ImportedRecord",
-    "LeaveAdjustment",
-    "LeavePolicy",
-    "LeaveRequest",
-    "LeaveType",
     "AuditEvent",
     "PersonTask",
     "Automation",

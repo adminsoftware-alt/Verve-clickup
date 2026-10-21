@@ -46,7 +46,7 @@ from app.schemas import work as s
 from app.services.work.access import Access, Opened, chain_for_folder, chain_for_list, chain_for_space
 from app.services.work.errors import Invalid
 from app.services.work.permissions import Node
-from app.services.work.tasks import TaskFilter, serialise_tasks, visible_lists, visible_tasks
+from app.services.work.tasks import TaskFilter, serialise_tasks, visible_lists, visible_lists_in_spaces, visible_tasks
 from app.services.work.timetracking import time_visible_people, tracked_totals
 
 OPEN = (StatusGroup.not_started, StatusGroup.active)
@@ -102,15 +102,34 @@ class Engine:
         tz: ZoneInfo,
         dashboard_filters: Optional[d.Filters] = None,
         now: Optional[datetime] = None,
+        scope: Optional[List[str]] = None,
+        me: Optional[str] = None,
     ):
         self.db = db
         self.access = access
         self.tz = tz
         self.dashboard_filters = dashboard_filters or d.Filters()
+        # Whose work the Dashboard is about -- its owner on a personal board, its Team on a Team
+        # one. Not a filter: it is never shown as one and can't be cleared, so the filter bar
+        # starts empty and only holds what somebody chose. See scope_of().
+        self.scope = d.Filters(assignees=scope) if scope else d.Filters()
+        # Who "me" is in the board's and its cards' filters. The viewer, except on someone's own
+        # "My work": there "me" was only ever written by its owner, about its owner (older boards
+        # still carry `assignees: ["me"]` on cards), so read by anyone else it must still mean
+        # the owner -- or an admin opening Atharv's board counts the admin's tasks and sees 0.
+        # See standard.me_of().
+        self.me = me or access.user_id
         self.now = now or datetime.now(timezone.utc)
         self.today = self.now.astimezone(tz).date()
+        # Everything below is remembered for the life of one request, so a board of twelve cards
+        # asks each question once rather than once per card (or per person, or per Space).
         self._loaded: Dict[Tuple, Loaded] = {}
+        self._lists: Dict[Tuple, Tuple[List[Tuple[TaskList, List[Node]]], int]] = {}
         self._users: Dict[str, User] = {}
+        self._users_loaded = False
+        self._weekly: Dict[str, Any] = {}
+        self._holidays: Optional[Tuple[date, date, Dict[date, str]]] = None
+        self._serialised: Dict[uuid.UUID, Any] = {}
         self._team_people: Dict[uuid.UUID, Set[str]] = {}
         self._time_people: Optional[Set[str]] = None
         self._time_people_loaded = False
@@ -180,6 +199,17 @@ class Engine:
     # --- people ----------------------------------------------------------------
 
     def user(self, user_id: str) -> Optional[User]:
+        if user_id not in self._users and not self._users_loaded:
+            # The first person asked for brings everyone in the workspace with them: a company
+            # board names every person, and one query for all of them beats one each.
+            from app.db.models import WorkspaceMember
+
+            self._users_loaded = True
+            for user in self.db.scalars(
+                select(User).join(WorkspaceMember, WorkspaceMember.user_id == User.id)
+                .where(WorkspaceMember.workspace_id == self.access.workspace_id)
+            ):
+                self._users[user.id] = user
         if user_id not in self._users:
             user = self.db.get(User, user_id)
             if user is None:
@@ -195,7 +225,7 @@ class Engine:
             if token == "none":
                 none = True
             elif token == "me":
-                people.add(self.access.user_id)
+                people.add(self.me)
             elif token.startswith("team:"):
                 team_id = uuid.UUID(token[5:])
                 if team_id not in self._team_people:
@@ -220,6 +250,45 @@ class Engine:
             self._time_people = time_visible_people(self.db, self.access)
             self._time_people_loaded = True
         return self._time_people
+
+    def weekly_hours(self, user_ids: Iterable[str]) -> Dict[str, Any]:
+        """working_time.weekly_hours, remembered: on first use, for everyone in the workspace."""
+        from app.services.work.working_time import weekly_hours
+
+        wanted = set(user_ids)
+        missing = wanted - set(self._weekly)
+        if missing:
+            if not self._weekly:
+                from app.db.models import WorkspaceMember
+
+                missing |= set(self.db.scalars(
+                    select(WorkspaceMember.user_id).where(WorkspaceMember.workspace_id == self.access.workspace_id)
+                ))
+            self._weekly.update(weekly_hours(self.db, self.access.workspace_id, sorted(missing)))
+        return {uid: self._weekly[uid] for uid in wanted if uid in self._weekly}
+
+    def working_weekdays(self, user_ids: Iterable[str]) -> Dict[str, Set[int]]:
+        return {uid: {i for i, sec in enumerate(hours[0]) if sec} for uid, hours in self.weekly_hours(user_ids).items()}
+
+    def holiday_days(self, first: date, last: date) -> Dict[date, str]:
+        from app.services.work.working_time import holiday_days
+
+        held = self._holidays
+        if held is None or first < held[0] or last > held[1]:
+            # A generous window the first time, so the next card's period is already inside it.
+            lo = min([first, self.today - timedelta(days=120)] + ([held[0]] if held else []))
+            hi = max([last, self.today + timedelta(days=120)] + ([held[1]] if held else []))
+            held = self._holidays = (lo, hi, holiday_days(self.db, self.access.workspace_id, lo, hi))
+        return {day: name for day, name in held[2].items() if first <= day <= last}
+
+    def daily_capacity(self, user_ids: Iterable[str], days: Sequence[date]) -> Dict[str, List[int]]:
+        """working_time.daily_capacity, from the remembered hours and holidays."""
+        ids = list(dict.fromkeys(user_ids))
+        if not ids or not days:
+            return {uid: [0] * len(days) for uid in ids}
+        weekly = self.weekly_hours(ids)
+        off = self.holiday_days(min(days), max(days))
+        return {uid: [0 if day in off else weekly[uid][0][day.weekday()] for day in days] for uid in ids if uid in weekly}
 
     # --- sources and tasks -------------------------------------------------------
 
@@ -262,21 +331,40 @@ class Engine:
                 found.append((item, level))
         return found, hidden
 
+    def _visible(self, sources: Sequence[d.Source]) -> Tuple[List[Tuple[TaskList, List[Node]]], int]:
+        key = tuple(sorted((src.kind.value, str(src.id)) for src in sources))
+        if key not in self._lists:
+            objects, hidden = self._source_objects(sources)
+            spaces = [obj for obj, _ in objects if isinstance(obj, Space)]
+            found = visible_lists_in_spaces(self.db, self.access, spaces) if spaces else []
+            for obj, level in objects:
+                if not isinstance(obj, Space):
+                    found.extend(visible_lists(self.db, Opened(obj, self.access, level)))
+            lists: List[Tuple[TaskList, List[Node]]] = []
+            seen: Set[uuid.UUID] = set()
+            for lst, chain in found:
+                if lst.id not in seen:
+                    seen.add(lst.id)
+                    lists.append((lst, chain))
+            self._lists[key] = (lists, hidden)
+        return self._lists[key]
+
     def load(self, config: d.CardConfig) -> Loaded:
         key = (tuple(sorted((src.kind.value, str(src.id)) for src in config.sources)), config.include_subtasks)
         if key in self._loaded:
             return self._loaded[key]
-        objects, hidden = self._source_objects(config.sources)
-        lists: List[Tuple[TaskList, List[Node]]] = []
-        seen: Set[uuid.UUID] = set()
-        for obj, level in objects:
-            for lst, chain in visible_lists(self.db, Opened(obj, self.access, level)):
-                if lst.id not in seen:
-                    seen.add(lst.id)
-                    lists.append((lst, chain))
+        if not config.include_subtasks:
+            # The same tasks less the subtasks: worked out from the full load rather than asked
+            # for again, so a board mixing the two settings reads its tasks once.
+            full = self.load(config.model_copy(update={"include_subtasks": True}))
+            loaded = Loaded(lists=full.lists, hidden=full.hidden, field_values=full.field_values,
+                            facts=[f for f in full.facts if f.task.parent_id is None])
+            self._loaded[key] = loaded
+            return loaded
+        lists, hidden = self._visible(config.sources)
         loaded = Loaded(lists=lists, hidden=hidden)
         tasks, levels, _ = visible_tasks(
-            self.db, self.access, lists, TaskFilter(include_closed=True, include_subtasks=config.include_subtasks)
+            self.db, self.access, lists, TaskFilter(include_closed=True, include_subtasks=True)
         )
         if tasks:
             ids = [t.id for t in tasks]
@@ -367,7 +455,8 @@ class Engine:
         for f in loaded.facts:
             if not wants_closed and f.group == StatusGroup.closed:
                 continue
-            if self._matches(f, flt, card.period) and self._matches(f, self.dashboard_filters, card.period):
+            if (self._matches(f, flt, card.period) and self._matches(f, self.dashboard_filters, card.period)
+                    and self._matches(f, self.scope, card.period)):
                 result.append(f)
         return result
 
@@ -642,11 +731,37 @@ class Engine:
             return sorted(facts, key=lambda f: f.task.name.lower())
         return sorted(facts, key=lambda f: (f.task.due_date or far, f.task.name.lower()))
 
-    def _card_task_list(self, config: d.CardConfig, loaded: Loaded) -> Dict[str, Any]:
+    def _task_list_shown(self, config: d.CardConfig, loaded: Loaded) -> Tuple[List[Facts], int]:
         matched = self._sorted(self.matching(config, loaded), config.sort)
-        shown = matched[: config.limit]
-        tasks = serialise_tasks(self.db, [f.task for f in shown], {f.task.id: f.level for f in shown})
-        return {"tasks": [t.model_dump(mode="json") for t in tasks], "total": len(matched)}
+        return matched[: config.limit], len(matched)
+
+    def _serialise(self, shown: Sequence[Facts]) -> List[Any]:
+        """serialise_tasks, remembered per task, so cards listing overlapping tasks share the work."""
+        missing = [f for f in shown if f.task.id not in self._serialised]
+        if missing:
+            for out in serialise_tasks(self.db, [f.task for f in missing], {f.task.id: f.level for f in missing}):
+                self._serialised[out.id] = out.model_dump(mode="json")
+        return [self._serialised[f.task.id] for f in shown]
+
+    def compute_all(self, cards: Sequence[DashboardCard]) -> List[d.CardData]:
+        """Every card of a board. The task-list cards' tasks are read together first, so three
+        lists (overdue, today, the next seven days) cost one set of queries, not three."""
+        wanted: Dict[uuid.UUID, Facts] = {}
+        for card in cards:
+            if card.type != "task_list":
+                continue
+            try:
+                config = d.CardConfig.model_validate(card.config)
+                for f in self._task_list_shown(config, self.load(config))[0]:
+                    wanted.setdefault(f.task.id, f)
+            except Invalid:
+                continue  # compute() below reports it on the card
+        self._serialise(list(wanted.values()))
+        return [self.compute(card) for card in cards]
+
+    def _card_task_list(self, config: d.CardConfig, loaded: Loaded) -> Dict[str, Any]:
+        shown, total = self._task_list_shown(config, loaded)
+        return {"tasks": self._serialise(shown), "total": total}
 
     def _card_portfolio(self, config: d.CardConfig, loaded: Loaded) -> Dict[str, Any]:
         matched = self.matching(config, loaded, force_closed=True)
@@ -781,7 +896,6 @@ class Engine:
         Planned effort is an estimate spread over the task's own start..due days, the way the
         Workload view spreads it, and only the part that lands inside the period counts.
         """
-        from app.services.work.leave import daily_capacity
         from app.services.work.workload import spread
 
         entries, first, last = self._entries(config, loaded)
@@ -794,6 +908,7 @@ class Engine:
         planned = 0
         scheduled = 0
         people: Set[str] = {entry.user_id for entry, _ in entries}
+        weekdays = self.working_weekdays({uid for f in matched for uid in f.assignees})
         for f in matched:
             people.update(f.assignees)
             estimate = f.task.time_estimate_seconds or 0
@@ -802,7 +917,9 @@ class Engine:
                 continue  # unscheduled work, or work nobody sized: it can't be planned into days
             end = self._local_day(due)
             start = self._local_day(f.task.start_date) if f.task.start_date else end
-            share = sum(seconds for day, seconds in spread(estimate, start, end).items() if day in window)
+            # The assignees' working days together; nobody assigned falls back to Monday to Friday.
+            days_on = set().union(*(weekdays.get(uid, set()) for uid in f.assignees)) or None
+            share = sum(seconds for day, seconds in spread(estimate, start, end, days_on).items() if day in window)
             if share:
                 planned += share
                 scheduled += 1
@@ -810,7 +927,7 @@ class Engine:
         seen = self.time_people()
         if seen is not None:
             people &= seen  # someone who may not see another's time doesn't get their capacity either
-        per_person = daily_capacity(self.db, self.access.workspace_id, sorted(people), days)
+        per_person = self.daily_capacity(sorted(people), days)
         fallback = sum(CAPACITY_SECONDS for day in days if day.weekday() < 5)
         capacity = sum(sum(v) for v in per_person.values()) if per_person else (fallback if people else 0)
         logged = sum(entry.duration_seconds or 0 for entry, _ in entries)
@@ -832,6 +949,9 @@ class Engine:
             "people": len(people),
             "tasks": len(matched),
             "scheduled_tasks": scheduled,
+            # What keeps work out of "planned": no due date to place it on, or no estimate to size it.
+            "no_due_date_tasks": sum(1 for f in matched if f.task.due_date is None),
+            "no_estimate_tasks": sum(1 for f in matched if not f.task.time_estimate_seconds),
             "period": {"start": first.isoformat(), "end": last.isoformat()},
             "sees_everyone": seen is None,
         }
@@ -844,7 +964,6 @@ class Engine:
         the person reading it -- a manager looking at someone else's Dashboard sees their own
         LineUp, because you cannot plan another person's day for them.
         """
-        from app.services.work.leave import daily_capacity
         from app.db.models import LineupItem
 
         today = self.today
@@ -883,7 +1002,7 @@ class Engine:
             body["overdue"] = f.task.due_date is not None and f.task.due_date < now
             tasks.append(body)
 
-        per_person = daily_capacity(self.db, self.access.workspace_id, [self.access.user_id], [today])
+        per_person = self.daily_capacity([self.access.user_id], [today])
         capacity = sum(per_person.get(self.access.user_id) or []) or (
             CAPACITY_SECONDS if today.weekday() < 5 else 0
         )
@@ -989,7 +1108,7 @@ class Engine:
         lo, hi = self._at(first), self._at(last + timedelta(days=1))
         facts = {f.task.id: f for f in self.matching(config, loaded, force_closed=True)}
         wanted: Optional[Set[str]] = None
-        for tokens in (config.filters.assignees, self.dashboard_filters.assignees):
+        for tokens in (config.filters.assignees, self.dashboard_filters.assignees, self.scope.assignees):
             if tokens is not None:
                 people, _ = self._people(tokens)
                 wanted = people if wanted is None else wanted & people
@@ -1092,7 +1211,7 @@ class Engine:
         allowed = self.time_people()
         if allowed is not None:
             query = query.where(TimeEntry.user_id.in_(allowed))
-        for tokens in (config.filters.assignees, self.dashboard_filters.assignees):
+        for tokens in (config.filters.assignees, self.dashboard_filters.assignees, self.scope.assignees):
             if tokens is not None:
                 people, _ = self._people(tokens)
                 query = query.where(TimeEntry.user_id.in_(people))
@@ -1145,10 +1264,8 @@ class Engine:
         # and approved leave -- so "12h" reads as comfortable or as a problem rather than as a
         # number. Grouped by task or List there is no such thing, and the bars stay relative.
         if config.time_group_by == "user" and out:
-            from app.services.work.leave import daily_capacity
-
             days = [first + timedelta(days=i) for i in range((last - first).days + 1)]
-            per_person = daily_capacity(self.db, self.access.workspace_id, [r["key"] for r in out], days)
+            per_person = self.daily_capacity([r["key"] for r in out], days)
             for row in out:
                 row["capacity_seconds"] = sum(per_person.get(row["key"], []))
         return {
@@ -1199,8 +1316,6 @@ class Engine:
                     "seconds": seconds,
                     "billable": bool(entry.billable),
                 })
-        from app.services.work.leave import daily_capacity
-
         # Everyone this card is about, not only those who logged something. A week where seven of
         # twelve people recorded nothing should read "29h of 480h", not "29h of 200h" -- the second
         # improves as more people fail to fill it in, which is exactly backwards. The set is the
@@ -1216,7 +1331,7 @@ class Engine:
             people.setdefault(uid, [0] * len(days))
 
         # Each person's working hours less holidays and approved leave; the header uses the usual week.
-        own = daily_capacity(self.db, self.access.workspace_id, list(people), days)
+        own = self.daily_capacity(list(people), days)
         capacity = [CAPACITY_SECONDS if day.weekday() < 5 else 0 for day in days]
         rows = [
             {

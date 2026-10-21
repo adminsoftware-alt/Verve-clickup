@@ -228,7 +228,8 @@ def attachments_out(db: Session, task_id: uuid.UUID) -> List[dict]:
 
 
 def add_attachment(db: Session, opened: Opened[Task], filename: str, content_type: str, data: bytes) -> Attachment:
-    _require(opened, PermissionLevel.comment, "attach files")
+    # Edit, like checklists: a file is part of the task, and with comment access it is somebody else's.
+    _require(opened, PermissionLevel.edit, "attach files")
     limit = settings.MAX_UPLOAD_MB * 1024 * 1024
     if len(data) > limit:
         raise Invalid(f"Files can be at most {settings.MAX_UPLOAD_MB} MB")

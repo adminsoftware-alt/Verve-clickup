@@ -135,6 +135,8 @@ class WorkspaceMember(Base):
     employee_code: Mapped[Optional[str]] = mapped_column(String(40))
     date_of_joining: Mapped[Optional[date]] = mapped_column(Date)
     location: Mapped[Optional[str]] = mapped_column(String(100))
+    # Their postal address. Contact details like the phone: theirs to keep up to date.
+    address: Mapped[Optional[str]] = mapped_column(String(500))
     added_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     invite_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     # Dates the joiner checklist uses for HR reminders.

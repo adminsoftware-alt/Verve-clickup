@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  BarChart3, Bell, Clock, CornerDownLeft, Folder, Inbox, List as ListIcon, MessageSquare, Search, UserCheck, Users,
+  BarChart3, Bell, Clock, CornerDownLeft, Folder, Inbox, LayoutGrid, List as ListIcon, MessageSquare, Search, UserCheck, Users,
 } from 'lucide-react';
 import { workApi, type FolderNode, type SpaceNode, type Task, type UserRef } from './api';
 import { Avatar, Portal, StatusDot } from './ui';
 import { useIsManager, useWork } from './WorkContext';
-import { recentItems } from './recent';
+import { RECENT_EVENT, recentItems } from './recent';
 
 export const OPEN_SEARCH = 'timetriq:search';
 export const openSearch = () => window.dispatchEvent(new Event(OPEN_SEARCH));
@@ -27,7 +27,7 @@ const PAGES: { label: string; path: string; icon: React.ReactNode; words: string
   { label: 'Replies', path: '/replies', icon: <MessageSquare size={15} />, words: 'replies comments threads' },
   { label: 'Reminders', path: '/reminders', icon: <Bell size={15} />, words: 'reminders' },
   { label: 'Dashboards', path: '/dashboards', icon: <BarChart3 size={15} />, words: 'dashboards reports charts' },
-  { label: 'Timesheets', path: '/timesheets', icon: <Clock size={15} />, words: 'timesheets time tracking hours' },
+  { label: 'Timesheet', path: '/timesheets', icon: <Clock size={15} />, words: 'timesheets time tracking hours' },
   { label: 'People & Teams', path: '/people', icon: <Users size={15} />, words: 'people teams members', managers: true },
 ];
 
@@ -83,6 +83,25 @@ export const GlobalSearch: React.FC = () => {
     if (hierarchy?.personal_list) out.set(hierarchy.personal_list.id, 'Personal List');
     return out;
   }, [hierarchy]);
+  // The same for Folders and Spaces, which are remembered too.
+  const placePath = useMemo(() => {
+    const out = new Map<string, string>();
+    const walk = (n: FolderNode, path: string[]) => {
+      out.set(n.id, [...path, n.name].join(' / '));
+      n.folders.forEach((f) => walk(f, [...path, n.name]));
+    };
+    hierarchy?.spaces.forEach((sp) => { out.set(sp.id, sp.name); sp.folders.forEach((f) => walk(f, [sp.name])); });
+    return out;
+  }, [hierarchy]);
+  // Recents are read whenever the box opens, and again if something is opened while it is up.
+  // Read once, they stayed as they were when the page first loaded -- so a List opened from a
+  // link never appeared.
+  const [recentVersion, setRecentVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setRecentVersion((v) => v + 1);
+    window.addEventListener(RECENT_EVENT, bump);
+    return () => window.removeEventListener(RECENT_EVENT, bump);
+  }, []);
 
   const hits: Hit[] = useMemo(() => {
     const close = () => setOpen(false);
@@ -94,6 +113,12 @@ export const GlobalSearch: React.FC = () => {
           out.push({ key: `rt:${r.id}`, section: 'Recent', label: r.name ?? 'Task', sub: listPath.get(r.listId), icon: <CornerDownLeft size={15} />, go: go(`/l/${r.listId}?task=${r.id}`) });
         } else if (r.kind === 'list' && listPath.has(r.id)) {
           out.push({ key: `rl:${r.id}`, section: 'Recent', label: listPath.get(r.id)!.split(' / ').pop()!, sub: listPath.get(r.id), icon: <ListIcon size={15} />, go: go(`/l/${r.id}`) });
+        } else if ((r.kind === 'folder' || r.kind === 'space') && placePath.has(r.id)) {
+          const where = placePath.get(r.id)!;
+          out.push({
+            key: `r${r.kind[0]}:${r.id}`, section: 'Recent', label: where.split(' / ').pop()!, sub: r.kind === 'folder' ? where : 'Space',
+            icon: r.kind === 'folder' ? <Folder size={15} /> : <LayoutGrid size={15} />, go: go(`/${r.kind[0]}/${r.id}`),
+          });
         }
       });
       pages.forEach((p) => out.push({ key: `p:${p.path}`, section: 'Go to', label: p.label, icon: p.icon, go: go(p.path) }));
@@ -132,7 +157,7 @@ export const GlobalSearch: React.FC = () => {
       }));
     pages.filter((p) => matches(p.words, query)).forEach((p) => out.push({ key: `p:${p.path}`, section: 'Go to', label: p.label, icon: p.icon, go: go(p.path) }));
     return out;
-  }, [query, tasks, hierarchy, members, listPath, navigate]);
+  }, [query, tasks, hierarchy, members, listPath, placePath, pages, navigate, open, recentVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { setActive(0); }, [query, tasks]);
   useEffect(() => {
@@ -200,10 +225,13 @@ export const GlobalSearch: React.FC = () => {
 };
 
 /** The header's search box: opens the Command Search. */
+/** The search bar in the middle of the top bar. It opens the search panel rather than being an
+ *  input itself, so typing starts in the one place results are shown. */
 export const SearchButton: React.FC = () => (
   <button type="button" onClick={openSearch} aria-label="Search (Ctrl+K)"
-    className="flex items-center gap-2 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-sm text-gray-400 hover:border-gray-300 hover:text-gray-600">
-    <Search size={14} /> <span className="hidden md:inline">Search</span>
-    <kbd className="hidden rounded border border-gray-200 px-1 text-[10px] md:inline">Ctrl K</kbd>
+    className="group flex h-10 w-10 items-center justify-center gap-2.5 rounded-xl border border-gray-200 bg-white/90 text-sm text-gray-400 shadow-sm ring-blue-500/10 transition-all hover:border-blue-300 hover:text-gray-600 hover:shadow-md hover:ring-4 focus:outline-none focus-visible:border-blue-400 focus-visible:ring-4 sm:w-full sm:justify-start sm:px-3.5">
+    <Search size={16} className="shrink-0 text-gray-400 group-hover:text-blue-600" />
+    <span className="hidden flex-1 truncate text-left sm:inline">Search tasks, Lists, people…</span>
+    <kbd className="hidden shrink-0 rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-gray-500 md:inline">Ctrl K</kbd>
   </button>
 );

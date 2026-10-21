@@ -1,33 +1,13 @@
 // Feature flags: toggle modules without removing their code.
 const DEFAULTS = {
-  chat: false,
-  // The old standalone Tasks page. Tasks now live inside Spaces > Folders > Lists.
-  legacyTasks: false,
-  // Old top-level pages. As in ClickUp, these now live inside Spaces instead:
-  // Calendar, Workload and Dashboard are views; time is tracked on tasks;
-  // teams are managed under People & Teams.
-  legacyTimeTracking: false,
-  legacyCalendar: false,
-  legacyTeams: false,
-  legacyReports: false,
-  legacyWorkload: false,
-  // Sidebar extras: the Settings/Integrations group and the workspace card at the bottom.
-  // Settings stays reachable from the profile menu.
-  sidebarSettings: false,
+  // Sidebar extra: the workspace card at the bottom.
   sidebarWorkspaceCard: false,
-  // The header's "Request Leave" button. It still points at the old v1 pages, so it stays off:
-  // the Leave page in the sidebar is the v2 one.
-  leave: false,
   // The header bell's old v1 notification popover. The bell now opens the v2 Inbox.
   legacyNotifications: false,
   // The header's bell -- the way into the Inbox, and where the unread count lives -- and the
   // "Available" status picker.
   headerBell: true,
   availabilityStatus: false,
-  // The first People & Teams page, replaced by the Teams Hub.
-  legacyPeoplePage: false,
-  // The old Firestore-backed home page. Home now shows your own "My work" Dashboard.
-  legacyHome: false,
 
   // Candidate dashboard cards rendered with made-up data, so they could be judged and picked
   // before any was built for real. That choosing is done, so the link is off. The page still
@@ -213,8 +193,6 @@ const DEFAULTS = {
   // into one room. Both pages still answer at /inbox and /reminders.
   inbox: false,
   reminders: false,
-  // The separate rows under My Tasks. My Tasks is one page with its own views now.
-  myTasksChildren: false,
   plannerRow: false,
   // The separate "All Tasks" row. Everything you can open is a tab inside My Tasks.
   allTasksRow: false,
@@ -222,15 +200,47 @@ const DEFAULTS = {
   // are in and the ones shared with you, so there is only one place to look.
   allSpacesPage: false,
   compliance: false,
-  // Leave is on: the policy, the chain from a person to their manager to HR, balances that run on
-  // the firm's leave year, and the approver seeing what is due before they say yes.
-  leavePages: true,
-  billing: false,
+  // The leave request and approval workflow: the policy, the chain from a person to their manager
+  // to HR, the balances, and the approver seeing what is due before they say yes.
+  //
   archived: false,
   templates: false,
-  // The extra view types. Only Dashboard, Table, Team, Calendar and Workload are offered in "+ View";
-  // every location keeps its built-in List (and a Folder or Space its Overview).
-  extraViewTypes: false,
+
+  // The "Blocked addresses" list in Admin, and the "Offboard and block" option it existed to undo.
+  // Off: barring an email was a second way of saying somebody had left, and offboarding already
+  // says it. The endpoints are untouched.
+  blockedAddresses: false,
+
+  // "Arrange cards" on a Dashboard's menu. Off: every standard board is built from one template
+  // and kept to it, so dragging cards about on one puts it out of step with the other fifteen.
+  // The edit mode it opened is untouched and still reachable via dashboardEditButton.
+  dashboardArrangeCards: false,
+
+  // The Timesheets tab strip: "My timesheet | All timesheets | Approvals", under a heading that
+  // already said Timesheets. Off -- the page is one page now, and approvals went with the middle
+  // tier of staff that would have done the approving. Every route still answers.
+  timesheetTabs: false,
+
+  // Email that arrives on a timer: the daily summary, the week ahead, the month just gone, the
+  // Friday recap, the overdue chase, the manager's Monday heads-up and the team digest. Off on
+  // the server too (SCHEDULED_EMAIL_ENABLED in backend/.env), and this is the matching half --
+  // a settings page offering a daily summary that the server will not send is worse than one
+  // that does not offer it. The jobs and this UI both still exist; turn the pair back on
+  // together. Email triggered by something a person did -- an invitation, "each update, right
+  // away" -- is unaffected.
+  emailDigests: false,
+
+  // Any email that is not an invitation.
+  //
+  // Off, and this is the one that takes the whole "Email" control off the notification settings
+  // with it. While email was still doing updates there was something to choose between -- a daily
+  // summary, each update, never -- and the control was worth its space even with the summaries
+  // switched off. With email down to getting new people into the workspace there is nothing left
+  // for a person to decide, and a dropdown whose every option does the same thing is worse than no
+  // dropdown. Notifications still arrive in the app and on the device; those controls stay.
+  //
+  // The server has the matching switch: UPDATE_EMAIL_ENABLED in backend/.env.
+  emailUpdates: false,
 };
 
 export type FeatureName = keyof typeof DEFAULTS;

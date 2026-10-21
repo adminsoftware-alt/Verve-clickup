@@ -92,19 +92,15 @@ def planner(db: Session, access: Access, start: datetime, end: datetime) -> p.Pl
 
 
 def _days_off(db: Session, access: Access, first: date, last: date) -> List[p.DayOff]:
-    """The caller's leave (approved or pending) and company holidays, day by day."""
-    from app.db.models import Holiday, LeaveRequest, LeaveType
+    """Company holidays, day by day.
+
+    This used to carry the caller's own leave as well. With leave gone, a shut day is the only
+    reason the planner greys one out.
+    """
+    from app.db.models import Holiday
 
     out = [p.DayOff(day=h.day, label=h.name, kind="holiday") for h in db.scalars(select(Holiday).where(
         Holiday.workspace_id == access.workspace_id, Holiday.day >= first, Holiday.day <= last))]
-    for r in db.scalars(select(LeaveRequest).where(
-            LeaveRequest.workspace_id == access.workspace_id, LeaveRequest.user_id == access.user_id,
-            LeaveRequest.status.in_(("pending", "approved")), LeaveRequest.start_date <= last, LeaveRequest.end_date >= first)):
-        kind = db.get(LeaveType, r.type_id) if r.type_id else None
-        day = max(r.start_date, first)
-        while day <= min(r.end_date, last):
-            out.append(p.DayOff(day=day, label=f"{kind.name if kind else 'Leave'} leave", part=r.part, kind="leave", pending=r.status == "pending"))
-            day += timedelta(days=1)
     return sorted(out, key=lambda d: d.day)
 
 

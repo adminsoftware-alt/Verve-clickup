@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { useWork } from '../WorkContext';
-import { Portal, StatusDot, formatDuration } from '../ui';
+import { Menu, Portal, StatusDot, formatDuration, type MenuItem } from '../ui';
 import { isoDay, parseDay, sheetApi, type PickTask } from './api';
 
 /** "0h", "54m", "2h 5m": ClickUp's timesheet style (zero shows as 0h). */
@@ -9,11 +9,18 @@ export const hours = (seconds: number) => formatDuration(seconds) || '0h';
 
 export function rangeLabel(start: string, end: string): string {
   const a = parseDay(start), b = parseDay(end);
+  // A week the server never sent (a refused request, a mangled ?week=) is not "Invalid Date NaN".
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return '…';
   const month = (d: Date) => d.toLocaleDateString(undefined, { month: 'short' });
   return a.getMonth() === b.getMonth()
     ? `${month(a)} ${a.getDate()} - ${b.getDate()}`
     : `${month(a)} ${a.getDate()} - ${month(b)} ${b.getDate()}`;
 }
+
+/** Saturday or Sunday, read from the date itself so a weekend looks like one whoever's sheet it is. */
+export const isWeekend = (iso: string) => { const d = new Date(`${iso}T00:00:00`).getDay(); return d === 0 || d === 6; };
+/** The weekend shade, used on the header, the cells and the entry rows alike. */
+export const WEEKEND = 'bg-gray-100/80';
 
 export const dayLabel = (iso: string) => parseDay(iso).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
@@ -86,10 +93,23 @@ export const WeekNav: React.FC<{ start: string | null; end: string | null; onGo:
     d.setDate(d.getDate() + days);
     onGo(isoDay(d));
   };
+  const today = isoDay(new Date());
+  const thisWeek = !!start && !!end && today >= start && today <= end;
+  const away = (weeks: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + weeks * 7);
+    return isoDay(d);
+  };
+  const weeks: MenuItem[] = [
+    { label: 'Last week', onClick: () => onGo(away(-1)) },
+    { label: 'This week', onClick: () => onGo(today) },
+    { label: 'Next week', onClick: () => onGo(away(1)) },
+    { label: 'Pick a date…', onClick: () => picker.current?.showPicker?.() },
+  ];
   return (
     <div className="flex items-center gap-1 sm:gap-2">
-      <button type="button" title="Previous week" onClick={() => shift(-7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
-      <button type="button" title="Next week" onClick={() => shift(7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
+      <button aria-label="Previous week" type="button" title="Previous week" onClick={() => shift(-7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
+      <button aria-label="Next week" type="button" title="Next week" onClick={() => shift(7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
       <button
         type="button"
         onClick={() => picker.current?.showPicker?.()}
@@ -108,9 +128,23 @@ export const WeekNav: React.FC<{ start: string | null; end: string | null; onGo:
           className="pointer-events-none absolute left-0 top-full h-0 w-0 opacity-0"
         />
       </button>
-      <button type="button" onClick={() => onGo(isoDay(new Date()))} className="ml-auto shrink-0 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 sm:ml-2">
-        This week
-      </button>
+      {/* "This week" was a button that only ever did one thing, sitting next to two arrows that
+          did the other two. Last week and next week are a click away now instead of a click and a
+          count, and "Pick a date" opens the same picker the title does -- a timesheet is a week at
+          a time, so a date is really a choice of which week. */}
+      <Menu
+        align="right"
+        triggerClassName="ml-auto shrink-0 sm:ml-2"
+        trigger={
+          <span className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+            {/* Until the week has loaded there are no dates to name, and parsing nothing printed
+                "Invalid Date NaN". */}
+            {thisWeek ? 'This week' : start && end ? rangeLabel(start, end) : '…'}
+            <ChevronDown size={14} className="text-gray-500" />
+          </span>
+        }
+        items={weeks}
+      />
     </div>
   );
 };
@@ -131,7 +165,7 @@ export const TaskPicker: React.FC<{ onPick: (task: PickTask) => void; exclude?: 
     <div>
       <div className="mb-1 flex items-center gap-2 rounded-md border border-gray-200 px-2 py-1">
         <Search size={13} className="text-gray-400" />
-        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} className="w-full text-sm focus:outline-none" />
+        <input autoFocus aria-label={placeholder} value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} className="w-full text-sm focus:outline-none" />
       </div>
       <ul className="max-h-64 overflow-y-auto" role="listbox" aria-label="Tasks">
         {items === null ? <li className="px-2 py-2 text-xs text-gray-400">Loading…</li> : shown.length === 0 ? <li className="px-2 py-2 text-xs text-gray-400">No tasks found</li> : shown.map((task) => (

@@ -32,6 +32,7 @@ from app.schemas import dashboards as d
 from app.schemas import work as s
 from app.services.work.dashboards.access import OpenedDashboard, at_least, open_dashboard
 from app.services.work.dashboards.engine import Engine
+from app.services.work.dashboards import standard
 from app.services.work.dashboards.service import cards_of
 from app.services.work.errors import Forbidden, Invalid, NotFound, WorkError
 
@@ -310,7 +311,8 @@ def render_card(card, data: d.CardData) -> str:
 
 def render_report(db: Session, opened: OpenedDashboard, tz: ZoneInfo, now: Optional[datetime] = None) -> str:
     dash = opened.dashboard
-    engine = Engine(db, opened.access, tz, d.Filters.model_validate(dash.filters or {}), now=now)
+    engine = Engine(db, opened.access, tz, d.Filters.model_validate(dash.filters or {}), now=now,
+                    scope=standard.scope_of(dash), me=standard.me_of(dash))
     moment = engine.now.astimezone(tz)
     blocks = []
     for card in cards_of(db, dash.id):
@@ -434,7 +436,33 @@ _stop = threading.Event()
 
 
 _compliance_hour: Optional[str] = None
-_escalation_hour: Optional[str] = None
+
+
+# Which outbound email jobs run, and why the list is shorter than the module.
+#
+# ON_EVENT happen because a person did something. run_instant is also what marks a notification
+# delivered and what pushes it to a browser, so switching it off would take the in-app
+# notifications with it; its email half already waits for somebody to have chosen "each update,
+# right away" for themselves. Invitation chasing is the other one -- an invitation nobody
+# accepted is a person who cannot get in, not a report about work.
+#
+# ON_A_TIMER are the digests, recaps and nudges. They go out because the clock said so, which is
+# exactly what the firm asked us to stop. They are not deleted and their tests still run; they
+# are simply not called while SCHEDULED_EMAIL_ENABLED is off.
+ON_EVENT = ["run_instant", "run_invite_reminders"]
+ON_A_TIMER = ["run_daily_digests", "run_weekly_digests", "run_monthly_digests",
+              "run_overdue_nudges", "run_friday_recaps", "run_manager_heads_up",
+              "run_team_digests"]
+
+
+def outbound_jobs() -> List[str]:
+    """The outbound jobs this server should run on this tick, in order."""
+    jobs = list(ON_EVENT)
+    if settings.APPROVAL_REMINDER_EMAIL:
+        jobs.append("run_approval_reminders")
+    if settings.SCHEDULED_EMAIL_ENABLED:
+        jobs += ON_A_TIMER
+    return jobs
 
 
 def _loop() -> None:
@@ -443,12 +471,19 @@ def _loop() -> None:
     from app.services.work import recurrence
 
     while not _stop.wait(60):
-        try:
-            with new_session() as db:
-                while run_due(db) == 20:
-                    pass  # more were waiting
-        except Exception:
-            log.exception("Checking for due Dashboard reports failed")
+        # Scheduled Dashboard reports are email on a timer too, so they answer to the same
+        # switch. "Send now" is untouched -- that goes through send_now() because somebody asked
+        # for it. Nothing is waiting today (no schedule has ever been created, and the dialog
+        # that creates them is off in the UI), so this closes a door rather than shutting
+        # anything down; a schedule left behind would simply send on the next tick after the
+        # switch goes back on.
+        if settings.SCHEDULED_EMAIL_ENABLED:
+            try:
+                with new_session() as db:
+                    while run_due(db) == 20:
+                        pass  # more were waiting
+            except Exception:
+                log.exception("Checking for due Dashboard reports failed")
         try:
             with new_session() as db:
                 while recurrence.run_due(db) == 100:
@@ -471,7 +506,7 @@ def _loop() -> None:
                     db.commit()
         except Exception:
             log.exception("Running due-date automations failed")
-        global _compliance_hour, _escalation_hour
+        global _compliance_hour
         hour = datetime.now(timezone.utc).strftime("%Y-%m-%d %H")
         if hour != _compliance_hour:  # compliance tasks: once an hour is plenty
             _compliance_hour = hour
@@ -486,9 +521,7 @@ def _loop() -> None:
         # Every outbound job is "if it is the right hour for this person, and it has not gone
         # already". Each decides that for itself from the email log, so running them all every
         # minute costs a read and sends nothing twice.
-        for job in ("run_instant", "run_daily_digests", "run_weekly_digests", "run_monthly_digests",
-                    "run_overdue_nudges", "run_invite_reminders", "run_friday_recaps",
-                    "run_approval_reminders", "run_manager_heads_up", "run_team_digests"):
+        for job in outbound_jobs():
             try:
                 from app.services.work import outbound
 
@@ -497,14 +530,15 @@ def _loop() -> None:
                     db.commit()
             except Exception:
                 log.exception("Outbound job %s failed", job)
-        try:
-            from app.services.work.timesheets import run_timesheet_reminders
+        if settings.SCHEDULED_EMAIL_ENABLED:  # the Friday "your timesheet is short" nudge
+            try:
+                from app.services.work.timesheets import run_timesheet_reminders
 
-            with new_session() as db:
-                if run_timesheet_reminders(db):
-                    db.commit()
-        except Exception:
-            log.exception("Sending timesheet reminders failed")
+                with new_session() as db:
+                    if run_timesheet_reminders(db):
+                        db.commit()
+            except Exception:
+                log.exception("Sending timesheet reminders failed")
         try:
             from app.services.work import sprints
 
@@ -513,16 +547,6 @@ def _loop() -> None:
                     db.commit()
         except Exception:
             log.exception("Completing finished sprints failed")
-        if hour != _escalation_hour:  # chasing a leave request once an hour is plenty
-            _escalation_hour = hour
-            try:
-                from app.services.work import leave as leave_service
-
-                with new_session() as db:
-                    if leave_service.run_escalations(db):
-                        db.commit()
-            except Exception:
-                log.exception("Escalating undecided leave failed")
         try:
             from app.services.work import calendar_sync
 

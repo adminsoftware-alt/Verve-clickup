@@ -38,7 +38,7 @@ def test_sub_teams_count_as_members_of_their_parent(api, workspace, space, folde
 
     # Workload for the parent Team includes the sub-team's people.
     ok(api.patch(f"/teams/{sub['id']}", "owner", {"parent_team_id": firm["id"]}))
-    ok(api.post(f"/lists/{folderless_list['id']}/tasks", "owner", {"name": "Fieldwork", "assignees": ["member"],
+    ok(api.post(f"/lists/{folderless_list['id']}/tasks", "owner", {"name": "Fieldwork", "assignees": ["member", "admin"],
                                                                     "due_date": datetime.now(timezone.utc).isoformat(), "time_estimate_seconds": 3600}), 201)
     wl = ok(api.get(f"/spaces/{space['id']}/workload", "owner", params={"start": date.today().isoformat(), "days": 7, "team_id": firm["id"]}))
     assert {r["user"]["id"] for r in wl["rows"] if r["user"]} == {"admin", "member"}
