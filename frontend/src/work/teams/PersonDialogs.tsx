@@ -11,9 +11,10 @@ import { FEATURES } from '../../config/features';
 import { PersonHistory, PersonHistoryHeading } from './PersonHistory';
 import { AddressField } from './AddressField';
 
-/** The three rungs the firm uses. The API refuses anything outside them, so a spreadsheet
- *  carrying a 4 is an error rather than a quietly invented fourth level. */
-export const LEVELS = [1, 2, 3];
+/** The six rungs the firm uses, L1 at the top. The API refuses anything outside them, so a
+ *  spreadsheet carrying a 7 is an error rather than a quietly invented seventh level. */
+import { EMPLOYMENT_TYPES, LEVELS, levelLabel } from './levels';
+export { LEVELS };
 
 export { ROLE_LABEL, accessOf, type Access } from './access';
 import { ROLE_LABEL, accessOf } from './access';
@@ -75,7 +76,13 @@ const ProfileFields: React.FC<{
         <Field label="Level">
           <select aria-label="Level" value={form.level ?? ''} onChange={(e) => set({ level: e.target.value ? Number(e.target.value) : null })} className={inputCls}>
             <option value="">No level</option>
-            {LEVELS.map((n) => <option key={n} value={n}>Level {n}</option>)}
+            {LEVELS.map((n) => <option key={n} value={n}>{levelLabel(n)}</option>)}
+          </select>
+        </Field>
+        <Field label="Employment type">
+          <select aria-label="Employment type" value={form.employment_type ?? ''} onChange={(e) => set({ employment_type: e.target.value || null })} className={inputCls}>
+            <option value="">Not set</option>
+            {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </Field>
         <Field label="Department"><input aria-label="Department" value={form.department ?? ''} onChange={(e) => set({ department: e.target.value })} placeholder="e.g. HR" className={inputCls} /></Field>
@@ -101,6 +108,9 @@ const ProfileFields: React.FC<{
       </>
     )}
     <Field label="Phone"><input aria-label="Phone" value={form.phone ?? ''} onChange={(e) => set({ phone: e.target.value })} className={inputCls} /></Field>
+    {/* Private like a birthday: only Admins and the person see it. The person can keep it up to date. */}
+    <Field label="Emergency contact name"><input aria-label="Emergency contact name" value={form.emergency_contact_name ?? ''} onChange={(e) => set({ emergency_contact_name: e.target.value || null })} className={inputCls} /></Field>
+    <Field label="Emergency contact phone"><input aria-label="Emergency contact phone" value={form.emergency_contact_phone ?? ''} onChange={(e) => set({ emergency_contact_phone: e.target.value || null })} placeholder="+91 …" className={inputCls} /></Field>
     <div className="col-span-2 text-xs font-medium text-gray-600">Address
       <div className="mt-1"><AddressField value={form.address} onChange={(address, city) => set({ address, location: city })} /></div>
     </div>
@@ -231,12 +241,16 @@ export const PersonPanel: React.FC<{
       manager_id: person.manager_id, phone: person.phone ?? '', employee_code: person.employee_code ?? '',
       date_of_joining: person.date_of_joining, location: person.location ?? '', address: person.address ?? '', team_ids: person.team_ids, role: person.role,
       date_of_birth: person.date_of_birth, marriage_anniversary: person.marriage_anniversary, takes_interviews: person.takes_interviews,
+      employment_type: person.employment_type, emergency_contact_name: person.emergency_contact_name, emergency_contact_phone: person.emergency_contact_phone,
     });
     setEditing(true);
   };
   const save = async () => {
     setError(null);
-    const body: PersonInput = isAdmin ? { ...form } : { name: form.name, phone: form.phone, location: form.location, address: form.address };
+    const body: PersonInput = isAdmin ? { ...form } : {
+      name: form.name, phone: form.phone, location: form.location, address: form.address,
+      emergency_contact_name: form.emergency_contact_name, emergency_contact_phone: form.emergency_contact_phone,
+    };
     if (!isAdmin || person.role === 'owner' || body.role === person.role) delete body.role;
     try { await peopleApi.update(ws, person.user.id, body); setEditing(false); setHistoryKey((k) => k + 1); onChanged(); } catch (e) { setError((e as Error).message); }
   };
@@ -350,6 +364,10 @@ export const PersonPanel: React.FC<{
                 {info(<Phone size={14} />, 'Phone', person.phone)}
                 {info(<MapPin size={14} />, 'Address', person.address ? <span className="whitespace-pre-line">{person.address}</span> : null)}
                 {info(<Building2 size={14} />, 'Department', person.department)}
+                {info(<Briefcase size={14} />, 'Level', person.level != null ? levelLabel(person.level) : null)}
+                {info(<Briefcase size={14} />, 'Employment type', person.employment_type)}
+                {info(<Phone size={14} />, 'Emergency contact', person.emergency_contact_name || person.emergency_contact_phone
+                  ? [person.emergency_contact_name, person.emergency_contact_phone].filter(Boolean).join(' · ') : null)}
                 {info(<Cake size={14} />, 'Birthday', person.date_of_birth ? new Date(`${person.date_of_birth}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : null)}
                 {info(<Heart size={14} />, 'Anniversary', person.marriage_anniversary ? new Date(`${person.marriage_anniversary}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : null)}
                 {isAdmin && info(<ClipboardCheck size={14} />, 'Joiner checklist', person.joiner_tasks ? `${person.joiner_tasks} tasks created` : 'Not started')}

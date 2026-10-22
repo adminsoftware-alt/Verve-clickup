@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Archive, Bell, BellOff, Check, CheckCheck, Clock, Flag, Inbox as InboxIcon, MessageSquare, MoreHorizontal, Plus, Settings, SlidersHorizontal, Trash2, UserCheck, X } from 'lucide-react';
 import { useWork } from './WorkContext';
 import { disablePush, enablePush, outboundApi, type Delivery } from './outboundApi';
@@ -61,6 +61,10 @@ function describe(item: InboxItem): string {
       if (d.before != null && d.before !== d.seconds) return `changed your time on ${day} from ${h(d.before)} to ${h(d.seconds)}`;
       return `edited your time entry on ${day}`;
     }
+    case 'team_change':
+      return d.action === 'joined' ? `${d.person} joined your team ${d.team}`
+        : d.action === 'offboarded' ? `${d.person} left the firm and your team ${d.team}`
+        : `${d.person} left your team ${d.team}`;
     case 'space_join_request': return `asked to join the ${d.space} Space${d.message ? `: “${d.message}”` : ''}`;
     case 'space_join_decision': return d.status === 'approved' ? `let you into the ${d.space} Space` : `declined your request to join ${d.space}`;
     case 'chat_mention': return `mentioned you in ${d.view ?? 'a chat'}: “${d.body ?? ''}”`;
@@ -100,6 +104,7 @@ const GROUPS: { key: string; label: string }[] = [
   { key: 'reminders', label: 'Reminders & timesheets' },
   { key: 'leave', label: 'Leave' },
   { key: 'task_detail', label: 'Files & checklists' },
+  { key: 'team', label: 'Team changes' },
 ];
 const DUE: { key: InboxDue; label: string }[] = [
   { key: 'overdue', label: 'Overdue' },
@@ -198,9 +203,21 @@ export const InboxPage: React.FC = () => {
     inboxChanged();
   };
   const navigate = useNavigate();
+  // A push notification about a task arrives as /inbox?task=…&n=…: open that task, ready to edit,
+  // and count the notification as read, as if it had been clicked here.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const task = params.get('task');
+    if (!task) return;
+    setOpenTask(task);
+    const n = params.get('n');
+    if (n) collabApi.updateNotification(n, { read: true }).then(inboxChanged).catch(() => undefined);
+    setParams({}, { replace: true });
+  }, [params, setParams]);
   const open = (item: InboxItem) => {
     if (!item.read) act(item.id, { read: true });
     if (item.kind === 'time_changed') navigate('/timesheets');
+    else if (item.kind === 'team_change' && item.data.team_id) navigate(`/people/teams/${item.data.team_id}`);
     else if (item.task) setOpenTask(item.task.id);
     else if (item.kind === 'timesheet_reminder') navigate('/timesheets');
     else if (item.kind === 'space_join_request') navigate('/all-spaces');

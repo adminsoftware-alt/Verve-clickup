@@ -121,6 +121,13 @@ def import_people(db: Session, access: Access, data: s.PersonImportIn) -> s.Pers
         existing = db.scalars(select(User).where(func.lower(User.email) == email)).first()
         member = db.get(WorkspaceMember, (access.workspace_id, existing.id)) if existing else None
         profile = {f: getattr(row, f) for f in PROFILE_FIELDS if f != "takes_interviews" and getattr(row, f, None) is not None}
+        if "employment_type" in profile:
+            kind = next((k for k in s.EMPLOYMENT_TYPES if k.lower() == profile["employment_type"].strip().lower()), None)
+            if kind is None:
+                res.problems.append(f"unknown employment type \"{profile['employment_type']}\" (use {', '.join(s.EMPLOYMENT_TYPES)})")
+                del profile["employment_type"]
+            else:
+                profile["employment_type"] = kind
         try:
             with db.begin_nested():
                 if member is None:
@@ -447,7 +454,7 @@ def offboard(db: Session, access: Access, user_id: str, data: s.OffboardIn) -> s
                 row.is_lead = True
             led_moved += 1
         db.flush()
-    remove_from_workspace_teams(db, access.workspace_id, user_id)
+    remove_from_workspace_teams(db, access.workspace_id, user_id, access.user_id)
     member.deactivated_at = datetime.now(timezone.utc)
     member.deactivated_by = access.user_id
     db.flush()

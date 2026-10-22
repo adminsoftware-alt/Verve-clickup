@@ -24,6 +24,7 @@ from app.services.work.permissions import can_manage_workspace
 PROFILE_FIELDS = (
     "designation", "level", "department", "phone", "employee_code", "date_of_joining", "location",
     "address", "date_of_birth", "marriage_anniversary", "takes_interviews",
+    "employment_type", "emergency_contact_name", "emergency_contact_phone",
 )
 # Who sees what on someone else's profile, as person_out applies it (see `_standing`):
 #   * name, photo, designation, level, department, Teams and reporting line are directory detail,
@@ -33,7 +34,7 @@ PROFILE_FIELDS = (
 #     The People page being hidden from staff did not stop the server answering them directly;
 #   * a birthday and an anniversary are the person's and the admins', nobody else's. Highlights
 #     still says whose birthday it is today, which needs only the name.
-SELF_EDITABLE = {"name", "phone", "location", "address"}
+SELF_EDITABLE = {"name", "phone", "location", "address", "emergency_contact_name", "emergency_contact_phone"}
 # The fields a promotion or a transfer moves. Changes to these are logged with their old and new
 # values, because "what was their designation before?" is the question the log gets asked.
 MOVEMENT_FIELDS = ("designation", "level", "department", "manager_id")
@@ -95,6 +96,11 @@ def person_out(member: WorkspaceMember, user: User, team_ids: Sequence[uuid.UUID
         date_of_birth=member.date_of_birth if show_private else None,
         marriage_anniversary=member.marriage_anniversary if show_private else None,
         takes_interviews=member.takes_interviews,
+        # HR record, shown where the employee code is.
+        employment_type=None if hide_contact else member.employment_type,
+        # Private like a birthday: the person and admins only.
+        emergency_contact_name=member.emergency_contact_name if show_private else None,
+        emergency_contact_phone=member.emergency_contact_phone if show_private else None,
         team_ids=list(team_ids),
         direct_reports=reports,
         invite_sent_at=member.invite_sent_at,
@@ -237,6 +243,12 @@ def _set_teams(db: Session, access: Access, user_id: str, team_ids: Sequence[uui
     for team_id in wanted - set(current):
         db.add(TeamMember(team_id=team_id, user_id=user_id))
     db.flush()
+    from app.services.work.teams import tell_managers
+
+    for team_id in wanted - set(current):
+        tell_managers(db, access.workspace_id, access.user_id, team_id, user_id, "joined")
+    for team_id in set(current) - wanted:
+        tell_managers(db, access.workspace_id, access.user_id, team_id, user_id, "left")
 
 
 # --- adding and inviting -----------------------------------------------------------------------

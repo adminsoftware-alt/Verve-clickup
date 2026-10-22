@@ -3,9 +3,24 @@ import { ChevronDown, ChevronUp, Download, FileSpreadsheet, FileText, List as Li
 import { Avatar, Menu } from '../ui';
 import { orgChartTableExcel, orgChartTablePdf, orgChartTreeExcel, orgChartTreePdf } from './exportOrgChart';
 import { personName, type Person } from './peopleApi';
+import { LEVEL_NAMES, LEVELS, levelLabel, levelTag } from './levels';
 import { useHub, useScope } from './TeamsHub';
 
 interface Node { person: Person; children: Node[] }
+
+/** Senior first, then by name: people at the same level sit together under their manager. */
+const byLevel = (a: Person, b: Person) => (a.level ?? 99) - (b.level ?? 99) || personName(a).localeCompare(personName(b));
+
+/** One colour per level, L1 darkest, so a level reads at a glance across the whole chart. */
+const LEVEL_STYLE: Record<number, string> = {
+  1: 'bg-teal-800 text-white', 2: 'bg-teal-600 text-white', 3: 'bg-teal-100 text-teal-800',
+  4: 'bg-sky-100 text-sky-800', 5: 'bg-gray-100 text-gray-700', 6: 'bg-amber-50 text-amber-800',
+};
+const LevelBadge: React.FC<{ level: number | null }> = ({ level }) => level == null ? null : (
+  <span title={levelLabel(level)} className={`mt-0.5 inline-block rounded-full px-1.5 text-[10px] font-semibold ${LEVEL_STYLE[level] ?? 'bg-gray-100 text-gray-600'}`}>
+    {levelTag(level)} · {LEVEL_NAMES[level] ?? ''}
+  </span>
+);
 
 /** Build reporting trees: anyone whose manager isn't in the set starts a tree. */
 function build(people: Person[]): Node[] {
@@ -15,12 +30,12 @@ function build(people: Person[]): Node[] {
   const make = (p: Person, seen: Set<string>): Node => ({
     person: p,
     children: seen.has(p.user.id) ? [] : (kids.get(p.user.id) ?? [])
-      .sort((a, b) => personName(a).localeCompare(personName(b)))
+      .sort(byLevel)
       .map((c) => make(c, new Set([...seen, p.user.id]))),
   });
   return people
     .filter((p) => !p.manager_id || !ids.has(p.manager_id))
-    .sort((a, b) => (kids.get(b.user.id)?.length ?? 0) - (kids.get(a.user.id)?.length ?? 0) || personName(a).localeCompare(personName(b)))
+    .sort((a, b) => (a.level ?? 99) - (b.level ?? 99) || (kids.get(b.user.id)?.length ?? 0) - (kids.get(a.user.id)?.length ?? 0) || personName(a).localeCompare(personName(b)))
     .map((p) => make(p, new Set()));
 }
 
@@ -35,9 +50,7 @@ const Box: React.FC<{ node: Node; collapsed: Set<string>; toggle: (id: string) =
           <Avatar user={p.user} size={34} />
           <span className="mt-1 w-40 truncate text-sm font-semibold text-gray-900">{personName(p)}</span>
           <span className="w-40 truncate text-[11px] text-gray-500">{p.designation || '—'}</span>
-          {p.level != null && (
-            <span className="mt-0.5 rounded-full bg-gray-100 px-1.5 text-[10px] font-medium text-gray-600">Level {p.level}</span>
-          )}
+          <LevelBadge level={p.level} />
         </button>
         {node.children.length > 0 && (
           <button type="button" onClick={() => toggle(p.user.id)} aria-label={closed ? `Show ${personName(p)}'s reports` : `Hide ${personName(p)}'s reports`}
@@ -70,9 +83,10 @@ export const OrgChart: React.FC<{ people?: Person[]; embedded?: boolean }> = ({ 
   // "" is everyone in reach. Narrowing to a Team keeps the reporting lines that exist inside it --
   // someone whose manager is outside the Team simply starts a tree of their own.
   const [team, setTeam] = useState('');
+  const [level, setLevel] = useState('');
   const people = useMemo(
-    () => (team ? everyone.filter((p) => p.team_ids.includes(team)) : everyone),
-    [everyone, team],
+    () => everyone.filter((p) => (!team || p.team_ids.includes(team)) && (!level || String(p.level) === level)),
+    [everyone, team, level],
   );
   const trees = useMemo(() => build(people), [people]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -85,7 +99,7 @@ export const OrgChart: React.FC<{ people?: Person[]; embedded?: boolean }> = ({ 
   // The tree highlights a search; the table narrows to it, which is what a table is for.
   const rows = useMemo(() => people
     .filter((p) => !match || `${personName(p)} ${p.user.email} ${p.designation ?? ''} ${p.department ?? ''}`.toLowerCase().includes(match))
-    .sort((a, b) => personName(a).localeCompare(personName(b))), [people, match]);
+    .sort(byLevel), [people, match]);
   const teamName = (id: string) => hub.teams.find((t) => t.id === id)?.name;
   const chartTitle = team ? `Org chart: ${teamName(team) ?? 'Team'}` : 'Org chart';
   const sel = 'rounded-md border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700';
@@ -103,6 +117,10 @@ export const OrgChart: React.FC<{ people?: Person[]; embedded?: boolean }> = ({ 
             {scope.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         )}
+        <select aria-label="Level" value={level} onChange={(e) => { setLevel(e.target.value); setCollapsed(new Set()); }} className={sel}>
+          <option value="">All levels</option>
+          {LEVELS.map((n) => <option key={n} value={n}>{levelLabel(n)}</option>)}
+        </select>
         <span className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1">
           <Search size={14} className="text-gray-400" />
           <input value={q} onChange={(e) => { setQ(e.target.value); if (e.target.value) setCollapsed(new Set()); }} placeholder="Find someone" aria-label="Find someone in the org chart" className="w-40 text-sm focus:outline-none" />
@@ -143,7 +161,7 @@ export const OrgChart: React.FC<{ people?: Person[]; embedded?: boolean }> = ({ 
           <table className="w-full min-w-[760px] text-sm" aria-label="Org chart table">
             <thead className="bg-gray-50 text-left text-xs font-medium text-gray-500">
               <tr>
-                <th className="px-3 py-2">Name</th><th className="px-3 py-2">Designation</th><th className="px-3 py-2">Department</th>
+                <th className="px-3 py-2">Name</th><th className="px-3 py-2">Level</th><th className="px-3 py-2">Designation</th><th className="px-3 py-2">Department</th>
                 <th className="px-3 py-2">Reports to</th><th className="px-3 py-2">Teams</th>
               </tr>
             </thead>
@@ -157,6 +175,7 @@ export const OrgChart: React.FC<{ people?: Person[]; embedded?: boolean }> = ({ 
                         <span className="min-w-0 truncate font-medium text-gray-900">{personName(p)}</span>
                       </span>
                     </td>
+                    <td className="px-3 py-2">{p.level != null ? <LevelBadge level={p.level} /> : <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-2 text-gray-700">{p.designation ?? <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-2 text-gray-700">{p.department ?? <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-2 text-gray-700">{boss ? personName(boss) : <span className="text-gray-300">—</span>}</td>
@@ -166,7 +185,7 @@ export const OrgChart: React.FC<{ people?: Person[]; embedded?: boolean }> = ({ 
                   </tr>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={5}className="px-3 py-10 text-center text-sm text-gray-400">{people.length ? 'Nobody matches.' : team ? 'Nobody is in that Team yet.' : 'Nobody here yet.'}</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={6}className="px-3 py-10 text-center text-sm text-gray-400">{people.length ? 'Nobody matches.' : team ? 'Nobody is in that Team yet.' : 'Nobody here yet.'}</td></tr>}
             </tbody>
           </table>
         </div>

@@ -50,6 +50,23 @@ def led_team_ids(db: Session, workspace_id: uuid.UUID, user_id: str) -> List[uui
     )
 
 
+def tell_managers(
+    db: Session, workspace_id: uuid.UUID, actor_id: Optional[str], team_id: uuid.UUID, person_id: str, action: str,
+) -> None:
+    """A Manager hears when someone joins their team (`action` "joined") or leaves it ("left", or
+    "offboarded" when they left the firm), so a new face or an empty desk is never a surprise."""
+    managers = [u for u in leads_of(db, [team_id])[team_id] if u != person_id]
+    if not managers:
+        return
+    from app.services.work import events
+
+    team, person = db.get(Team, team_id), db.get(User, person_id)
+    events.notify(db, workspace_id, managers, actor_id, "team_change", "primary", data={
+        "action": action, "team": team.name if team else None, "team_id": str(team_id),
+        "person": (person.display_name or person.email) if person else None, "person_id": person_id,
+    })
+
+
 def people_led_by(db: Session, workspace_id: uuid.UUID, user_id: str) -> set:
     """Everyone in the Teams this person leads (including the lead)."""
     teams = led_team_ids(db, workspace_id, user_id)
@@ -245,12 +262,20 @@ def set_members(
         for membership in db.scalars(select(TeamMember).where(TeamMember.team_id == team.id)):
             membership.is_lead = membership.user_id in set(lead_ids)
         db.flush()
+    # Told after the leads are set, so a Manager named in the same save hears about the others.
+    for uid in sorted(set(wanted) - current):
+        tell_managers(db, access.workspace_id, access.user_id, team.id, uid, "joined")
+    for uid in sorted(current - set(wanted)):
+        tell_managers(db, access.workspace_id, access.user_id, team.id, uid, "left")
 
 
-def remove_from_workspace_teams(db: Session, workspace_id: uuid.UUID, user_id: str) -> None:
-    """Called when someone leaves a workspace: they leave its Teams too."""
+def remove_from_workspace_teams(db: Session, workspace_id: uuid.UUID, user_id: str, actor_id: Optional[str] = None) -> None:
+    """Called when someone leaves a workspace: they leave its Teams too, and their Managers are told."""
     team_ids = select(Team.id).where(Team.workspace_id == workspace_id)
-    for membership in db.scalars(
+    memberships = list(db.scalars(
         select(TeamMember).where(TeamMember.user_id == user_id, TeamMember.team_id.in_(team_ids))
-    ):
+    ))
+    for membership in memberships:
+        tell_managers(db, workspace_id, actor_id, membership.team_id, user_id, "offboarded")
+    for membership in memberships:
         db.delete(membership)

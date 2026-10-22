@@ -6,6 +6,7 @@ export interface Person {
   designation: string | null; level: number | null; department: string | null; manager_id: string | null; phone: string | null;
   employee_code: string | null; date_of_joining: string | null; location: string | null; address: string | null;
   date_of_birth: string | null; marriage_anniversary: string | null; takes_interviews: boolean;
+  employment_type: string | null; emergency_contact_name: string | null; emergency_contact_phone: string | null;
   team_ids: string[]; direct_reports: number; invite_sent_at: string | null; deactivated_at: string | null; joiner_tasks: number;
 }
 export interface PersonInput {
@@ -13,10 +14,12 @@ export interface PersonInput {
   manager_id?: string | null; phone?: string | null; employee_code?: string | null; date_of_joining?: string | null;
   location?: string | null; address?: string | null; team_ids?: string[];
   date_of_birth?: string | null; marriage_anniversary?: string | null; takes_interviews?: boolean; start_joiner_checklist?: boolean;
+  employment_type?: string | null; emergency_contact_name?: string | null; emergency_contact_phone?: string | null;
 }
 export interface ImportRow {
   email: string; name?: string; role?: string; designation?: string; department?: string; manager_email?: string; teams?: string;
   phone?: string; employee_code?: string; date_of_joining?: string; date_of_birth?: string; marriage_anniversary?: string; location?: string;
+  level?: number; employment_type?: string; emergency_contact_name?: string; emergency_contact_phone?: string;
 }
 export interface ImportTeam { name: string; parent?: string; description?: string }
 export interface ImportResult {

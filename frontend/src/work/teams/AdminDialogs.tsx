@@ -3,6 +3,7 @@ import { DrawInPlace } from './inlineDialog';
 import * as XLSX from 'xlsx';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Download, FileSpreadsheet, LogOut, MinusCircle, X } from 'lucide-react';
 import { Portal, useEscapeToClose } from '../ui';
+import { parseLevel } from './levels';
 import { peopleApi, personName, type ImportResult, type ImportRow, type ImportTeam, type JoinerStep, type OffboardPreview, type Person } from './peopleApi';
 
 const Dialog: React.FC<{ title: string; onClose: () => void; width?: string; children: React.ReactNode }> = ({ title, onClose, width = 'w-[36rem]', children }) => {
@@ -198,6 +199,10 @@ const COLUMNS: [keyof ImportRow, string[]][] = [
   ['marriage_anniversary', ['marriage anniversary', 'anniversary']],
   ['phone', ['phone', 'mobile', 'contact']],
   ['location', ['location', 'city', 'office', 'office location']],
+  ['level', ['level']],
+  ['employment_type', ['employment type', 'employment']],
+  ['emergency_contact_name', ['emergency contact name', 'emergency contact']],
+  ['emergency_contact_phone', ['emergency contact phone', 'emergency phone']],
 ];
 /** "Work email *" and "work email" are the same column: required marks and case don't matter. */
 const headerKey = (h: string) => h.replace(/\*/g, '').trim().toLowerCase();
@@ -229,6 +234,12 @@ export function rowsFromSheet(records: Record<string, unknown>[]): { rows: Impor
     const row: ImportRow = { email: '' };
     for (const [field, header] of map) {
       const raw = rec[header as string];
+      if (field === 'level') {
+        // "L3", "l3", "3" or "L3 · Management" all mean 3.
+        const n = parseLevel(raw);
+        if (n != null) row.level = n;
+        continue;
+      }
       const value = DATE_FIELDS.has(field) ? toIsoDate(raw) : (raw == null ? '' : String(raw).trim());
       if (value) (row as unknown as Record<string, string>)[field] = value;
     }

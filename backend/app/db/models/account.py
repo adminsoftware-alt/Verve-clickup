@@ -143,6 +143,11 @@ class WorkspaceMember(Base):
     date_of_birth: Mapped[Optional[date]] = mapped_column(Date)
     marriage_anniversary: Mapped[Optional[date]] = mapped_column(Date)
     takes_interviews: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False, default=False)
+    # Full-time, Part-time, Article, Intern or Consultant (schemas.work.EMPLOYMENT_TYPES).
+    employment_type: Mapped[Optional[str]] = mapped_column(String(20))
+    # Who to call if something happens at work. Seen by admins and the person only, like a birthday.
+    emergency_contact_name: Mapped[Optional[str]] = mapped_column(String(100))
+    emergency_contact_phone: Mapped[Optional[str]] = mapped_column(String(40))
     # Offboarded: kept for history, but can no longer open the workspace.
     deactivated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     deactivated_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))

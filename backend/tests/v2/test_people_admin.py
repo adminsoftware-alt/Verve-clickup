@@ -85,6 +85,38 @@ def test_the_onboarding_workbook_makes_teams_people_and_managers_in_one_go(api, 
     assert "use Admin, Manager or Employee" in bad["rows"][0]["problems"][0]
 
 
+def test_levels_employment_type_and_a_private_emergency_contact(api, ws):
+    rows = [{"email": "asha@example.com", "name": "Asha", "level": 6, "employment_type": "article",
+             "emergency_contact_name": "Ramesh (father)", "emergency_contact_phone": "+91 98200 54321"},
+            {"email": "odd@example.com", "employment_type": "Freelancer"}]
+    out = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows}))
+    assert out["added"] == 2 and "unknown employment type" in out["rows"][1]["problems"][0]
+    asha = by_email(api, ws, "asha@example.com")
+    assert (asha["level"], asha["employment_type"]) == (6, "Article")  # written however; stored one way
+    assert asha["emergency_contact_name"] == "Ramesh (father)"
+    # Seven is not a level.
+    assert api.patch(f"/workspaces/{ws}/people/{asha['user']['id']}", "owner", {"level": 7}).status_code == 422
+    # Even her Manager, who sees her phone, does not see the emergency contact: that is hers and the admins'.
+    team = ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Articles"}), 201)
+    ok(api.put(f"/teams/{team['id']}/members", "owner", {"user_ids": ["member", asha["user"]["id"]], "lead_ids": ["member"]}))
+    ok(api.patch(f"/workspaces/{ws}/people/{asha['user']['id']}", "owner", {"phone": "+91 90000 00000"}))
+    seen = next(p for p in ok(api.get(f"/workspaces/{ws}/people", "member")) if p["user"]["email"] == "asha@example.com")
+    assert seen["phone"] == "+91 90000 00000" and seen["employment_type"] == "Article"
+    assert seen["emergency_contact_name"] is None and seen["emergency_contact_phone"] is None
+
+
+def test_a_manager_hears_when_someone_joins_or_leaves_their_team(api, ws):
+    team = ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Tax"}), 201)
+    ok(api.put(f"/teams/{team['id']}/members", "owner", {"user_ids": ["member"], "lead_ids": ["member"]}))
+    out = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": [{"email": "new@example.com", "name": "Neha", "teams": "Tax"}]}))
+    assert out["added"] == 1
+    inbox = lambda: [n for n in ok(api.get(f"/workspaces/{ws}/inbox", "member", params={"tab": "primary"})) if n["kind"] == "team_change"]
+    assert [(n["data"]["action"], n["data"]["person"], n["data"]["team"]) for n in inbox()] == [("joined", "Neha", "Tax")]
+    neha = by_email(api, ws, "new@example.com")["user"]["id"]
+    ok(api.post(f"/workspaces/{ws}/people/{neha}/offboard", "owner", {"keep_tasks": True}))
+    assert sorted(n["data"]["action"] for n in inbox()) == ["joined", "offboarded"]
+
+
 # --- joiner checklist --------------------------------------------------------------------------------------
 
 

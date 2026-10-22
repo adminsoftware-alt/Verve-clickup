@@ -176,7 +176,7 @@ def remove_member(db: Session, access: Access, user_id: str) -> None:
                 "They are the only lead of " + ", ".join(t.name for t in orphaned)
                 + ". Give the team another lead first, or offboard them and hand it over."
             )
-    remove_from_workspace_teams(db, access.workspace_id, user_id)
+    remove_from_workspace_teams(db, access.workspace_id, user_id, access.user_id)
     from app.services.work import audit
     from app.services.work.people import clear_reports_to
 
