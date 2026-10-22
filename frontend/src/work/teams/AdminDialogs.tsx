@@ -3,7 +3,8 @@ import { DrawInPlace } from './inlineDialog';
 import * as XLSX from 'xlsx';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Download, FileSpreadsheet, LogOut, MinusCircle, X } from 'lucide-react';
 import { Portal, useEscapeToClose } from '../ui';
-import { peopleApi, personName, type ImportResult, type ImportRow, type JoinerStep, type OffboardPreview, type Person } from './peopleApi';
+import { parseLevel } from './levels';
+import { peopleApi, personName, type ImportResult, type ImportRow, type ImportTeam, type JoinerStep, type OffboardPreview, type Person } from './peopleApi';
 
 const Dialog: React.FC<{ title: string; onClose: () => void; width?: string; children: React.ReactNode }> = ({ title, onClose, width = 'w-[36rem]', children }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -197,8 +198,14 @@ const COLUMNS: [keyof ImportRow, string[]][] = [
   ['date_of_birth', ['date of birth', 'dob', 'birthday']],
   ['marriage_anniversary', ['marriage anniversary', 'anniversary']],
   ['phone', ['phone', 'mobile', 'contact']],
-  ['location', ['location', 'city', 'office']],
+  ['location', ['location', 'city', 'office', 'office location']],
+  ['level', ['level']],
+  ['employment_type', ['employment type', 'employment']],
+  ['emergency_contact_name', ['emergency contact name', 'emergency contact']],
+  ['emergency_contact_phone', ['emergency contact phone', 'emergency phone']],
 ];
+/** "Work email *" and "work email" are the same column: required marks and case don't matter. */
+const headerKey = (h: string) => h.replace(/\*/g, '').trim().toLowerCase();
 const DATE_FIELDS = new Set<keyof ImportRow>(['date_of_joining', 'date_of_birth', 'marriage_anniversary']);
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -220,13 +227,19 @@ function toIsoDate(v: unknown): string | undefined {
 export function rowsFromSheet(records: Record<string, unknown>[]): { rows: ImportRow[]; missing: string[] } {
   if (!records.length) return { rows: [], missing: ['email'] };
   const headers = Object.keys(records[0]);
-  const find = (aliases: string[]) => headers.find((h) => aliases.includes(h.trim().toLowerCase()));
+  const find = (aliases: string[]) => headers.find((h) => aliases.includes(headerKey(h)));
   const map = COLUMNS.map(([field, aliases]) => [field, find(aliases)] as const).filter(([, h]) => h);
   const missing = map.some(([f]) => f === 'email') ? [] : ['email'];
   const rows = records.map((rec) => {
     const row: ImportRow = { email: '' };
     for (const [field, header] of map) {
       const raw = rec[header as string];
+      if (field === 'level') {
+        // "L3", "l3", "3" or "L3 · Management" all mean 3.
+        const n = parseLevel(raw);
+        if (n != null) row.level = n;
+        continue;
+      }
       const value = DATE_FIELDS.has(field) ? toIsoDate(raw) : (raw == null ? '' : String(raw).trim());
       if (value) (row as unknown as Record<string, string>)[field] = value;
     }
@@ -235,15 +248,23 @@ export function rowsFromSheet(records: Record<string, unknown>[]): { rows: Impor
   return { rows, missing };
 }
 
-function downloadTemplate() {
-  const sheet = XLSX.utils.aoa_to_sheet([
-    ['Name', 'Email', 'Designation', 'Department', 'Reporting manager email', 'Teams', 'Role', 'Employee code', 'Date of joining', 'Date of birth', 'Marriage anniversary', 'Phone', 'Location'],
-    ['Priya Nair', 'priya.nair@verveadvisory.com', 'Executive', 'Accounts', 'ravi.kumar@verveadvisory.com', 'Accounts', 'Member', 'VAPL-104', '2026-09-01', '1998-04-12', '', '+91 98xxxxxx', 'Bengaluru'],
-  ]);
-  const book = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(book, sheet, 'People');
-  XLSX.writeFile(book, 'timetriq-people-template.xlsx');
+/** The Teams sheet of the onboarding workbook: Team name, Parent team, Description. */
+export function teamsFromSheet(records: Record<string, unknown>[]): ImportTeam[] {
+  if (!records.length) return [];
+  const headers = Object.keys(records[0]);
+  const col = (aliases: string[]) => headers.find((h) => aliases.includes(headerKey(h)));
+  const name = col(['team name', 'team', 'name']);
+  const parent = col(['parent team', 'parent']);
+  const description = col(['description']);
+  if (!name) return [];
+  const text = (rec: Record<string, unknown>, h?: string) => (h ? String(rec[h] ?? '').trim() : '');
+  return records
+    .map((rec) => ({ name: text(rec, name), parent: text(rec, parent) || undefined, description: text(rec, description) || undefined }))
+    .filter((t) => t.name);
 }
+
+/** The workbook the firm fills in once: Read me, Teams, People. Kept in public/ so it is the same file everywhere. */
+const TEMPLATE_URL = '/templates/verve-people-onboarding.xlsx';
 
 const ROW_ICON = { added: <CheckCircle2 size={14} className="text-emerald-600" />, updated: <CheckCircle2 size={14} className="text-sky-600" />, unchanged: <MinusCircle size={14} className="text-gray-400" />, error: <AlertTriangle size={14} className="text-red-600" /> };
 
@@ -252,6 +273,7 @@ export const ImportPeopleDialog: React.FC<{ ws: string; onClose: () => void; onD
   const fileRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [rows, setRows] = useState<ImportRow[]>([]);
+  const [teams, setTeams] = useState<ImportTeam[]>([]);
   const [check, setCheck] = useState<ImportResult | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [options, setOptions] = useState({ start_joiner_checklist: false, update_existing: true });
@@ -265,34 +287,39 @@ export const ImportPeopleDialog: React.FC<{ ws: string; onClose: () => void; onD
     setFileName(file.name);
     try {
       const book = XLSX.read(await file.arrayBuffer(), { cellDates: true });
-      const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(book.Sheets[book.SheetNames[0]], { defval: '', raw: true });
+      // The onboarding workbook has People and Teams sheets; a plain file is just its first sheet.
+      const sheetNamed = (name: string) => book.SheetNames.find((n) => n.trim().toLowerCase() === name);
+      const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(book.Sheets[sheetNamed('people') ?? book.SheetNames[0]], { defval: '', raw: true });
+      const teamSheet = sheetNamed('teams');
+      const parsedTeams = teamSheet ? teamsFromSheet(XLSX.utils.sheet_to_json<Record<string, unknown>>(book.Sheets[teamSheet], { defval: '', raw: true })) : [];
       const { rows: parsed, missing } = rowsFromSheet(records);
-      if (missing.length) { setError('The first sheet needs an "Email" column. Download the template to see the columns.'); setRows([]); return; }
+      if (missing.length) { setError('The People sheet needs a "Work email" column. Download the template to see the columns.'); setRows([]); return; }
       if (!parsed.length) { setError('No rows with an email address were found.'); setRows([]); return; }
       setRows(parsed);
+      setTeams(parsedTeams);
       setBusy(true);
-      setCheck(await peopleApi.importPeople(ws, { rows: parsed, dry_run: true, ...options }));
+      setCheck(await peopleApi.importPeople(ws, { rows: parsed, teams: parsedTeams, dry_run: true, ...options }));
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
   const recheck = async (next: typeof options) => {
     setOptions(next);
-    if (rows.length) setCheck(await peopleApi.importPeople(ws, { rows, dry_run: true, ...next }).catch(() => check));
+    if (rows.length) setCheck(await peopleApi.importPeople(ws, { rows, teams, dry_run: true, ...next }).catch(() => check));
   };
   const go = async () => {
     setBusy(true);
     setError(null);
-    try { setResult(await peopleApi.importPeople(ws, { rows, dry_run: false, ...options })); onDone(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    try { setResult(await peopleApi.importPeople(ws, { rows, teams, dry_run: false, ...options })); onDone(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
   const shown = result ?? check;
   return (
     <Dialog title="Import people from Excel" onClose={onClose} width="w-[48rem]">
       {!result && (
         <>
-          <p className="mb-3 text-sm text-gray-600">Use one row per person. Managers can be anyone already here or anyone in the same file. Existing people are matched by email.</p>
+          <p className="mb-3 text-sm text-gray-600">Upload the onboarding workbook: its Teams are created, everyone on People is added, and each Manager manages the Teams on their row. Existing people are matched by work email. Nothing changes until you press Import.</p>
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <button type="button" onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"><FileSpreadsheet size={14} /> {fileName ? 'Choose another file' : 'Choose a file'}</button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" aria-label="Spreadsheet file" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) read(f); e.target.value = ''; }} />
-            <button type="button" onClick={downloadTemplate} className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-brand-700 hover:bg-brand-50"><Download size={14} /> Download template</button>
+            <a href={TEMPLATE_URL} download className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-brand-700 hover:bg-brand-50"><Download size={14} /> Download template</a>
             {fileName && <span className="text-xs text-gray-500">{fileName} · {rows.length} rows</span>}
           </div>
           <div className="mb-3 flex flex-wrap gap-4 text-sm text-gray-700">
@@ -306,7 +333,11 @@ export const ImportPeopleDialog: React.FC<{ ws: string; onClose: () => void; onD
         <>
           <p className="mb-2 text-sm text-gray-700" role="status">
             {result ? 'Imported: ' : 'Ready to import: '}<b>{shown.added}</b> new, <b>{shown.updated}</b> updated{shown.errors ? <>, <b className="text-red-700">{shown.errors}</b> with problems (skipped)</> : ''}.
+            {shown.teams_created.length > 0 && <> {result ? 'Teams created' : 'Teams to create'}: <b>{shown.teams_created.join(', ')}</b>.</>}
           </p>
+          {shown.team_problems.length > 0 && (
+            <p className="mb-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">{shown.team_problems.join(' · ')}</p>
+          )}
           <div className="max-h-72 overflow-auto rounded-lg border border-gray-200">
             <table className="w-full text-sm" aria-label="Import rows">
               <thead className="sticky top-0 bg-gray-50 text-left text-xs text-gray-500"><tr><th className="px-3 py-1.5">Row</th><th className="px-3 py-1.5">Email</th><th className="px-3 py-1.5">Result</th><th className="px-3 py-1.5">Notes</th></tr></thead>

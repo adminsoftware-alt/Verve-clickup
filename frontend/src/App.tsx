@@ -102,6 +102,8 @@ const AppContent: React.FC = () => {
     // shell has its own boundary inside Layout, so the sidebar and header stay put there; here
     // there is nothing to keep, so a plain wait is honest.
     <Suspense fallback={<FullPageWaiting />}>
+    {/* A word about the day, once a day, after signing in -- never on the sign-in screen. */}
+    {user && <Suspense fallback={null}><DayLift /></Suspense>}
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
       {/* Public links: read-only, no sign-in. */}
@@ -171,8 +173,6 @@ const AppContent: React.FC = () => {
 const App: React.FC = () => {
   return (
     <BrowserRouter>
-      {/* A word about the day, once a day, that leaves on its own. */}
-      <Suspense fallback={null}><DayLift /></Suspense>
       {/* Confirmations and the odd "type a name", in the app's own shape rather than the
           browser's grey box. Anything can ask; this is what draws it. */}
       <AskHost />

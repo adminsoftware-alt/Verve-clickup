@@ -14,8 +14,8 @@ import { X } from 'lucide-react';
 
 const SEEN_KEY = 'verve.dayLift';
 /** Long enough to read twice, short enough that nobody has to dismiss it. */
-const ON_SCREEN_MS = 9000;
-const ARRIVES_AFTER_MS = 1400;
+const ON_SCREEN_MS = 6000;
+const ARRIVES_AFTER_MS = 900;
 
 interface Line {
   /** What the day is, said plainly. */
@@ -114,36 +114,33 @@ export const DayLift: React.FC = () => {
   return (
     <AnimatePresence>
       {line && (
+        // Centred, once, just after signing in: it opens from the middle, stays a few seconds and
+        // goes. The wrapper lets clicks through, so the app underneath is never blocked.
+        <div className="pointer-events-none fixed inset-0 z-[120] flex items-center justify-center p-4">
         <motion.div
-          // Bottom right: seen without being stood in front of. A modal for a kind word would
-          // be worse than saying nothing. It sits just above the assistant's round button
-          // (48px tall, 24px up on a desktop, above the bottom bar on a phone) so it never
-          // covers it while it is up.
-          initial={{ opacity: 0, y: 24, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 12, scale: 0.98 }}
-          transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+          initial={{ opacity: 0, scale: 0.85 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.92 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 24 }}
           role="status"
           aria-live="polite"
-          className="fixed bottom-[calc(8.25rem+env(safe-area-inset-bottom))] right-4 z-[120] w-[22rem] max-w-[calc(100vw-2rem)] sm:right-6 md:bottom-[5.25rem] overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5"
+          className="pointer-events-auto w-[24rem] max-w-full overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5"
         >
-          <div className={`h-1 w-full bg-gradient-to-r ${skin}`} />
-          <div className="flex items-start gap-3 px-4 py-3.5">
-            <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${skin} text-[13px] font-bold text-white shadow-sm`}>
-              {weekday.slice(0, 2)}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-semibold text-gray-900">{line.is}</p>
-              <p className="mt-0.5 text-[13px] leading-snug text-gray-600">{line.so}</p>
-            </div>
+          <div className={`h-1.5 w-full bg-gradient-to-r ${skin}`} />
+          <div className="relative flex flex-col items-center px-6 pb-5 pt-6 text-center">
             <button
               type="button"
               aria-label="Dismiss"
               onClick={() => setLine(null)}
-              className="-mr-1 -mt-1 rounded-lg p-1 text-gray-300 hover:bg-gray-100 hover:text-gray-600"
+              className="absolute right-2 top-2 rounded-lg p-1 text-gray-300 hover:bg-gray-100 hover:text-gray-600"
             >
               <X size={14} />
             </button>
+            <span className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${skin} text-base font-bold text-white shadow-md`}>
+              {weekday.slice(0, 2)}
+            </span>
+            <p className="mt-3 text-base font-semibold text-gray-900">{line.is}</p>
+            <p className="mt-1 text-sm leading-snug text-gray-600">{line.so}</p>
           </div>
           {/* A bar draining away, so it is obvious this is leaving on its own. */}
           <motion.div
@@ -153,6 +150,7 @@ export const DayLift: React.FC = () => {
             transition={{ duration: ON_SCREEN_MS / 1000, ease: 'linear' }}
           />
         </motion.div>
+        </div>
       )}
     </AnimatePresence>
   );

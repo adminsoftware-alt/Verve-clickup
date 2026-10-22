@@ -8,6 +8,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { personName, type Person } from './peopleApi';
+import { levelLabel } from './levels';
 
 export interface OrgNode { person: Person; children: OrgNode[] }
 
@@ -25,7 +26,7 @@ function tableRows(people: Person[], { byId, teamName }: Lookups): Record<string
         Email: p.user.email,
         Designation: p.designation ?? '',
         Department: p.department ?? '',
-        Level: p.level ?? '',
+        Level: p.level != null ? levelLabel(p.level) : '',
         'Reports to': boss ? personName(boss) : '',
         Teams: p.team_ids.map(teamName).filter(Boolean).join(', '),
         Status: p.pending ? 'Pending' : 'Active',

@@ -83,6 +83,12 @@ class MemberUpdate(BaseModel):
 Email = Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")]
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]
 Address = Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]
+# L1 (Leadership) to L6 (Trainees); see frontend/src/work/teams/levels.ts for the names.
+Level = Annotated[int, Field(ge=1, le=6)]
+EMPLOYMENT_TYPES = ("Full-time", "Part-time", "Article", "Intern", "Consultant")
+EmploymentType = Literal["Full-time", "Part-time", "Article", "Intern", "Consultant"]
+ContactName = Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]
+Phone = Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]
 
 
 class PersonCreate(BaseModel):
@@ -92,7 +98,7 @@ class PersonCreate(BaseModel):
     name: Optional[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]] = None
     role: WorkspaceRole = WorkspaceRole.member
     designation: Optional[ShortText] = None
-    level: Optional[Annotated[int, Field(ge=1, le=3)]] = None
+    level: Optional[Level] = None
     department: Optional[ShortText] = None
     manager_id: Optional[str] = None
     phone: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
@@ -103,6 +109,9 @@ class PersonCreate(BaseModel):
     date_of_birth: Optional[date] = None
     marriage_anniversary: Optional[date] = None
     takes_interviews: bool = False
+    employment_type: Optional[EmploymentType] = None
+    emergency_contact_name: Optional[ContactName] = None
+    emergency_contact_phone: Optional[Phone] = None
     team_ids: List[uuid.UUID] = Field(default_factory=list)
     send_invite: bool = False
     # Create the joiner checklist tasks (induction, learning, reviews, HR reminders) straight away.
@@ -116,7 +125,7 @@ class PersonUpdate(BaseModel):
     email: Optional[Email] = None
     role: Optional[WorkspaceRole] = None
     designation: Optional[ShortText] = None
-    level: Optional[Annotated[int, Field(ge=1, le=3)]] = None
+    level: Optional[Level] = None
     department: Optional[ShortText] = None
     manager_id: Optional[str] = None
     phone: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]] = None
@@ -127,6 +136,9 @@ class PersonUpdate(BaseModel):
     date_of_birth: Optional[date] = None
     marriage_anniversary: Optional[date] = None
     takes_interviews: Optional[bool] = None
+    employment_type: Optional[EmploymentType] = None
+    emergency_contact_name: Optional[ContactName] = None
+    emergency_contact_phone: Optional[Phone] = None
     team_ids: Optional[List[uuid.UUID]] = None
 
 
@@ -147,6 +159,9 @@ class PersonOut(BaseModel):
     date_of_birth: Optional[date] = None
     marriage_anniversary: Optional[date] = None
     takes_interviews: bool = False
+    employment_type: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
     team_ids: List[uuid.UUID] = Field(default_factory=list)
     direct_reports: int = 0
     invite_sent_at: Optional[datetime] = None
@@ -193,7 +208,7 @@ class PersonImportRow(BaseModel):
     name: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]] = None
     role: Optional[str] = None
     designation: Optional[ShortText] = None
-    level: Optional[Annotated[int, Field(ge=1, le=3)]] = None
+    level: Optional[Level] = None
     department: Optional[ShortText] = None
     manager_email: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=320)]] = None
     teams: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]] = None
@@ -203,10 +218,24 @@ class PersonImportRow(BaseModel):
     date_of_birth: Optional[date] = None
     marriage_anniversary: Optional[date] = None
     location: Optional[ShortText] = None
+    # Words, as typed in the sheet: matched to EMPLOYMENT_TYPES ignoring case.
+    employment_type: Optional[ShortText] = None
+    emergency_contact_name: Optional[ContactName] = None
+    emergency_contact_phone: Optional[Phone] = None
+
+
+class TeamImportRow(BaseModel):
+    """One Team from the onboarding workbook's Teams sheet. Created if the workspace has no Team of that name."""
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+    parent: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=64)]] = None
+    description: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=5000)]] = None
 
 
 class PersonImportIn(BaseModel):
     rows: List[PersonImportRow] = Field(min_length=1, max_length=1000)
+    # The Teams sheet, when the file has one: made first, so People can name them.
+    teams: List[TeamImportRow] = Field(default_factory=list, max_length=300)
     dry_run: bool = False
     send_invites: bool = False
     start_joiner_checklist: bool = False
@@ -228,6 +257,8 @@ class PersonImportResult(BaseModel):
     errors: int
     rows: List[PersonImportRowResult]
     email_problem: Optional[str] = None
+    teams_created: List[str] = Field(default_factory=list)
+    team_problems: List[str] = Field(default_factory=list)
 
 
 class OffboardPreview(BaseModel):

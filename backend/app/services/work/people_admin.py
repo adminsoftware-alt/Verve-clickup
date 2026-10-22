@@ -27,7 +27,46 @@ log = logging.getLogger(__name__)
 ROLE_WORDS = {
     "owner": None, "admin": WorkspaceRole.admin, "administrator": WorkspaceRole.admin, "member": WorkspaceRole.member,
     "limited": WorkspaceRole.limited, "limited member": WorkspaceRole.limited, "guest": WorkspaceRole.guest, "": WorkspaceRole.member,
+    # The firm's own words: Admin, Manager, Employee. A Manager is stored as a member who manages
+    # (leads) every Team named on their row; an Employee is a member who manages none.
+    "employee": WorkspaceRole.member, "manager": WorkspaceRole.member,
 }
+
+
+def _import_teams(db: Session, access: Access, rows: List[s.TeamImportRow], teams: Dict[str, uuid.UUID]) -> Tuple[List[str], List[str]]:
+    """Make the Teams sheet's Teams that don't exist yet, parents before children.
+
+    Returns (names created, problems). `teams` (lower-cased name -> id) is updated in place.
+    """
+    from app.services.work.teams import create_team
+
+    created: List[str] = []
+    problems: List[str] = []
+    waiting = [r for r in rows if r.name.lower() not in teams]
+    seen = set()
+    for r in list(waiting):
+        if r.name.lower() in seen:
+            problems.append(f"Team {r.name} appears more than once on Teams")
+            waiting.remove(r)
+        seen.add(r.name.lower())
+    while waiting:
+        ready = [r for r in waiting if not r.parent or r.parent.lower() in teams]
+        if not ready:
+            problems += [f"Team {r.name}: parent team {r.parent} is not on Teams" for r in waiting]
+            break
+        for r in ready:
+            waiting.remove(r)
+            try:
+                with db.begin_nested():
+                    team = create_team(db, access, s.TeamCreate(
+                        name=r.name, description=r.description or None,
+                        parent_team_id=teams[r.parent.lower()] if r.parent else None,
+                    ))
+                teams[r.name.lower()] = team.id
+                created.append(r.name)
+            except (Invalid, Forbidden) as exc:
+                problems.append(f"Team {r.name}: {exc.message}")
+    return created, problems
 
 
 def _member(db: Session, access: Access, user_id: str) -> Tuple[WorkspaceMember, User]:
@@ -55,8 +94,10 @@ def import_people(db: Session, access: Access, data: s.PersonImportIn) -> s.Pers
     teams = {t.name.lower(): t.id for t in db.scalars(select(Team).where(Team.workspace_id == access.workspace_id))}
     results: List[s.PersonImportRowResult] = []
     touched: Dict[str, Tuple[int, s.ImportRow, str]] = {}  # email -> (result index, row, user id)
+    row_teams: Dict[str, List[uuid.UUID]] = {}  # email -> the Teams on their row
     seen = set()
     outer = db.begin_nested()
+    teams_created, team_problems = _import_teams(db, access, data.teams, teams)
     for i, row in enumerate(data.rows, start=1):
         email = row.email.strip().lower()
         res = s.PersonImportRowResult(row=i, email=email, outcome="unchanged")
@@ -67,16 +108,26 @@ def import_people(db: Session, access: Access, data: s.PersonImportIn) -> s.Pers
         seen.add(email)
         role = ROLE_WORDS.get((row.role or "").strip().lower(), "bad")
         if role == "bad" or role is None:
-            res.outcome, res.problems = "error", [f"unknown role \"{row.role}\" (use Admin, Member, Limited or Guest)"]
+            res.outcome, res.problems = "error", [f"unknown access \"{row.role}\" (use Admin, Manager or Employee)"]
             continue
         team_ids, missing = [], []
         for name in [t.strip() for t in (row.teams or "").replace(";", ",").split(",") if t.strip()]:
             (team_ids if name.lower() in teams else missing).append(teams.get(name.lower(), name))
         if missing:
             res.problems.append("unknown team: " + ", ".join(missing))
+        row_teams[email] = [t for t in team_ids if isinstance(t, uuid.UUID)]
+        if (row.role or "").strip().lower() == "manager" and not row_teams[email]:
+            res.problems.append("a Manager needs at least one Team on their row to manage")
         existing = db.scalars(select(User).where(func.lower(User.email) == email)).first()
         member = db.get(WorkspaceMember, (access.workspace_id, existing.id)) if existing else None
         profile = {f: getattr(row, f) for f in PROFILE_FIELDS if f != "takes_interviews" and getattr(row, f, None) is not None}
+        if "employment_type" in profile:
+            kind = next((k for k in s.EMPLOYMENT_TYPES if k.lower() == profile["employment_type"].strip().lower()), None)
+            if kind is None:
+                res.problems.append(f"unknown employment type \"{profile['employment_type']}\" (use {', '.join(s.EMPLOYMENT_TYPES)})")
+                del profile["employment_type"]
+            else:
+                profile["employment_type"] = kind
         try:
             with db.begin_nested():
                 if member is None:
@@ -131,6 +182,16 @@ def import_people(db: Session, access: Access, data: s.PersonImportIn) -> s.Pers
                 db.flush()
         except Invalid as exc:
             res.problems.append(exc.message)
+    # Third pass: Access says who manages. A Manager manages every Team on their row; someone
+    # marked Employee manages none (so a re-import after a demotion takes effect).
+    for email, (idx, row, user_id) in touched.items():
+        word = (row.role or "").strip().lower()
+        if word not in ("manager", "employee"):
+            continue
+        for membership in db.scalars(select(TeamMember).join(Team, Team.id == TeamMember.team_id).where(
+                Team.workspace_id == access.workspace_id, TeamMember.user_id == user_id)):
+            membership.is_lead = word == "manager" and membership.team_id in row_teams.get(email, [])
+        db.flush()
     email_problem = None
     if data.dry_run:
         outer.rollback()
@@ -149,7 +210,7 @@ def import_people(db: Session, access: Access, data: s.PersonImportIn) -> s.Pers
     added = sum(r.outcome == "added" for r in results)
     updated = sum(r.outcome == "updated" for r in results)
     return s.PersonImportResult(dry_run=data.dry_run, added=added, updated=updated, errors=sum(r.outcome == "error" for r in results),
-                          rows=results, email_problem=email_problem)
+                          rows=results, email_problem=email_problem, teams_created=teams_created, team_problems=team_problems)
 
 
 # --- offboarding --------------------------------------------------------------------------------------------
@@ -393,7 +454,7 @@ def offboard(db: Session, access: Access, user_id: str, data: s.OffboardIn) -> s
                 row.is_lead = True
             led_moved += 1
         db.flush()
-    remove_from_workspace_teams(db, access.workspace_id, user_id)
+    remove_from_workspace_teams(db, access.workspace_id, user_id, access.user_id)
     member.deactivated_at = datetime.now(timezone.utc)
     member.deactivated_by = access.user_id
     db.flush()

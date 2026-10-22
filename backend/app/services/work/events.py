@@ -53,6 +53,8 @@ KIND_LABELS = {
     "reminder": "Reminders",
     "automation": "Automation messages",
     "timesheet_reminder": "Timesheet reminders",
+    "time_changed": "Changes someone else makes to my time",
+    "team_change": "People joining or leaving my team",
     "escalation": "Escalations about my team's tasks",
     "space_join_request": "Requests to join my Spaces",
     "space_join_decision": "Answers to my requests to join a Space",

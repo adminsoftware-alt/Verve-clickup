@@ -123,11 +123,52 @@ def test_timesheet_visibility_follows_time_visibility(api, org):
     assert api.get(f"/workspaces/{org['ws']}/timesheet", "member2", params={"start": MONDAY.isoformat(), "user_id": "member"}).status_code == 404
     assert sheet(api, org, "lead", user_id="member")["total_seconds"] == HOUR
     assert sheet(api, org, "admin", user_id="member")["total_seconds"] == HOUR
-    # Only owners and admins change other people's time.
-    assert sheet(api, org, "lead", user_id="member")["can_edit"] is False
-    assert cell(api, org, "lead", org["a"], MONDAY, 2, user_id="member").status_code == 403
-    assert cell(api, org, "admin", org["a"], MONDAY, 2, user_id="member").status_code == 204
-    assert sheet(api, org, "member")["total_seconds"] == 2 * HOUR
+    # Admins change anyone's time; a Team lead changes the time of the people they lead.
+    assert sheet(api, org, "lead", user_id="member")["can_edit"] is True
+    assert cell(api, org, "lead", org["a"], MONDAY, 2, user_id="member").status_code == 204
+    assert cell(api, org, "admin", org["a"], MONDAY, 2.5, user_id="member").status_code == 204
+    assert sheet(api, org, "member")["total_seconds"] == int(2.5 * HOUR)
+    # Not someone outside their Teams.
+    log(api, org["a"], "member2", MONDAY, 1)
+    assert cell(api, org, "lead", org["a"], MONDAY, 2, user_id="member2").status_code == 404
+
+
+def inbox(api, org, who):
+    return ok(api.get(f"/workspaces/{org['ws']}/inbox", who, params={"tab": "primary"}))
+
+
+def test_a_team_lead_fixes_a_team_members_time_and_the_member_is_told(api, org):
+    entry = log(api, org["a"], "member", MONDAY, 3)
+    # Through the time entry itself: change it, then delete it.
+    changed = ok(api.patch(f"/time/{entry['id']}", "lead", {"duration_seconds": 2 * HOUR}))
+    assert changed["duration_seconds"] == 2 * HOUR
+    told = [n for n in inbox(api, org, "member") if n["kind"] == "time_changed"]
+    assert len(told) == 1 and told[0]["data"]["before"] == 3 * HOUR and told[0]["data"]["seconds"] == 2 * HOUR
+    assert told[0]["actor"]["id"] == "lead"
+    ok(api.delete(f"/time/{entry['id']}", "lead"), 204)
+    assert sheet(api, org, "member")["total_seconds"] == 0
+    # The lead may also log time for them...
+    log(api, org["b"], "lead", MONDAY, 1, user_id="member")
+    assert sheet(api, org, "member")["total_seconds"] == HOUR
+    actions = sorted(n["data"]["action"] for n in inbox(api, org, "member") if n["kind"] == "time_changed")
+    assert actions == ["changed", "deleted", "logged"]
+    # ...and their own changes to their own time tell nobody.
+    assert not [n for n in inbox(api, org, "lead") if n["kind"] == "time_changed"]
+    # Each change is kept in the audit log.
+    actions = {r["action"] for r in ok(api.get(f"/workspaces/{org['ws']}/audit", "owner"))}
+    assert {"time.changed", "time.deleted", "time.logged"} <= actions
+
+
+def test_a_team_lead_cannot_touch_time_outside_their_teams(api, org):
+    entry = log(api, org["a"], "member2", MONDAY, 1)
+    assert api.patch(f"/time/{entry['id']}", "lead", {"duration_seconds": HOUR // 2}).status_code == 404
+    assert api.delete(f"/time/{entry['id']}", "lead").status_code == 404
+    start = datetime(MONDAY.year, MONDAY.month, MONDAY.day, 10, tzinfo=timezone.utc)
+    body = {"started_at": start.isoformat(), "ended_at": (start + timedelta(hours=1)).isoformat(), "user_id": "member2"}
+    assert api.post(f"/tasks/{org['a']['id']}/time", "lead", body).status_code == 403
+    # A plain member cannot change a colleague's time either.
+    mine = log(api, org["a"], "member", MONDAY, 1)
+    assert api.patch(f"/time/{mine['id']}", "member2", {"duration_seconds": 60}).status_code == 404
 
 
 def test_all_timesheets_for_leads_and_admins_only(api, org):
@@ -245,6 +286,23 @@ def test_submit_locks_the_week_and_the_team_lead_approves(api, approvals_on):
     assert cell(api, org, "member", org["a"], MONDAY, 1).status_code == 204
     events = [c["event"] for c in ok(api.get(f"/timesheet-submissions/{sub['id']}/comments", "member"))]
     assert events == ["submitted", "approved", "reopened"]
+
+
+def test_the_team_lead_fixes_a_submitted_week_but_not_an_approved_one(api, approvals_on):
+    org = approvals_on
+    entry = log(api, org["a"], "member", MONDAY, 2)
+    sub = ok(submit(api, org, "member"))
+    # Reviewing a submitted week is when a Manager spots the mistake, so they may fix it then.
+    assert sheet(api, org, "lead", user_id="member")["can_edit"] is True
+    assert cell(api, org, "lead", org["a"], MONDAY, 1.5, user_id="member").status_code == 204
+    # The member still cannot: their week is waiting for a decision.
+    assert cell(api, org, "member", org["a"], MONDAY, 3).status_code == 403
+    ok(api.post(f"/timesheet-submissions/{sub['id']}/approve", "lead", {}))
+    # Approved is final for everyone but admins.
+    assert sheet(api, org, "lead", user_id="member")["can_edit"] is False
+    assert cell(api, org, "lead", org["a"], MONDAY, 1, user_id="member").status_code == 403
+    assert api.delete(f"/time/{entry['id']}", "lead").status_code == 403
+    assert cell(api, org, "admin", org["a"], MONDAY, 1, user_id="member").status_code == 204
 
 
 def test_request_changes_withdraw_and_resubmit(api, approvals_on):

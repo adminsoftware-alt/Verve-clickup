@@ -68,3 +68,5 @@ frontend/_*.py
 # spreadsheet stays on the machine it was made on.
 verve-demo-data.xlsx
 *.xlsx
+# Except the blank onboarding template the app offers for download (fictional example only).
+!frontend/public/templates/*.xlsx

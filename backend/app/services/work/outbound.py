@@ -85,6 +85,26 @@ def channels() -> o.Channels:
 # --- words for a notification ----------------------------------------------------------------------------------
 
 
+def _hours(seconds) -> str:
+    return f"{round((seconds or 0) / 3600, 2):g}h"
+
+
+def _time_changed_line(d: dict) -> str:
+    """'changed your time on 21 Oct from 3h to 2.5h', from the data timetracking.tell_time_owner keeps."""
+    day = (d.get("day") or "")[:10]
+    try:
+        day = datetime.fromisoformat(day).strftime("%d %b")
+    except ValueError:
+        pass
+    if d.get("action") == "logged":
+        return f"logged {_hours(d.get('seconds'))} for you on {day}"
+    if d.get("action") == "deleted":
+        return f"removed {_hours(d.get('before'))} of your time on {day}"
+    if d.get("before") is not None and d.get("before") != d.get("seconds"):
+        return f"changed your time on {day} from {_hours(d.get('before'))} to {_hours(d.get('seconds'))}"
+    return f"edited your time entry on {day}"
+
+
 def describe(db: Session, n: Notification) -> Tuple[str, str]:
     """(title, one line), e.g. ("Reconcile bank", "Priya assigned you to this task")."""
     actor = db.get(User, n.actor_id) if n.actor_id else None
@@ -103,6 +123,10 @@ def describe(db: Session, n: Notification) -> Tuple[str, str]:
         "automation": f"Automation: {d.get('rule', '')}",
         "timesheet_reminder": f"Your timesheet shows {round((d.get('tracked') or 0) / 3600, 1)}h of {round((d.get('expected') or 0) / 3600, 1)}h this week",
         "reminder": "Reminder",
+        "time_changed": _time_changed_line(d),
+        "team_change": (f"{d.get('person')} joined your team {d.get('team')}" if d.get("action") == "joined"
+                        else f"{d.get('person')} left the firm and your team {d.get('team')}" if d.get("action") == "offboarded"
+                        else f"{d.get('person')} left your team {d.get('team')}"),
         "space_join_request": f"asked to join the {d.get('space')} Space",
         "space_join_decision": f"{'let you into' if d.get('status') == 'approved' else 'declined your request to join'} the {d.get('space')} Space",
         "chat_mention": f"mentioned you in {d.get('view') or 'a chat'}: {(d.get('body') or '')[:120]}",
@@ -114,10 +138,13 @@ def describe(db: Session, n: Notification) -> Tuple[str, str]:
 
 def _link(n: Notification) -> str:
     base = settings.APP_URL.rstrip("/")
-    if n.task_id:
-        return f"{base}/inbox"
-    if n.kind == "timesheet_reminder":
+    if n.kind in ("timesheet_reminder", "time_changed"):
         return f"{base}/timesheets"
+    if n.kind == "team_change" and (n.data or {}).get("team_id"):
+        return f"{base}/people/teams/{n.data['team_id']}"
+    if n.task_id:
+        # Straight to the task, open and editable, rather than to a list to find it in.
+        return f"{base}/inbox?task={n.task_id}&n={n.id}"
     return f"{base}/inbox"
 
 
