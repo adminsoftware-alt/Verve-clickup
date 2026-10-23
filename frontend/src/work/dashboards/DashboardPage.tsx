@@ -3,8 +3,9 @@ import { FEATURES } from '../../config/features';
 import { FavoriteStar } from '../Favorites';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  BarChart3, ChevronRight, Copy, Download, Expand, FileSpreadsheet, FilterX, GripVertical, ImageDown, LayoutDashboard, Mail, MoreHorizontal, Pencil, PieChart as PieChartIcon, Plus, Printer, RefreshCw,
-  RotateCcw, Share2, Trash2, Undo2, Users,
+  AlertCircle, AlertTriangle, BarChart3, BatteryMedium, CalendarCheck, CalendarClock, CalendarDays, CheckCircle2, ChevronRight, Clock, Copy, Download, Expand,
+  FileSpreadsheet, FilterX, FolderKanban, Gauge, Globe, GripVertical, Hash, History, ImageDown, LayoutDashboard, LineChart, ListChecks, Mail, MessageSquare,
+  MoreHorizontal, Pencil, PieChart as PieChartIcon, Plus, Printer, RefreshCw, RotateCcw, Scale, Share2, StickyNote, Target, Trash2, Undo2, Users, Zap,
 } from 'lucide-react';
 import { useWork } from '../WorkContext';
 import { TaskPanel } from '../TaskPanel';
@@ -69,6 +70,42 @@ const RELATION_NOTE: Record<string, string> = {
  * where deleting it goes back to the standard view summary.
  */
 const TIME_CARDS = ['timesheet', 'time_report', 'capacity', 'variance', 'completed', 'worked_on'];
+/** Cards with tasks behind them, so a click anywhere on the card lists those tasks. */
+const DRILLABLE = ['calculation', 'pie', 'bar', 'line', 'task_list', 'portfolio', 'behind', 'completed', 'capacity', 'variance', 'plan'];
+/** Hours cards have no task list behind them; a click on one opens the Timesheet instead. */
+const OPENS_TIMESHEET = ['time_report', 'timesheet', 'worked_on'];
+const isClickable = (card: Card) => DRILLABLE.includes(card.type) || OPENS_TIMESHEET.includes(card.type);
+
+/** The icon tile on a card header, in the colour of what the card is about. */
+function cardLook(card: Card): { Icon: React.ElementType; tile: string } {
+  const due = card.config.filters?.due;
+  switch (card.type) {
+    case 'pie': return { Icon: PieChartIcon, tile: '#8B5CF6' };
+    case 'bar': return { Icon: BarChart3, tile: '#3B82F6' };
+    case 'line': return { Icon: LineChart, tile: '#3B82F6' };
+    case 'calculation': return { Icon: Hash, tile: '#3B82F6' };
+    case 'task_list':
+      if (due === 'overdue') return { Icon: AlertCircle, tile: '#EF4444' };
+      if (due) return { Icon: CalendarDays, tile: '#F97316' };
+      return { Icon: ListChecks, tile: '#3B82F6' };
+    case 'time_report': return { Icon: Clock, tile: '#0EA5E9' };
+    case 'timesheet': return { Icon: CalendarClock, tile: '#6366F1' };
+    case 'portfolio': return { Icon: FolderKanban, tile: '#64748B' };
+    case 'behind': return { Icon: AlertTriangle, tile: '#EF4444' };
+    case 'completed': return { Icon: CheckCircle2, tile: '#8B5CF6' };
+    case 'notes': return { Icon: StickyNote, tile: '#F59E0B' };
+    case 'embed': return { Icon: Globe, tile: '#64748B' };
+    case 'discussion': return { Icon: MessageSquare, tile: '#EC4899' };
+    case 'capacity': return { Icon: Gauge, tile: '#6366F1' };
+    case 'variance': return { Icon: Scale, tile: '#F97316' };
+    case 'plan': return { Icon: CalendarCheck, tile: '#3B82F6' };
+    case 'battery': return { Icon: BatteryMedium, tile: '#0EA5E9' };
+    case 'worked_on': return { Icon: History, tile: '#0EA5E9' };
+    case 'goal': return { Icon: Target, tile: '#F43F5E' };
+    case 'sprint': return { Icon: Zap, tile: '#8B5CF6' };
+    default: return { Icon: LayoutDashboard, tile: '#64748B' };
+  }
+}
 /** A single day is too short to say anything about an on-time habit, so that card starts at a week. */
 const periodChoices = (card: Card): [Period['preset'], string][] =>
   (card.type === 'completed' ? CARD_PERIODS.filter(([v]) => v !== 'today' && v !== 'yesterday') : CARD_PERIODS);
@@ -565,7 +602,7 @@ export const DashboardPage: React.FC<{
       </header>
       )}
 
-      <main className="min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-8 sm:py-6">
+      <main className="dash-3d min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-8 sm:py-6">
         {/* The quote first, where it is the first thing read; it is not dashboard content, so
             it stays off the printout. */}
         {intro && <div className="no-print">{intro}</div>}
@@ -723,7 +760,20 @@ export const DashboardPage: React.FC<{
                 aria-label={card.title}
                 onDragOver={(e) => { if (editMode && dragging) e.preventDefault(); }}
                 onDrop={(e) => { e.preventDefault(); if (dragging) moveBefore(dragging, card.id); setDragging(null); }}
-                className={`ui-card group relative flex min-w-0 flex-col transition-shadow hover:shadow-[var(--ui-shadow-sm)] ${dragging === card.id ? 'opacity-50' : ''} ${editMode ? '!border-dashed !border-brand-200' : ''}`}
+                // A click on the card itself lists its tasks. Clicks on its own controls, on a
+                // chart (whose bars drill by themselves), from a menu or dialog it opened, or
+                // ending a text selection are left alone.
+                onClick={(e) => {
+                  if (editMode || !isClickable(card)) return;
+                  const target = e.target as HTMLElement;
+                  if (!e.currentTarget.contains(target)) return;
+                  if (target.closest('button, a, input, select, textarea, label, [role="menu"], .recharts-wrapper')) return;
+                  if (window.getSelection()?.toString()) return;
+                  if (OPENS_TIMESHEET.includes(card.type)) navigate('/timesheets');
+                  else setDialog({ type: 'drill', cardId: card.id, title: card.title });
+                }}
+                title={editMode || !isClickable(card) ? undefined : OPENS_TIMESHEET.includes(card.type) ? 'Open the Timesheet' : 'Show these tasks'}
+                className={`ui-card dash-card group relative flex min-w-0 flex-col ${!editMode && isClickable(card) ? 'is-clickable' : ''} ${dragging === card.id ? 'opacity-50' : ''} ${editMode ? '!border-dashed !border-brand-200' : ''}`}
                 style={{ gridColumn: `span ${card.width} / span ${card.width}`, gridRow: `span ${card.height} / span ${card.height}` }}
               >
                 <header className="flex items-center gap-1.5 px-4 pt-3.5">
@@ -738,16 +788,17 @@ export const DashboardPage: React.FC<{
                       <GripVertical size={14} />
                     </span>
                   )}
-                  {card.type === 'bar' || card.type === 'pie' ? (
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                        {card.type === 'pie' ? <PieChartIcon size={15} /> : <BarChart3 size={15} />}
+                  {(() => {
+                    const { Icon, tile } = cardLook(card);
+                    return (
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="tile-3d h-7 w-7 rounded-lg" style={{ '--tile': tile } as React.CSSProperties}>
+                          <Icon size={15} />
+                        </span>
+                        <h2 className="min-w-0 truncate text-sm font-semibold text-gray-900">{card.title}</h2>
                       </span>
-                      <span className="block min-w-0 truncate text-sm font-semibold text-gray-900">{card.title}</span>
-                    </span>
-                  ) : (
-                    <h2 className="min-w-0 truncate text-sm font-semibold text-gray-900">{card.title}</h2>
-                  )}
+                    );
+                  })()}
                   {/* Time cards carry their own period, so today / this week / this month or a
                       range is one click away rather than an edit. */}
                   <span className="flex-1" />

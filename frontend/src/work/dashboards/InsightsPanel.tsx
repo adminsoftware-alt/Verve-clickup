@@ -295,7 +295,7 @@ export const InsightsPanel: React.FC<{
   return (
     <section aria-label="Highlights" className="ui-card mt-8 break-before-auto p-3 sm:p-4">
       <h3 className="mb-1 flex items-center gap-2 px-2 text-base font-semibold text-gray-900">
-        <Sparkles size={16} className="text-amber-500" /> Highlights
+        <span className="tile-3d h-7 w-7 rounded-lg" style={{ '--tile': '#F59E0B' } as React.CSSProperties}><Sparkles size={15} /></span> Highlights
       </h3>
       {!insights ? (
         <div className="space-y-2 p-2" aria-busy="true" aria-label="Loading highlights">

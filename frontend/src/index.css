@@ -697,3 +697,82 @@ select:not([multiple]):not([size]) {
 @media (pointer: coarse) {
   input, select, textarea { font-size: 16px; }
 }
+
+/* --- Dashboards: a raised, finished look --------------------------------------------------------
+   Same cards in the same places; only the finish changes. Cards sit on the page like paper on a
+   desk -- a white top edge catching the light, a soft shadow under them -- and the icon chips are
+   small glossy tiles in the colour of what they stand for, like app icons. Scoped to Dashboards. */
+.dash-3d { background: linear-gradient(180deg, #F8F9FB 0%, #F1F3F6 100%); }
+.dash-3d .ui-card {
+  background: linear-gradient(180deg, #FFFFFF 0%, #FCFCFD 100%);
+  border-color: rgba(16, 24, 40, 0.07);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 #FFFFFF,
+    0 1px 2px rgba(16, 24, 40, 0.05),
+    0 6px 14px -8px rgba(16, 24, 40, 0.10),
+    0 18px 32px -22px rgba(16, 24, 40, 0.22);
+}
+.dash-3d .ui-card-hover:hover,
+.dash-3d section.ui-card:hover {
+  box-shadow:
+    inset 0 1px 0 #FFFFFF,
+    0 2px 4px rgba(16, 24, 40, 0.06),
+    0 10px 22px -10px rgba(16, 24, 40, 0.16),
+    0 24px 40px -24px rgba(16, 24, 40, 0.28);
+}
+.dash-3d .ui-card-hover:hover { transform: translateY(-2px); }
+
+/* Grid cards: they rise a little under the pointer, their icon tile brightens, and a card that
+   opens its tasks says so with the pointer and a blue title. */
+.dash-3d .dash-card { transition: box-shadow 180ms var(--ui-ease), transform 180ms var(--ui-ease), border-color 180ms var(--ui-ease); }
+.dash-3d .dash-card:hover { transform: translateY(-2px); border-color: rgba(16, 24, 40, 0.11); }
+.dash-3d .dash-card .tile-3d { transition: transform 180ms var(--ui-ease), filter 180ms var(--ui-ease); }
+.dash-3d .dash-card:hover .tile-3d { transform: scale(1.06); filter: brightness(1.06) saturate(1.08); }
+.dash-3d .dash-card.is-clickable { cursor: pointer; }
+.dash-3d .dash-card.is-clickable h2 { transition: color 160ms var(--ui-ease); }
+.dash-3d .dash-card.is-clickable:hover h2 { color: #2563EB; }
+.dash-3d .dash-card.is-clickable:active { transform: translateY(0); }
+.dash-3d .ui-card-hover .tile-3d { transition: transform 180ms var(--ui-ease); }
+.dash-3d .ui-card-hover:hover .tile-3d { transform: scale(1.06); }
+
+/* A glossy icon tile. Its colour comes in as --tile. */
+.tile-3d {
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  color: #fff;
+  background: linear-gradient(160deg, color-mix(in oklab, var(--tile) 78%, white) 0%, var(--tile) 62%, color-mix(in oklab, var(--tile) 88%, black) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.10),
+    0 6px 14px -6px color-mix(in oklab, var(--tile) 70%, transparent);
+}
+
+/* A figure tile inside a card: pressed slightly into it, and lifted out when it can be opened. */
+.dash-well {
+  background: linear-gradient(180deg, #F9FAFB 0%, #F4F5F7 100%);
+  box-shadow: inset 0 1px 2px rgba(16, 24, 40, 0.05), inset 0 0 0 1px rgba(16, 24, 40, 0.05);
+  transition: background 160ms var(--ui-ease), box-shadow 160ms var(--ui-ease), transform 160ms var(--ui-ease);
+}
+.dash-well:not(:disabled):hover {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(16, 24, 40, 0.07), 0 8px 18px -10px rgba(16, 24, 40, 0.25);
+  transform: translateY(-1px);
+}
+/* Progress bars with a little depth: lighter on top, a soft glow in their own colour. */
+.bar-3d {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--tile) 72%, white), var(--tile));
+  box-shadow: 0 2px 6px -2px color-mix(in oklab, var(--tile) 60%, transparent);
+}
+
+/* Charts: bars and slices stand off the card with a soft shadow beneath. */
+.dash-3d .recharts-bar-rectangle path { filter: drop-shadow(0 4px 6px rgba(16, 24, 40, 0.14)); }
+.dash-3d .recharts-pie-sector path { filter: drop-shadow(0 3px 5px rgba(16, 24, 40, 0.16)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-3d .ui-card-hover:hover, .dash-well:not(:disabled):hover, .dash-3d .dash-card:hover,
+  .dash-3d .dash-card:hover .tile-3d, .dash-3d .ui-card-hover:hover .tile-3d { transform: none; }
+}
+@media print {
+  .dash-3d { background: none; }
+  .dash-3d .ui-card, .tile-3d, .bar-3d { box-shadow: none; }
+}

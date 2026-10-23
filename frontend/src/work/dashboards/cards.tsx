@@ -356,6 +356,14 @@ const PieCard: React.FC<{ segments: Segment[]; format: string; total: number; do
       <div className="relative min-h-0 flex-1">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
+            <defs>
+              {segments.map((sg) => (
+                <linearGradient key={sg.key} id={`pie-${sg.key.replace(/[^\w-]/g, '')}`} x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor={`color-mix(in oklab, ${sg.color} 72%, white)`} />
+                  <stop offset="100%" stopColor={`color-mix(in oklab, ${sg.color} 88%, black)`} />
+                </linearGradient>
+              ))}
+            </defs>
             <Pie
               data={segments}
               dataKey="value"
@@ -368,7 +376,7 @@ const PieCard: React.FC<{ segments: Segment[]; format: string; total: number; do
               onClick={(entry: { key?: string; label?: string }) => entry.key && onDrill(entry.key, entry.label ?? '')}
               isAnimationActive={false}
             >
-              {segments.map((sg) => <Cell key={sg.key} fill={sg.color} stroke={segments.length > 1 ? '#fff' : 'none'} strokeWidth={2} className="cursor-pointer outline-none" />)}
+              {segments.map((sg) => <Cell key={sg.key} fill={`url(#pie-${sg.key.replace(/[^\w-]/g, '')})`} stroke={segments.length > 1 ? '#fff' : 'none'} strokeWidth={2} className="cursor-pointer outline-none" />)}
             </Pie>
             <Tooltip formatter={(v: number) => fmt(v, format)} />
           </PieChart>
@@ -447,10 +455,10 @@ const BarCard: React.FC<{ segments: Segment[]; format: string } & Pick<CardHandl
                   style={{ minHeight: ROW_PX }}
                 >
                   <span className="w-36 shrink-0 truncate text-[13px] text-gray-700">{sg.label}</span>
-                  <span className="relative h-3.5 flex-1 overflow-hidden rounded-full bg-gray-100">
+                  <span className="relative h-3.5 flex-1 overflow-hidden rounded-full bg-gray-100 shadow-[inset_0_1px_1px_rgba(16,24,40,0.06)]">
                     <span
-                      className="absolute inset-y-0 left-0 rounded-full"
-                      style={{ width: `${(100 * sg.value) / top}%`, backgroundColor: sg.color }}
+                      className="bar-3d absolute inset-y-0 left-0 rounded-full"
+                      style={{ width: `${(100 * sg.value) / top}%`, '--tile': sg.color } as React.CSSProperties}
                     />
                   </span>
                   <span className="w-12 shrink-0 text-right text-[13px] font-semibold tabular-nums text-gray-900">
@@ -480,9 +488,12 @@ const BarCard: React.FC<{ segments: Segment[]; format: string } & Pick<CardHandl
           <BarChart data={shown} margin={{ top: 40, right: 8, bottom: crowded ? 34 : 0, left: 6 }}>
             <defs>
               {shown.map((sg) => (
+                // Lit from above: a lighter top running down into the full colour, so the bars
+                // read as solid blocks rather than flat paint.
                 <linearGradient key={sg.key} id={`bar-${sg.key.replace(/[^\w-]/g, '')}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={sg.color} stopOpacity={1} />
-                  <stop offset="100%" stopColor={sg.color} stopOpacity={0.72} />
+                  <stop offset="0%" stopColor={`color-mix(in oklab, ${sg.color} 70%, white)`} />
+                  <stop offset="45%" stopColor={sg.color} />
+                  <stop offset="100%" stopColor={`color-mix(in oklab, ${sg.color} 85%, black)`} />
                 </linearGradient>
               ))}
             </defs>

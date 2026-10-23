@@ -102,7 +102,7 @@ export const DailyThought: React.FC<{
   return (
     <section
       aria-label="Thought of the day"
-      className={`mb-4 overflow-hidden rounded-2xl bg-gradient-to-r ${skin.band} px-6 py-5 shadow-sm ring-1 ${skin.ring}`}
+      className={`mb-4 overflow-hidden rounded-2xl bg-gradient-to-r ${skin.band} px-6 py-5 ring-1 ${skin.ring} shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(16,24,40,0.05),0_18px_32px_-22px_rgba(16,24,40,0.22)]`}
     >
       <p className="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold text-gray-800">
         {greeting}
@@ -111,7 +111,7 @@ export const DailyThought: React.FC<{
       <div className="mt-3 flex items-start gap-4">
         {/* A symbol for what this line is about, rather than a quote mark that says only
             "this is a quote" -- which the quotation marks already say. */}
-        <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${skin.chip}`} aria-hidden>
+        <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${skin.chip} shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_6px_14px_-8px_rgba(16,24,40,0.25)]`} aria-hidden>
           <thought.Icon size={22} strokeWidth={1.75} />
         </span>
         <figure className="min-w-0 flex-1">

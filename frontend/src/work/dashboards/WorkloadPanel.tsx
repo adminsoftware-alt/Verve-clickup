@@ -24,13 +24,13 @@ export interface WorkloadData {
   period: { start: string; end: string };
 }
 
-type Tone = 'blue' | 'violet' | 'green' | 'orange';
+type Tone = 'slate' | 'violet' | 'blue' | 'orange';
 
-const TONES: Record<Tone, { tile: string; badge: string; bar: string; percent: string }> = {
-  blue: { tile: 'bg-gray-50/80', badge: 'bg-blue-100 text-blue-600', bar: 'bg-blue-500', percent: 'text-blue-600' },
-  violet: { tile: 'bg-gray-50/80', badge: 'bg-violet-100 text-violet-600', bar: 'bg-violet-500', percent: 'text-violet-600' },
-  green: { tile: 'bg-gray-50/80', badge: 'bg-emerald-100 text-emerald-600', bar: 'bg-emerald-500', percent: 'text-emerald-600' },
-  orange: { tile: 'bg-gray-50/80', badge: 'bg-orange-100 text-orange-600', bar: 'bg-orange-500', percent: 'text-orange-600' },
+const TONES: Record<Tone, { color: string; percent: string }> = {
+  slate: { color: '#64748B', percent: 'text-slate-600' },
+  violet: { color: '#8B5CF6', percent: 'text-violet-600' },
+  blue: { color: '#3B82F6', percent: 'text-blue-600' },
+  orange: { color: '#F97316', percent: 'text-orange-600' },
 };
 
 const CHOICES: [Period['preset'], string][] = [
@@ -66,11 +66,12 @@ const Tile: React.FC<{
       onClick={onClick}
       disabled={!onClick}
       title={onClick ? 'Show the tasks these hours cover' : undefined}
-      className={`rounded-xl px-4 py-3 text-left ring-1 ring-inset ring-gray-100 transition-all ${skin.tile} ${onClick ? 'hover:bg-white hover:shadow-[var(--ui-shadow-sm)] hover:ring-gray-200' : 'cursor-default'}`}
+      className={`dash-well rounded-xl px-4 py-3 text-left ${onClick ? '' : 'cursor-default'}`}
+      style={{ '--tile': skin.color } as React.CSSProperties}
     >
       <div className="flex items-start gap-2.5">
-        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${skin.badge}`}>
-          <Icon size={16} />
+        <span className="tile-3d h-9 w-9 rounded-[10px]">
+          <Icon size={17} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
@@ -84,8 +85,8 @@ const Tile: React.FC<{
         </div>
       </div>
       {share !== undefined ? (
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-200/70">
-          <div className={`h-full rounded-full ${skin.bar}`} style={{ width: `${Math.min(100, share * 100)}%` }} />
+        <div className="mt-2.5 h-2 overflow-hidden rounded-full bg-gray-200/70 shadow-[inset_0_1px_1px_rgba(16,24,40,0.06)]">
+          <div className="bar-3d h-full rounded-full" style={{ width: `${Math.min(100, share * 100)}%` }} />
         </div>
       ) : (
         <p className="mt-2 truncate text-[11px] text-gray-500">{note}</p>
@@ -115,8 +116,8 @@ export const WorkloadPanel: React.FC<{
   return (
     <section aria-label={card.title} className="ui-card mb-6 px-4 py-4">
       <header className="mb-3 flex flex-wrap items-center gap-3">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-          <BarChart3 size={15} />
+        <span className="tile-3d h-8 w-8 rounded-lg" style={{ '--tile': '#8B5CF6' } as React.CSSProperties}>
+          <BarChart3 size={16} />
         </span>
         <h2 className="min-w-0 text-sm font-semibold text-gray-900">Workload &amp; Time</h2>
         <div className="no-print ml-auto flex items-center gap-2">
@@ -157,10 +158,10 @@ export const WorkloadPanel: React.FC<{
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Tile
-              tone="blue" Icon={Users} label="Total capacity" value={hours(capacity)}
+              tone="slate" Icon={Users} label="Total capacity" value={hours(capacity)}
             />
             <Tile tone="violet" Icon={CalendarClock} label="Planned" value={hours(d.planned_seconds)} share={share(d.planned_seconds)} onClick={() => onDrill('Planned')} />
-            <Tile tone="green" Icon={PlayCircle} label="Logged" value={hours(d.logged_seconds)} share={share(d.logged_seconds)} onClick={() => onDrill('Logged')} />
+            <Tile tone="blue" Icon={PlayCircle} label="Logged" value={hours(d.logged_seconds)} share={share(d.logged_seconds)} onClick={() => onDrill('Logged')} />
             <Tile tone="orange" Icon={CircleGauge} label="Remaining" value={hours(d.remaining_seconds)} share={share(d.remaining_seconds)} onClick={() => onDrill('Remaining')} />
           </div>
         </>

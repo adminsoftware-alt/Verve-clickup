@@ -19,16 +19,16 @@ const PREVIOUS: Partial<Record<string, string>> = {
   yesterday: 'Yesterday', last_week: 'Last week', last_month: 'Last month',
 };
 
-type Tone = 'blue' | 'green' | 'red' | 'violet' | 'amber';
+type Tone = 'blue' | 'orange' | 'red' | 'violet' | 'pink';
 
-// The meaning is carried by the icon chip and, for overdue, by the figure itself; the tile stays
+// The meaning is carried by the icon tile and, for overdue, by the figure itself; the card stays
 // white like every other card, so a row of them reads as one calm band rather than five colours.
-const TONES: Record<Tone, { badge: string; value: string }> = {
-  blue: { badge: 'bg-blue-50 text-blue-600 ring-blue-100', value: 'text-gray-900' },
-  green: { badge: 'bg-emerald-50 text-emerald-600 ring-emerald-100', value: 'text-gray-900' },
-  red: { badge: 'bg-rose-50 text-rose-600 ring-rose-100', value: 'text-rose-600' },
-  violet: { badge: 'bg-violet-50 text-violet-600 ring-violet-100', value: 'text-gray-900' },
-  amber: { badge: 'bg-amber-50 text-amber-600 ring-amber-100', value: 'text-gray-900' },
+const TONES: Record<Tone, { tile: string; value: string }> = {
+  blue: { tile: '#3B82F6', value: 'text-gray-900' },
+  orange: { tile: '#F97316', value: 'text-gray-900' },
+  red: { tile: '#EF4444', value: 'text-rose-600' },
+  violet: { tile: '#8B5CF6', value: 'text-gray-900' },
+  pink: { tile: '#EC4899', value: 'text-gray-900' },
 };
 
 /** What a stat card means, read from the filters it was built with rather than from its name. */
@@ -36,8 +36,8 @@ export function statLook(card: Card): { tone: Tone; Icon: React.ElementType } {
   const f = card.config.filters ?? {};
   if (f.due === 'overdue') return { tone: 'red', Icon: AlertCircle };
   if (f.done) return { tone: 'violet', Icon: CheckCircle2 };
-  if (f.due) return { tone: 'green', Icon: CalendarDays };
-  if (f.assignees?.includes('none')) return { tone: 'amber', Icon: Users };
+  if (f.due) return { tone: 'orange', Icon: CalendarDays };
+  if (f.assignees?.includes('none')) return { tone: 'pink', Icon: Users };
   if (card.config.measure && card.config.measure !== 'tasks') return { tone: 'blue', Icon: Clock };
   return { tone: 'blue', Icon: ListChecks };
 }
@@ -87,8 +87,8 @@ export const StatCard: React.FC<{
         title="Show these tasks"
         className="flex w-full items-center gap-3 text-left"
       >
-      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset ${skin.badge}`}>
-        <Icon size={18} />
+      <span className="tile-3d h-11 w-11 rounded-xl" style={{ '--tile': skin.tile } as React.CSSProperties}>
+        <Icon size={20} />
       </span>
       <span className="min-w-0 flex-1">
         <span className={`block truncate text-xs font-medium text-gray-500 ${filter ? 'pr-7' : ''}`}>{card.title}</span>
