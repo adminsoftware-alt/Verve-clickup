@@ -443,13 +443,9 @@ export const Layout: React.FC = () => {
               </div>
             )}
 
-            {/* The running timer floats here instead of taking room in the bar, so starting or
-                stopping it never pushes the search and the title sideways. */}
-            {phone ? <RunningTimerChip /> : (
-              <span className="relative flex h-8 w-0 items-center">
-                <span className="absolute right-0 top-1/2 -translate-y-1/2"><RunningTimerChip /></span>
-              </span>
-            )}
+            {/* The running timer takes its own place in the bar: floating, it sat on top of the
+                search. The search gives way a little instead. */}
+            <RunningTimerChip />
 
             {FEATURES.legacyNotifications ? (
             <div style={{ position: 'relative' }} ref={notificationsRef}>

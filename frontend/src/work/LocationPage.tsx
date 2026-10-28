@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Activity, ArrowDownToLine, Calendar, CalendarRange, ChevronRight, ClipboardList, Columns3, FileSpreadsheet, FileText, Folder, GanttChart, Globe, History, Home, LayoutDashboard, List as ListIcon, ListPlus, Lock, Map as MapIcon, MessagesSquare, Network, PenTool, Plus, Share2, Table2, Upload, Users } from 'lucide-react';
+import { Activity, Calendar, CalendarRange, ChevronRight, ClipboardList, Columns3, FileSpreadsheet, FileText, Folder, GanttChart, Globe, History, Home, LayoutDashboard, List as ListIcon, ListPlus, Lock, Map as MapIcon, MessagesSquare, Network, PenTool, Plus, Share2, Table2, Upload, Users } from 'lucide-react';
 import { useWork, useMe } from './WorkContext';
 import { pathFor } from './SpacesSidebar';
 import { peek, workApi, type CustomField, type Dependency, type FolderNode, type ListNode, type LocationKind, type Recurrence, type SpaceNode, type Status, type Task, type TaskGroup, type TaskInput, type UserRef, type View, type ViewType } from './api';
 import { DateField } from './DateField';
 import { FieldEditor } from './fields/FieldValue';
 import { TaskRowsSkeleton } from './Skeleton';
-import { Menu, NameDialog, PRIORITIES, Portal, StatusDot, formatDue, fromDateInput } from './ui';
+import { DownloadIcon, Menu, NameDialog, PRIORITIES, Portal, StatusDot, formatDue, fromDateInput } from './ui';
 import { DurationInput } from './DurationInput';
 import { Select } from './Select';
 import { TaskPanel } from './TaskPanel';
@@ -26,10 +26,10 @@ import { GroupsDialog } from './GroupsDialog';
 import { AssigneePicker } from './task/AssigneePicker';
 import { RecurrenceEditor } from './RecurrenceEditor';
 import { NO_GROUP, buildGroups, type GroupBy } from './views/grouping';
-import { applyFilters, readSettings, sameSettings, sortTasks, COLUMNS, type ViewSettings } from './views/viewSettings';
+import { applyFilters, readSettings, sortTasks, COLUMNS, type ViewSettings } from './views/viewSettings';
 import { FilterPanel } from './views/FilterPanel';
 import { FieldsButton, ShowButton } from './views/QuickControls';
-import { GroupByButton } from './views/ViewControls';
+import { GroupByButton, MeButton, TeamButton } from './views/ViewControls';
 import { BulkBar } from './views/BulkBar';
 import { TableView } from './views/TableView';
 import { TeamView } from './views/TeamView';
@@ -84,7 +84,7 @@ export const LocationPage: React.FC = () => {
   const { id = '' } = useParams();
   const { pathname } = useLocation();
   const kind: LocationKind = pathname.startsWith('/s/') ? 'space' : pathname.startsWith('/f/') ? 'folder' : 'list';
-  const { hierarchy, members, locate, listName, taskTypes, refresh: refreshTree, loading: treeLoading, error: treeError } = useWork();
+  const { hierarchy, members, locate, listName, taskTypes, teams, refresh: refreshTree, loading: treeLoading, error: treeError } = useWork();
   // Lists and Folders are a manager's to make. An employee with full access to a Space still
   // works inside it rather than reshaping it, so the buttons are not offered.
   const { isAdmin, led } = useLeadership();
@@ -129,13 +129,40 @@ export const LocationPage: React.FC = () => {
 
   const activeView = views.find((v) => v.id === searchParams.get('v')) ?? views[0];
 
-  // The view's saved setup (filters, sort, group by, columns). Changes apply at once; as in
-  // ClickUp they stay unsaved until someone who can edit the view saves them.
+  // The view's setup (filters, sort, group by, columns). Changes apply at once and are kept for
+  // you, in this browser, per view -- the "View changed / Save view" bar is gone, so one person's
+  // filter no longer has to be saved over everyone's.
   const savedSettings = useMemo(() => readSettings(activeView?.settings, activeView?.type), [activeView]);
+  const mineKey = `timetriq.view.${activeView?.id ?? ''}`;
   const [settings, setSettings] = useState<ViewSettings>(savedSettings);
-  useEffect(() => { setSettings(savedSettings); setSelected(new Set()); }, [savedSettings]);
-  const dirty = !sameSettings(settings, savedSettings);
-  const update = <K extends keyof ViewSettings>(key: K, value: ViewSettings[K]) => setSettings((prev) => ({ ...prev, [key]: value }));
+  useEffect(() => {
+    let mine: ViewSettings | null = null;
+    try { const raw = localStorage.getItem(mineKey); if (raw) mine = readSettings(JSON.parse(raw), activeView?.type); } catch { mine = null; }
+    setSettings(mine ?? savedSettings);
+    setSelected(new Set());
+  }, [savedSettings, mineKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const update = <K extends keyof ViewSettings>(key: K, value: ViewSettings[K]) => setSettings((prev) => {
+    const next = { ...prev, [key]: value };
+    try { localStorage.setItem(mineKey, JSON.stringify(next)); } catch { /* ignore */ }
+    return next;
+  });
+  // Me mode, as in ClickUp: only your tasks, and every task you add here is put in your name.
+  const [meMode, setMeModeState] = useState(() => { try { return localStorage.getItem('timetriq.meMode') === '1'; } catch { return false; } });
+  const setMeMode = (on: boolean) => {
+    setMeModeState(on);
+    if (on) setTeamMode(false);
+    try { localStorage.setItem('timetriq.meMode', on ? '1' : '0'); } catch { /* ignore */ }
+  };
+  // My team, for Managers: the tasks of everyone in the Teams they lead. One or the other with Me.
+  const myPeople = useMemo(() => new Set(teams.filter((t) => t.lead_ids.includes(me)).flatMap((t) => t.members.map((u) => u.id)).filter((x) => x !== me)), [teams, me]);
+  const [teamMode, setTeamModeState] = useState(false);
+  const setTeamMode = (on: boolean) => { setTeamModeState(on); if (on) setMeModeState(false); };
+  // Who a new task here is given to: you in Me mode, plus anyone picked in Filter -> Assignee.
+  // Filter by two people and add five tasks, and all five go to those two.
+  const autoAssignees = useMemo(() => {
+    const picked = settings.filters.assignees.filter((a) => a !== 'none').map((a) => (a === 'me' ? me : a));
+    return [...new Set([...(meMode ? [me] : []), ...picked])].filter(Boolean) as string[];
+  }, [settings.filters.assignees, meMode, me]);
   // Lists no longer offer "Group by"; one saved with another grouping goes back to status.
   const groupBy: GroupBy = activeView?.type === 'list' ? 'status' : settings.groupBy;
   // Subtasks on or off, per view in this browser.
@@ -143,15 +170,6 @@ export const LocationPage: React.FC = () => {
   const [showSubtasks, setShowSubtasksState] = useState(true);
   useEffect(() => { try { setShowSubtasksState(localStorage.getItem(subKey) !== '0'); } catch { setShowSubtasksState(true); } }, [subKey]);
   const setShowSubtasks = (on: boolean) => { setShowSubtasksState(on); try { localStorage.setItem(subKey, on ? '1' : '0'); } catch { /* ignore */ } };
-  const saveView = async () => {
-    if (!activeView) return;
-    try {
-      const saved = await workApi.updateView(activeView.id, { settings: settings as unknown as Record<string, unknown> });
-      setViews((prev) => prev.map((v) => (v.id === saved.id ? saved : v)));
-    } catch (e) {
-      notify.error(e);
-    }
-  };
 
   // A Board shows its closed column's cards, as ClickUp does; List and Calendar hide them unless asked.
   // The Team view shows what each person finished this week, so it needs closed tasks too.
@@ -250,7 +268,7 @@ export const LocationPage: React.FC = () => {
   const people = useMemo(() => members.map((m) => m.user), [members]);
   const filtered = useMemo(() => {
     const shown = showSubtasks ? tasks : tasks.filter((t) => !t.parent_id);
-    return sortTasks(applyFilters(shown, settings.filters, me, false), settings.sort);
+    return sortTasks(applyFilters(teamMode ? shown.filter((t) => t.assignees.some((u) => myPeople.has(u.id))) : shown, settings.filters, me, meMode), settings.sort);
   }, [tasks, settings.filters, settings.sort, me, showSubtasks]);
   const makeGroups = useCallback(
     (roots: Task[]) => buildGroups(groupBy, roots, statuses, groups, people, taskTypes),
@@ -330,14 +348,14 @@ export const LocationPage: React.FC = () => {
 
   /** Make the task, then open it: everything else is set on the task itself, as in ClickUp. */
   const createAndOpen = async (listId: string, input: TaskInput & { name: string }) => {
-    const task = await workApi.createTask(listId, input);
+    const task = await workApi.createTask(listId, input.assignees || !autoAssignees.length ? input : { ...input, assignees: autoAssignees });
     changed();
     setOpenTask(task.id);
   };
 
   const createInList = async (listId: string, input: TaskInput & { name: string }) => {
     try {
-      await workApi.createTask(listId, input);
+      await workApi.createTask(listId, input.assignees || !autoAssignees.length ? input : { ...input, assignees: autoAssignees });
       changed();
     } catch (e) {
       notify.error(e);
@@ -444,15 +462,8 @@ export const LocationPage: React.FC = () => {
           {(activeView.type === 'list' || activeView.type === 'table') && (
             <FieldsButton hidden={settings.hidden} onChange={(h) => update('hidden', h)} fields={viewFields} />
           )}
-          {dirty && (
-            <span className="ml-1 flex items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800" role="status">
-              View changed
-              {(located.node.permission_level === 'edit' || located.node.permission_level === 'full') && (
-                <button type="button" onClick={saveView} className="rounded bg-amber-600 px-2 py-0.5 font-medium text-white hover:bg-amber-700">Save view</button>
-              )}
-              <button type="button" onClick={() => setSettings(savedSettings)} className="rounded px-1.5 py-0.5 hover:bg-amber-100">Revert</button>
-            </span>
-          )}
+          <MeButton on={meMode} onChange={setMeMode} />
+          {myPeople.size > 0 && <TeamButton on={teamMode} onChange={setTeamMode} />}
           {/* Right: narrowing down, then everything else under "…". */}
           <div className="ml-auto flex items-center gap-1.5">
             {/* One panel, as on My Tasks: what to show, and how to lay it out. It replaced a row
@@ -481,7 +492,7 @@ export const LocationPage: React.FC = () => {
                 ] : []),
                 ...(canCreate ? [{ label: 'Import tasks', icon: <Upload size={14} />, onClick: () => setImporting(true) }] : []),
               ]}
-              trigger={<span title="Export or import" className="flex rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><ArrowDownToLine size={16} /></span>}
+              trigger={<span className="dash-dl flex rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-brand-700"><DownloadIcon /></span>}
             />
             {writableLists.length > 0 && (
               <button
@@ -552,6 +563,11 @@ export const LocationPage: React.FC = () => {
             onCreate={(name, key) => createInList(id, { name, ...inputForGroup(key) })}
             onMove={moveCard}
             onOpenTask={setOpenTask}
+            onChanged={changed}
+            onReorder={kind === 'list' && settings.sort.field === 'manual' ? async (taskId, orderindex) => {
+              await workApi.updateTask(taskId, { orderindex });
+              changed();
+            } : undefined}
           />
         ) : activeView?.type === 'gantt' || activeView?.type === 'timeline' ? (
           <GanttView
@@ -621,8 +637,18 @@ export const LocationPage: React.FC = () => {
             groupBy={groupBy}
             makeGroups={makeGroups}
             canAddIn={canAddIn}
-            onCreate={(name, key) => createInList(id, { name, ...inputForGroup(key) })}
+            onCreate={(name, key, extra) => createInList(id, { name, ...inputForGroup(key), ...extra })}
             onOpenTask={setOpenTask}
+            // Rows are dragged into place only where place means something: one List, in its own order.
+            onMoveRow={kind === 'list' && settings.sort.field === 'manual' ? async (taskId, orderindex, toGroupKey) => {
+              const moved = toGroupKey ? inputForGroup(toGroupKey) : {};
+              const status = moved.status_id ? statuses?.find((st) => st.id === moved.status_id) : undefined;
+              // Into its new place at once; the reload confirms it.
+              setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, orderindex, ...(status ? { status } : {}) } : t))
+                .sort((x, y) => x.orderindex - y.orderindex));
+              await workApi.updateTask(taskId, { orderindex, ...moved });
+              changed();
+            } : undefined}
             onAddColumn={FEATURES.listCustomFields ? () => setManagingFields(true) : undefined}
             columns={COLUMNS.map((c) => c.key).filter((k) => !settings.hidden.includes(k))}
             fields={viewFields.filter((f) => !settings.hidden.includes(`cf:${f.id}`))}
@@ -643,6 +669,7 @@ export const LocationPage: React.FC = () => {
         <NewTaskDialog
           lists={kind === 'list' ? [] : listChoices}
           listId={newTaskList}
+          startAssignees={autoAssignees}
           onClose={() => setNewTaskList(null)}
           onCreate={async (listId, input) => {
             await createAndOpen(listId, input);
@@ -719,7 +746,9 @@ const NewTaskDialog: React.FC<{
   onClose: () => void;
   onCreate: (listId: string, input: TaskInput & { name: string }) => Promise<void>;
   onTemplate: (listId: string) => void;
-}> = ({ lists, listId, onClose, onCreate, onTemplate }) => {
+  /** Who it starts assigned to (Me mode, the Assignee filter); you, when nobody is given. */
+  startAssignees?: string[];
+}> = ({ lists, listId, onClose, onCreate, onTemplate, startAssignees }) => {
   const meId = useMe();
   const { members: people, locate, taskTypes, hierarchy } = useWork();
   const [name, setName] = useState('');
@@ -728,7 +757,7 @@ const NewTaskDialog: React.FC<{
   const [due, setDue] = useState<string | null>(null);
   const [estimateSeconds, setEstimateSeconds] = useState<number | null>(null);
   const [priority, setPriority] = useState<number>(3);
-  const [assignees, setAssignees] = useState<string[]>([meId]);
+  const [assignees, setAssignees] = useState<string[]>(startAssignees?.length ? startAssignees : [meId]);
   const [repeat, setRepeat] = useState<Recurrence | null>(null);
   const [description, setDescription] = useState('');
   const [statusId, setStatusId] = useState<string | null>(null);

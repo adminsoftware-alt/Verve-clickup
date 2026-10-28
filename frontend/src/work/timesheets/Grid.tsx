@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { CalendarDays, ChevronDown, ChevronRight, Clock, DollarSign, ExternalLink, MoreHorizontal, MoveRight, Pencil, Play, Plus, Tag as TagIcon, Trash2 } from 'lucide-react';
+import { CalendarDays, Check, ChevronDown, ChevronRight, Clock, DollarSign, ExternalLink, MoreHorizontal, MoveRight, Pencil, Play, Plus, Tag as TagIcon, Trash2 } from 'lucide-react';
 import { Menu, StatusDot, formatDuration, parseDuration } from '../ui';
 import { isoDay, type EntryUpdate, type SheetEntry, type SheetRow, type TimeTag, type Timesheet } from './api';
-import { Popover, TaskPicker, dayLabel, hours, isWeekend, WEEKEND } from './pieces';
+import { AddTaskPicker, Popover, TaskPicker, dayLabel, hours, isWeekend, WEEKEND } from './pieces';
 import { CellCard, DayCard, HoverCard } from './Hover';
 import { TrackTime } from '../task/TrackTime';
 import { ask } from '../../components/ask';
@@ -16,7 +16,8 @@ export interface EntryActions {
   onCreateTag: (name: string) => Promise<TimeTag>;
 }
 
-const COLS = 'minmax(340px,2.8fr) repeat(7, minmax(84px,1fr)) minmax(110px,1fr)';
+/** The grid's columns: the task, one per day shown, and the total. */
+const colsFor = (days: number) => `minmax(340px,2.8fr) repeat(${days}, minmax(84px,1fr)) minmax(110px,1fr)`;
 
 
 /** The day header: date, total, and tracked-vs-capacity bar, with the full breakdown on hover. */
@@ -97,13 +98,13 @@ const Cell: React.FC<{
         <Popover
           width={432}
           align="left"
+          bare
           trigger={(open, active) => (
             <button
               type="button"
-              title="Log a specific period, e.g. 6pm to 7pm"
               aria-label={`Log a specific period for ${label}`}
               onClick={open}
-              className={`shrink-0 rounded p-1 text-gray-400 hover:bg-brand-50 hover:text-brand-600 ${active ? '' : 'opacity-0 group-hover/cell:opacity-100 focus:opacity-100'}`}
+              className={`shrink-0 rounded p-1 hover:bg-brand-50 hover:text-brand-600 ${active ? 'bg-brand-50 text-brand-600' : 'text-gray-300'}`}
             >
               <Clock size={14} />
             </button>
@@ -144,8 +145,15 @@ export const Grid: React.FC<{
   onStartTimer?: (taskId: string) => void;
   onAddTask: (taskId: string) => Promise<void>;
   actions: EntryActions;
-}> = ({ sheet, editable, onCell, forUserId, onLogged, onDeleteRow, onOpenTask, onStartTimer, onAddTask, actions }) => {
+  /** Saturday and Sunday left out of the grid; their hours still count in the totals. */
+  hideWeekends?: boolean;
+}> = ({ sheet, editable, onCell, forUserId, onLogged, onDeleteRow, onOpenTask, onStartTimer, onAddTask, actions, hideWeekends }) => {
+  const shownDays = sheet.days.map((d, i) => ({ d, i })).filter(({ d }) => !hideWeekends || !isWeekend(d));
+  const COLS = colsFor(shownDays.length);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  // A task opens to one line -- "2 time entries" -- and that line opens to the entries themselves.
+  const [openEntries, setOpenEntries] = useState<Set<string>>(new Set());
+  const toggleEntries = (id: string) => setOpenEntries((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const today = isoDay(new Date());
   const phone = usePhone();
   const toggle = (id: string) => setOpen((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -188,7 +196,7 @@ export const Grid: React.FC<{
       <div className="min-w-[1000px]" role="table" aria-label="Timesheet">
         <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: COLS }} role="row">
           <div className="flex items-center px-4 text-sm text-gray-700">Task / Location</div>
-          {sheet.days.map((d, i) => (
+          {shownDays.map(({ d, i }) => (
             <DayHead key={d} iso={d} tracked={sheet.tracked_per_day[i]} billable={sheet.billable_per_day[i]} capacity={sheet.capacity_per_day[i]} today={d === today} />
           ))}
           <div className="border-l border-gray-100 px-2.5 py-3">
@@ -214,26 +222,42 @@ export const Grid: React.FC<{
           return (
             <div key={row.task.id} className="border-b border-gray-100 last:border-b-0" role="rowgroup">
               <div className="grid min-h-[64px]" style={{ gridTemplateColumns: COLS }} role="row">
-                <div className="flex min-w-0 items-center gap-2 px-3 py-2">
-                  <button type="button" aria-label={expanded ? 'Hide entries' : 'Show entries'} onClick={() => toggle(row.task.id)} className={`text-gray-400 hover:text-gray-700 ${row.entries.length ? '' : 'invisible'}`}>
-                    {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                <div className="flex min-w-0 items-center gap-2 py-2 pl-2 pr-3">
+                  <button type="button" aria-label={expanded ? 'Hide time entries' : 'Show time entries'} aria-expanded={expanded} onClick={() => toggle(row.task.id)}
+                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-800 ${row.entries.length ? '' : 'invisible'}`}>
+                    {expanded ? <ChevronDown size={14} strokeWidth={2.5} /> : <ChevronRight size={14} strokeWidth={2.5} />}
                   </button>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <button type="button" disabled={!row.task.can_open} onClick={() => onOpenTask(row.task.id)} className="block max-w-full truncate text-left text-[15px] font-medium text-gray-900 hover:underline disabled:no-underline">
                       {row.task.name}
-                      {row.running && <span className="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-red-500 align-middle" title="Timer running" />}
                     </button>
                     {row.task.status && (
                       <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px] text-gray-500">
-                        <StatusDot status={row.task.status} size={13} />
+                        {/* A finished task says so with a green tick, as everywhere else. */}
+                        {row.task.status.group === 'done' || row.task.status.group === 'closed'
+                          ? <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded-full bg-[#16A34A] text-white"><Check size={9} strokeWidth={3.5} /></span>
+                          : <StatusDot status={row.task.status} size={13} />}
                         <span className="shrink-0">{row.task.status.name}</span>
                         {row.task.location && <span className="truncate">• {row.task.location}</span>}
                         {row.task.archived && <span className="shrink-0 rounded bg-gray-100 px-1 text-[11px]">archived</span>}
                       </div>
                     )}
                   </div>
+                  {/* Start the timer from the row itself; while it runs, the button says so. */}
+                  {onStartTimer && row.task.can_open && (
+                    row.running ? (
+                      <span aria-label="Timer running" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-50 ring-1 ring-red-200">
+                        <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+                      </span>
+                    ) : (
+                      <button type="button" aria-label={`Start a timer on ${row.task.name}`} onClick={() => onStartTimer(row.task.id)}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-600 hover:bg-[#234788] hover:text-white">
+                        <Play size={11} fill="currentColor" />
+                      </button>
+                    )
+                  )}
                 </div>
-                {row.seconds_per_day.map((_, i) => <React.Fragment key={i}>{cellFor(row, i)}</React.Fragment>)}
+                {shownDays.map(({ i }) => <React.Fragment key={i}>{cellFor(row, i)}</React.Fragment>)}
                 <div className="flex items-center justify-end gap-2 border-l border-gray-100 px-3">
                   <span className="text-[15px] font-medium text-gray-900">{hours(row.total_seconds)}</span>
                   {rowMenu.length > 0 && (
@@ -241,12 +265,19 @@ export const Grid: React.FC<{
                   )}
                 </div>
               </div>
-              {expanded && row.entries.map((entry) => (
+              {expanded && (
+                <button type="button" aria-expanded={openEntries.has(row.task.id)} onClick={() => toggleEntries(row.task.id)}
+                  className="flex w-full items-center gap-1.5 border-t border-gray-100 bg-[#FAFBFC] py-2 pl-9 pr-3 text-left text-[13px] text-gray-500 hover:bg-[#F3F6FB] hover:text-gray-800">
+                  {openEntries.has(row.task.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  {row.entries.length} time {row.entries.length === 1 ? 'entry' : 'entries'}
+                </button>
+              )}
+              {expanded && openEntries.has(row.task.id) && row.entries.map((entry) => (
                 <div key={entry.id} className="grid bg-gray-50/70 text-sm" style={{ gridTemplateColumns: COLS }} role="row">
                   <div className="flex min-w-0 items-center gap-2 py-2 pl-12 pr-3">
                     <EntryDetails entry={entry} editable={editable} actions={actions} />
                   </div>
-                  {sheet.days.map((d, i) => (
+                  {shownDays.map(({ d, i }) => (
                     <div key={i} className={`flex items-center justify-end border-l border-gray-100 px-3 text-gray-600 ${isWeekend(d) ? WEEKEND : ''}`}>
                       {entry.day === i ? (entry.running ? <span className="text-red-600">running</span> : formatDuration(entry.duration_seconds)) : ''}
                     </div>
@@ -263,14 +294,23 @@ export const Grid: React.FC<{
         {editable && (
           <div className="px-4 py-3">
             <Popover
-              width={340}
+              width={600}
+              bare
               trigger={(openPicker) => (
                 <button type="button" onClick={openPicker} className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700">
                   <Plus size={15} /> Add task
                 </button>
               )}
             >
-              {(close) => <TaskPicker exclude={new Set(sheet.rows.map((r) => r.task.id))} onPick={(task) => { close(); onAddTask(task.id); }} />}
+              {(close) => (
+                <AddTaskPicker
+                  exclude={new Set(sheet.rows.map((r) => r.task.id))}
+                  weekStart={sheet.period_start}
+                  forUserId={forUserId}
+                  onClose={close}
+                  onAdd={async (ids) => { for (const id of ids) await onAddTask(id); }}
+                />
+              )}
             </Popover>
           </div>
         )}

@@ -1,5 +1,5 @@
 import React, { startTransition, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Search } from 'lucide-react';
+import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ListFilter, RotateCcw, Search } from 'lucide-react';
 import { useWork } from '../WorkContext';
 import { Portal, StatusDot, formatDuration } from '../ui';
 import { isoDay, parseDay, sheetApi, type PickTask } from './api';
@@ -47,7 +47,9 @@ export const Popover: React.FC<{
   children: (close: () => void) => React.ReactNode;
   width?: number;
   align?: 'left' | 'right';
-}> = ({ trigger, children, width = 260, align = 'left' }) => {
+  /** No padding of its own: the contents bring their own header and edges. */
+  bare?: boolean;
+}> = ({ trigger, children, width = 260, align = 'left', bare }) => {
   const anchor = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -90,7 +92,9 @@ export const Popover: React.FC<{
       <span ref={anchor} className="inline-flex">{trigger(open, !!pos)}</span>
       {pos && (
         <Portal>
-          <div ref={panel} role="dialog" className="fixed z-[130] rounded-lg border border-gray-200 bg-white p-2 shadow-lg" style={{ top: pos.top, left: pos.left, width }}>
+          <div ref={panel} role="dialog" className={`fixed z-[130] border bg-white ${bare
+            ? 'overflow-hidden rounded-xl border-[#D9E1EF] shadow-[0_18px_40px_-12px_rgba(16,24,40,0.28),0_2px_6px_rgba(16,24,40,0.06)]'
+            : 'rounded-lg border-gray-200 p-2 shadow-lg'}`} style={{ top: pos.top, left: pos.left, width }}>
             {children(close)}
           </div>
         </Portal>
@@ -174,6 +178,140 @@ export const WeekNav: React.FC<{ start: string | null; end: string | null; onGo:
         {away === 0 ? <><span className="wk-dot" /> This week</> : <><RotateCcw size={13} /> Today</>}
       </button>
       {pickerFor}
+    </div>
+  );
+};
+
+// --- add tasks to the week ------------------------------------------------------------------------
+
+/** "Oct 22 at 11:16 pm" -- when a task last changed. */
+const changedAt = (iso: string) => {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).toLowerCase()}`;
+};
+
+/**
+ * Add task, as in ClickUp: one search over every task you can track time on, or just the ones on
+ * last week's timesheet; tick as many as you like and add them together.
+ */
+export const AddTaskPicker: React.FC<{
+  exclude: Set<string>;
+  /** The week on screen, so "Previous Timesheet" can read the week before it. */
+  weekStart: string;
+  /** Whose timesheet, when an admin is filling in someone else's. */
+  forUserId?: string;
+  onAdd: (taskIds: string[]) => Promise<void> | void;
+  onClose: () => void;
+}> = ({ exclude, weekStart, forUserId, onAdd, onClose }) => {
+  const { workspace } = useWork();
+  const [tab, setTab] = useState<'all' | 'previous'>('all');
+  const [q, setQ] = useState('');
+  const [all, setAll] = useState<PickTask[] | null>(null);
+  const [previous, setPrevious] = useState<PickTask[] | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [onlyMine, setOnlyMine] = useState(false);
+  const [hideDone, setHideDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!workspace) return undefined;
+    const timer = setTimeout(() => { sheetApi.pickTasks(workspace.id, q).then(setAll).catch(() => setAll([])); }, 200);
+    return () => clearTimeout(timer);
+  }, [workspace, q]);
+  useEffect(() => {
+    if (!workspace || tab !== 'previous' || previous) return;
+    const before = parseDay(weekStart);
+    before.setDate(before.getDate() - 7);
+    sheetApi.get(workspace.id, isoDay(before), { userId: forUserId })
+      .then((sheet) => setPrevious(sheet.rows.filter((r) => r.task.status)
+        .map((r) => ({ id: r.task.id, name: r.task.name, status: r.task.status!, location: r.task.location ?? '' }))))
+      .catch(() => setPrevious([]));
+  }, [workspace, tab, previous, weekStart, forUserId]);
+  const source = tab === 'all' ? all : previous;
+  const words = q.trim().toLowerCase();
+  const shown = (source ?? []).filter((x) => !exclude.has(x.id)
+    && (tab === 'all' || !words || x.name.toLowerCase().includes(words))
+    && (!onlyMine || tab === 'previous' || x.mine)
+    && (!hideDone || (x.status.group !== 'done' && x.status.group !== 'closed')));
+  const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const add = async () => {
+    if (!picked.length) return;
+    setBusy(true);
+    try { await onAdd(picked); onClose(); } finally { setBusy(false); }
+  };
+  const filters = Number(onlyMine) + Number(hideDone);
+  const options: [string, boolean, (on: boolean) => void][] = [['Assigned to me', onlyMine, setOnlyMine], ['Hide completed', hideDone, setHideDone]];
+  return (
+    <div className="flex max-h-[min(34rem,80vh)] flex-col">
+      <label className="flex items-center gap-3 border-b border-[#EEF0F3] px-4 py-3.5">
+        <Search size={18} className="shrink-0 text-gray-400" />
+        <input autoFocus aria-label="Search for a task" value={q} onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && picked.length) { e.preventDefault(); void add(); } }}
+          placeholder="Search for task name" className="w-full bg-transparent text-[15px] text-gray-900 placeholder:text-gray-400 focus:outline-none" />
+      </label>
+      <div className="relative flex items-center gap-5 border-b border-[#EEF0F3] px-4">
+        {([['all', 'All Tasks'], ['previous', 'Previous Timesheet']] as const).map(([key, label]) => (
+          <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
+            className={`-mb-px border-b-2 py-2.5 text-[13px] ${tab === key ? 'border-[#1B2A4A] font-semibold text-[#1B2A4A]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
+            {label}
+          </button>
+        ))}
+        <button type="button" aria-expanded={filterOpen} onClick={() => setFilterOpen(!filterOpen)}
+          className={`ml-auto flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] ${filters ? 'font-medium text-[#234788]' : 'text-gray-500 hover:text-gray-800'}`}>
+          <ListFilter size={14} /> Filter{filters ? ` · ${filters}` : ''}
+        </button>
+        {filterOpen && (
+          <div className="vf-menu absolute right-3 top-full z-10 mt-1 w-52 rounded-xl border p-1.5">
+            {options.map(([label, on, set]) => (
+              <label key={label} className="vf-menu-row flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-gray-700">
+                <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} /> {label}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+      <ul className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5" role="listbox" aria-label="Tasks" aria-multiselectable>
+        {source === null ? <li className="px-3 py-3"><LinesSkeleton /></li>
+          : shown.length === 0 ? (
+            <li className="px-3 py-8 text-center text-[13px] text-gray-400">
+              {tab === 'previous' ? 'Nothing from last week that is not here already.' : 'No tasks found.'}
+            </li>
+          ) : shown.map((task) => {
+            const on = picked.includes(task.id);
+            const done = task.status.group === 'done' || task.status.group === 'closed';
+            const where = task.location.split(' / ').pop();
+            return (
+              <li key={task.id}>
+                <button type="button" role="option" aria-selected={on} onClick={() => toggle(task.id)}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left ${on ? 'bg-[#EEF2F8]' : 'hover:bg-[#F7F8FA]'}`}>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14px] font-medium text-gray-900">{task.name}</span>
+                    <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] text-gray-500">
+                      {done
+                        ? <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded-full bg-[#16A34A] text-white"><Check size={9} strokeWidth={3.5} /></span>
+                        : <StatusDot status={task.status} size={12} />}
+                      <span className="shrink-0">{task.status.name}</span>
+                      {where && <span className="truncate">• {where}</span>}
+                      {task.updated_at && <span className="shrink-0">• {changedAt(task.updated_at)}</span>}
+                    </span>
+                  </span>
+                  <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border ${on ? 'border-[#234788] bg-[#234788] text-white' : 'border-gray-300 bg-white'}`}>
+                    {on && <Check size={12} strokeWidth={3} />}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+      </ul>
+      <div className="flex items-center gap-2 border-t border-[#EEF0F3] bg-[#F8FAFD] px-4 py-2.5">
+        <span className="text-[12.5px] text-gray-500">{picked.length ? `${picked.length} selected` : 'Tick the tasks to add'}</span>
+        {picked.length > 0 && <button type="button" onClick={() => setPicked([])} className="text-[12.5px] text-gray-500 underline-offset-2 hover:underline">Clear</button>}
+        <button type="button" onClick={onClose} className="ml-auto rounded-lg px-3 py-1.5 text-[13px] text-gray-600 hover:bg-gray-100">Cancel</button>
+        <button type="button" disabled={!picked.length || busy} onClick={() => { void add(); }}
+          className="rounded-lg bg-[#234788] px-4 py-1.5 text-[13px] font-semibold text-white hover:bg-[#1C3A70] disabled:opacity-40">
+          {busy ? 'Adding…' : `Add${picked.length > 1 ? ` ${picked.length} tasks` : ' task'}`}
+        </button>
+      </div>
     </div>
   );
 };

@@ -15,13 +15,14 @@ import {
 
 import type { Status, Task, UserRef } from '../api';
 import { PRIORITIES } from '../ui';
+import { IconTile } from './IconTile';
 import { GROUP_BY_LABELS, PROGRESS_COLUMNS, type GroupBy } from './grouping';
 import {
   COLUMNS, CREATED_FILTERS, DONE_FILTERS, DUE_FILTERS, EMPTY_FILTERS, ESTIMATE_FILTERS, START_FILTERS, TRACKED_FILTERS,
   filterCount, type DueFilter, type ViewFilters,
 } from './viewSettings';
 
-const PANEL_WIDTH = 240;
+const PANEL_WIDTH = 200;
 /** Above this many choices the value list gets its own search box. */
 const SEARCHABLE = 8;
 
@@ -202,12 +203,11 @@ export const FilterPanel: React.FC<{
         onClick={show}
         aria-expanded={open}
         className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm ${
-          count ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+          count ? 'border-brand-600 bg-brand-600 font-medium text-white' : 'vf-tool'}`}
       >
-        {/* The same shape as every other filter in the app: the word, and a count beside it. */}
-        Filter
-        {count > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-semibold leading-none text-white">{count}</span>}
-        <ChevronDown size={13} className={count ? 'text-blue-500' : 'text-gray-400'} />
+        {/* Switched on, it says so from across the page: a navy pill with the count in it. */}
+        {count > 0 ? <>Filter <span className="text-white/60">·</span> {count}</> : 'Filter'}
+        <ChevronDown size={13} className={count ? 'text-white/70' : 'text-gray-400'} />
       </button>
 
       {open && createPortal(
@@ -215,7 +215,7 @@ export const FilterPanel: React.FC<{
           ref={panelRef}
           role="dialog"
           aria-label="Filter tasks"
-          className="fixed z-50 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl"
+          className="vf-menu fixed z-50 overflow-hidden rounded-xl border"
           style={{ top: pos.top, left: pos.left, width: PANEL_WIDTH }}
         >
           {count > 0 && (
@@ -240,7 +240,7 @@ export const FilterPanel: React.FC<{
 
           {!field ? (
             <>
-              <label className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1.5">
+              <label className="vf-menu-search flex items-center gap-1.5 border-b px-2.5 py-1.5">
                 <Search size={13} className="shrink-0 text-gray-400" />
                 <input
                   ref={searchRef}
@@ -256,13 +256,13 @@ export const FilterPanel: React.FC<{
                   const text = textOf(e);
                   // Where the filters end and how they are laid out begins.
                   const rule = e.kind !== 'filter' && shown[i - 1]?.kind === 'filter';
-                  const skin = `flex w-full items-center gap-2 px-3 py-1 text-left text-[13px] text-gray-700 hover:bg-gray-50 ${
+                  const skin = `vf-menu-row flex w-full items-center gap-2 px-3 py-1 text-left text-[13px] text-gray-700 ${
                     rule ? 'mt-1 border-t border-gray-100 pt-2' : ''}`;
                   // A yes-or-no needs no second step, so it is answered where it stands.
                   if (e.kind === 'closed') {
                     return (
                       <label key={e.label} className={`${skin} cursor-pointer`}>
-                        <e.Icon size={14} className="shrink-0 text-gray-400" />
+                        <IconTile Icon={e.Icon} label={e.label} />
                         <span className="flex-1 truncate">{e.label}</span>
                         <input
                           type="checkbox"
@@ -274,10 +274,10 @@ export const FilterPanel: React.FC<{
                     );
                   }
                   return (
-                    <button key={e.label} type="button" onClick={() => { setOpenField(e.label); setSearch(''); }} className={skin}>
-                      <e.Icon size={14} className="shrink-0 text-gray-400" />
+                    <button key={e.label} type="button" data-on={text ? '' : undefined} onClick={() => { setOpenField(e.label); setSearch(''); }} className={skin}>
+                      <IconTile Icon={e.Icon} label={e.label} />
                       <span className="flex-1 truncate">{e.label}</span>
-                      {text && <span className="max-w-24 truncate text-[11px] text-blue-700">{text}</span>}
+                      {text && <span className="max-w-24 truncate text-[11px] font-medium text-brand-700">{text}</span>}
                       <ChevronRight size={13} className="shrink-0 text-gray-300" />
                     </button>
                   );
@@ -298,7 +298,7 @@ export const FilterPanel: React.FC<{
                 >
                   <ArrowLeft size={14} />
                 </button>
-                <field.Icon size={14} className="shrink-0 text-gray-400" />
+                <IconTile Icon={field.Icon} label={field.label} />
                 <span className="flex-1 truncate text-[13px] font-medium text-gray-800">{field.label}</span>
                 {textOf(field) && (
                   <button type="button" onClick={() => clearField(field)} className="filter-clear">Clear</button>

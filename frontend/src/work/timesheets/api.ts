@@ -104,7 +104,11 @@ export function matchesTracked(seconds: number, op: TrackedOp | null | undefined
     case 'eq': return seconds === against;
   }
 }
-export interface PickTask { id: string; name: string; status: Status; location: string }
+export interface PickTask {
+  id: string; name: string; status: Status; location: string;
+  /** When it last changed, and whether it is yours: shown and filtered on in Add task. */
+  updated_at?: string | null; mine?: boolean;
+}
 export interface PersonWeek {
   user: UserRef; capacity_per_day: number[]; tracked_per_day: number[]; billable_per_day: number[];
   total_seconds: number; capacity_seconds: number; submission_status: SubmissionStatus | null;

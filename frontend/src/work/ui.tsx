@@ -71,13 +71,16 @@ export const StatusDot: React.FC<{ status: Status; size?: number }> = ({ status,
   const closed = status.group === 'closed' || status.group === 'done';
   return (
     <span
+      data-status-dot
+      data-closed={closed ? '' : undefined}
       className="inline-block rounded-full shrink-0"
       style={{
+        '--dot': status.color,
         width: size,
         height: size,
         border: `2px ${status.group === 'not_started' ? 'dashed' : 'solid'} ${status.color}`,
         backgroundColor: closed ? status.color : 'transparent',
-      }}
+      } as React.CSSProperties}
     />
   );
 };
@@ -670,3 +673,14 @@ export function useEscapeToClose(ref: React.RefObject<HTMLElement | null>, onClo
     return () => window.removeEventListener('keydown', onKey);
   }, [ref, onClose]);
 }
+
+/** The download mark drawn in two parts, so on hover the arrow can drop into the tray. */
+export const DownloadIcon: React.FC = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <g className="dl-arrow">
+      <path d="M12 3v12" />
+      <path d="m7 10 5 5 5-5" />
+    </g>
+  </svg>
+);

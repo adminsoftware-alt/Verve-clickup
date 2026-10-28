@@ -159,6 +159,9 @@ const SheetPage: React.FC = () => {
   const [review, setReview] = useState<'approve' | 'request-changes' | 'reopen' | 'submit' | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Saturday and Sunday out of the grid, per browser. Their hours still count in the totals.
+  const [hideWeekends, setHideWeekendsState] = useState(() => { try { return localStorage.getItem('timetriq.ts.hideWeekends') === '1'; } catch { return false; } });
+  const setHideWeekends = (on: boolean) => { setHideWeekendsState(on); try { localStorage.setItem('timetriq.ts.hideWeekends', on ? '1' : '0'); } catch { /* ignore */ } };
   const seq = useRef(0);
   const shown = useRef('');
 
@@ -309,6 +312,15 @@ const SheetPage: React.FC = () => {
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         {view === 'timesheet' && <FilterBar query={query} onChange={setQuery} tags={tags} rows={sheet.rows} />}
+        {view === 'timesheet' && (
+          <label className="ml-auto flex cursor-pointer items-center gap-2 text-[13px] text-gray-600">
+            <button type="button" role="switch" aria-checked={hideWeekends} onClick={() => setHideWeekends(!hideWeekends)}
+              className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${hideWeekends ? 'bg-brand-600' : 'bg-gray-300'}`}>
+              <span className={`absolute left-0 top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${hideWeekends ? 'translate-x-[14px]' : 'translate-x-0.5'}`} />
+            </button>
+            Hide weekends
+          </label>
+        )}
         {FEATURES.timesheetEntriesView && (
           <div className="flex rounded-lg bg-gray-100 p-1" role="tablist" aria-label="Display">
             <button type="button" role="tab" aria-selected={view === 'timesheet'} onClick={() => setView('timesheet')} className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-sm ${view === 'timesheet' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}><Table2 size={14} /> Timesheet</button>
@@ -339,6 +351,7 @@ const SheetPage: React.FC = () => {
             onStartTimer={own ? (taskId) => run(() => startTimer(taskId)) : undefined}
             onAddTask={(taskId) => run(() => sheetApi.addRow(workspace!.id, { user_id: whose, task_id: taskId, start: sheet.period_start }))}
             actions={actions}
+            hideWeekends={hideWeekends}
           />
         ) : (
           <EntriesView sheet={sheet} editable={editable} actions={actions} onOpenTask={setOpenTask} />

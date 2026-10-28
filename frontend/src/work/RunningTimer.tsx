@@ -73,13 +73,18 @@ export const RunningTimerChip: React.FC = () => {
   if (!timer) return null;
   const elapsed = (now - new Date(timer.entry.started_at).getTime()) / 1000;
   return (
-    <div className="fresh-label flex items-center gap-2 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 py-1 pl-3 pr-1 text-sm">
-      <span className="h-2 w-2 rounded-full bg-amber-500" />
-      <Link to={`/l/${timer.list_id}`} className="max-w-48 truncate text-gray-700 no-underline hover:underline" title={timer.task_name}>
+    <div className="fresh-label flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-[#D9E1EF] bg-white py-1 pl-3 pr-1 text-[13px] shadow-[0_1px_2px_rgba(16,24,40,0.06)]">
+      {/* Recording: a red dot that breathes while the clock runs. */}
+      <span className="relative flex h-2 w-2 shrink-0">
+        <span className="absolute inset-0 animate-ping rounded-full bg-red-400 opacity-60" />
+        <span className="relative h-2 w-2 rounded-full bg-red-500" />
+      </span>
+      <Link to={`/l/${timer.list_id}`} className="max-w-[9rem] truncate font-medium text-[#1B2A4A] no-underline hover:underline xl:max-w-[12rem]">
         {timer.task_name}
       </Link>
-      <span className="font-semibold text-amber-800 tabular-nums">{formatClock(elapsed)}</span>
-      <button aria-label="Stop timer" type="button" title="Stop timer" onClick={() => stop().catch((e) => notify.error(e))} className="rounded-full bg-amber-600 p-1 text-white hover:bg-amber-700">
+      <span className="font-semibold tabular-nums text-[#234788]">{formatClock(elapsed)}</span>
+      <button aria-label="Stop timer" type="button" onClick={() => stop().catch((e) => notify.error(e))}
+        className="flex h-7 w-7 items-center justify-center rounded-full bg-red-50 text-red-600 ring-1 ring-red-200 hover:bg-red-100">
         <Square size={10} fill="currentColor" />
       </button>
     </div>

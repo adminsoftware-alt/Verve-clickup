@@ -12,7 +12,7 @@ import {
 import { peek } from '../api';
 import { useWork } from '../WorkContext';
 import { TaskPanel } from '../TaskPanel';
-import { Menu, NameDialog } from '../ui';
+import { DownloadIcon, Menu, NameDialog } from '../ui';
 import { Check, ChevronDown } from 'lucide-react';
 import { dashApi, type Card, type CardData, type Dashboard, type Filters, type Insights, type Period } from './api';
 import { InsightsPanel } from './InsightsPanel';
@@ -64,17 +64,6 @@ function narrowed(card: Card): boolean {
   return plainFilters(base) !== plainFilters(card.config.filters);
 }
 
-
-/** The download mark drawn in two parts, so on hover the arrow can drop into the tray. */
-const DownloadIcon: React.FC = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <g className="dl-arrow">
-      <path d="M12 3v12" />
-      <path d="m7 10 5 5 5-5" />
-    </g>
-  </svg>
-);
 
 /** How long "Up to date" stays before the button offers to refresh again. */
 const DONE_MS = 2500;

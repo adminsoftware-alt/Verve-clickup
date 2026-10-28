@@ -1,34 +1,32 @@
 // "What does my week look like" — the Workload view for My Tasks.
 //
-// A day is a container of a fixed size, and work is what you pour into it. So that is what a day
-// looks like here: a glass that fills from the bottom, one per day, and you can see at a glance
-// which ones are empty, which are comfortable and which have spilled over. A number alone
-// ("8.6h") does not say whether that is a full day or half of one; a level does, without being
-// read.
+// A day is a container of a fixed size, and work is what you pour into it: one level per day, so
+// you see at a glance which days are empty, comfortable or over. Under each level the numbers are
+// written out -- planned of capacity, what spilled over, what you actually logged -- so nothing
+// waits behind a hover.
 //
-// Above the glasses, four figures say what the whole window holds. Below them, your tasks, each
-// with its share of each day.
+// Above the days, one line says what the whole window holds. Below them, your tasks, each with
+// its share of each day. Click a day for what is on it.
 //
 // Same rules as ClickUp — an estimate is divided over the working days between its start and due
 // dates, only open work is scheduled, and the day is measured against your real capacity (working
-// hours less holidays and approved leave).
+// hours less company holidays).
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  AlertTriangle, CalendarOff, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, Circle, Droplets, Flag,
-  FolderTree, Gauge, Layers, Timer, TriangleAlert,
-} from 'lucide-react';
+import { CalendarClock, ChevronDown, ChevronLeft, ChevronRight, Circle, Flag, FolderTree, Timer, X } from 'lucide-react';
 
 import { useWork } from '../WorkContext';
 import { workApi, type Workload } from '../api';
-import { Avatar, StatusDot, formatDuration } from '../ui';
+import { planningApi } from '../planningApi';
+import { Avatar, Portal, StatusDot, formatDuration, parseDuration } from '../ui';
 import { TaskRowsSkeleton } from '../Skeleton';
 import { TwoStepFilter, type FilterField } from './TwoStepFilter';
+import { notify } from '../../components/notify';
 
-/** The spans the Range field offers, plus a custom one you type. */
-const RANGES: { value: string; label: string; days: number }[] = [
-  { value: '7', label: 'This week', days: 7 },
-  { value: '14', label: 'Two weeks', days: 14 },
-  { value: '28', label: 'Four weeks', days: 28 },
+/** The spans offered beside the dates. */
+const RANGES: { days: number; label: string }[] = [
+  { days: 7, label: 'Week' },
+  { days: 14, label: '2 weeks' },
+  { days: 28, label: '4 weeks' },
 ];
 
 const PRIORITY_NAMES: Record<number, { label: string; color: string }> = {
@@ -39,8 +37,8 @@ const PRIORITY_NAMES: Record<number, { label: string; color: string }> = {
 };
 
 const DAY_MS = 86_400_000;
-/** How tall a day's glass is. Tall enough that a quarter of it is still visible as a level. */
-const GLASS_PX = 64;
+/** How tall a day's level is. Tall enough that a quarter of it is still visible. */
+const GLASS_PX = 56;
 
 const isoDate = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -65,7 +63,7 @@ const hours = (seconds: number) => formatDuration(seconds) || '0h';
 
 type Level = 'empty' | 'light' | 'full' | 'over' | 'closed';
 
-/** How full a day is. The same bands ClickUp uses for a WIP limit. */
+/** How full a day is: under 80%, 80–100%, over. */
 function levelOf(scheduled: number, capacity: number): Level {
   if (capacity <= 0) return 'closed';
   if (scheduled <= 0) return 'empty';
@@ -73,13 +71,10 @@ function levelOf(scheduled: number, capacity: number): Level {
   return scheduled >= capacity * 0.8 ? 'full' : 'light';
 }
 
-const WATER: Record<Level, { glass: string; fill: string; text: string }> = {
-  closed: { glass: 'border-gray-100 bg-[repeating-linear-gradient(135deg,#f9fafb_0_6px,#f3f4f6_6px_12px)]', fill: '', text: 'text-gray-300' },
-  empty: { glass: 'border-gray-200 bg-gray-50/60', fill: '', text: 'text-gray-400' },
-  light: { glass: 'border-teal-200 bg-teal-50/40', fill: 'bg-gradient-to-t from-teal-500 to-teal-300', text: 'text-teal-900' },
-  full: { glass: 'border-amber-200 bg-amber-50/40', fill: 'bg-gradient-to-t from-amber-500 to-amber-300', text: 'text-amber-900' },
-  over: { glass: 'border-red-300 bg-red-50/60', fill: 'bg-gradient-to-t from-red-600 to-red-400', text: 'text-red-800' },
-};
+/** Flat colours: the navy for a comfortable day, amber nearly full, red over. */
+const FILL: Record<Level, string> = { closed: '', empty: '', light: '#234788', full: '#D97706', over: '#DC2626' };
+/** The water's lighter surface colour, over the deeper colour at the bottom of the bowl. */
+const SURFACE: Record<Level, string> = { closed: '', empty: '', light: '#5A7DB6', full: '#FBBF24', over: '#F87171' };
 
 export const MyWorkloadView: React.FC<{
   onOpenTask: (id: string) => void;
@@ -94,8 +89,9 @@ export const MyWorkloadView: React.FC<{
   // Narrowed here rather than on the server: the window is one person's fortnight, so the rows
   // are already in hand and a round trip per tick would buy nothing.
   const [picked, setPicked] = useState<Record<string, string[]>>({});
-  // A span the presets do not cover, typed in the Range field.
-  const [customDays, setCustomDays] = useState('');
+  const [reload, setReload] = useState(0);
+  // The day opened in the side panel, by its index in the window.
+  const [dayOpen, setDayOpen] = useState<number | null>(null);
 
   useEffect(() => {
     if (!workspace) return;
@@ -104,27 +100,27 @@ export const MyWorkloadView: React.FC<{
     workApi.myWorkload(workspace.id, isoDate(start), days)
       .then(setData)
       .catch((e) => setError((e as Error).message));
-  }, [workspace, start, days]);
+  }, [workspace, start, days, reload]);
+  useEffect(() => setDayOpen(null), [start, days]);
 
   const row = data?.rows?.[0];
   const dates = useMemo(() => (data?.days ?? []).map((d) => new Date(`${d}T00:00:00`)), [data]);
   const today = isoDate(new Date());
+  const todayIndex = dates.findIndex((d) => isoDate(d) === today);
+  const tracked = data?.tracked_seconds ?? [];
+  const notes = data?.day_notes ?? [];
 
   const sums = useMemo(() => {
     const add = (xs: number[]) => xs.reduce((n, v) => n + v, 0);
-    const planned = row ? add(row.scheduled_seconds) : 0;
-    const capacity = row ? add(row.capacity_seconds) : 0;
-    const overDays = row
-      ? row.capacity_seconds.filter((cap, i) => cap > 0 && row.scheduled_seconds[i] > cap).length
-      : 0;
-    const workingDays = row ? row.capacity_seconds.filter((c) => c > 0).length : 0;
-    return { planned, capacity, free: Math.max(0, capacity - planned), overDays, workingDays };
+    return { planned: row ? add(row.scheduled_seconds) : 0, capacity: row ? add(row.capacity_seconds) : 0 };
   }, [row]);
+  // A weekend is a day like any other here -- people plan work on them too. With no hours of its
+  // own, it is measured against an ordinary working day.
+  const usualDay = useMemo(() => Math.max(0, ...(row?.capacity_seconds ?? [0])) || 8 * 3600, [row]);
 
   const step = (by: number) => setStart(new Date(start.getTime() + by * days * DAY_MS));
 
-  // Only the tasks that actually land in these days, heaviest first: a row of nothing but
-  // dashes is what made the grid unreadable.
+  // Only the tasks that actually land in these days, heaviest first.
   const all = useMemo(() => {
     const rows = (row?.tasks ?? []).map((t) => ({ t, total: t.seconds_per_day.reduce((n, v) => n + v, 0) }));
     return rows.filter((r) => r.total > 0).sort((a, b) => b.total - a.total);
@@ -141,14 +137,6 @@ export const MyWorkloadView: React.FC<{
       if (t.priority) priorities.add(t.priority);
     }
     return [
-      {
-        key: 'range',
-        label: 'Range',
-        Icon: CalendarRange,
-        single: true,
-        options: RANGES.map((r) => ({ value: r.value, label: `${r.label} (${r.days} days)` })),
-        selected: [String(days)],
-      },
       { key: 'status', label: 'Status', Icon: Circle, options: [...statuses.values()], selected: picked.status ?? [] },
       {
         key: 'priority',
@@ -159,7 +147,7 @@ export const MyWorkloadView: React.FC<{
       },
       { key: 'list', label: 'List', Icon: FolderTree, options: [...lists.values()], selected: picked.list ?? [] },
     ];
-  }, [all, picked, listName, days]);
+  }, [all, picked, listName]);
 
   const tasks = useMemo(() => all.filter(({ t }) => {
     const byStatus = picked.status?.length ? picked.status.includes(t.status.name.toLowerCase()) : true;
@@ -169,9 +157,6 @@ export const MyWorkloadView: React.FC<{
   }), [all, picked]);
 
   const toggle = (field: FilterField, value: string) => {
-    // The Range is the window the view is read over, not a property of the work in it, so it is
-    // saved on the view rather than in the set of picked values.
-    if (field.key === 'range') { setDays(Number(value)); setCustomDays(''); return; }
     setPicked((prev) => {
       const on = prev[field.key] ?? [];
       const next = on.includes(value) ? on.filter((x) => x !== value) : [...on, value];
@@ -189,94 +174,63 @@ export const MyWorkloadView: React.FC<{
     return out;
   }, [dates]);
 
-  // The task column is wide and fixed: a name that wraps under the glasses is what pushed the
+  // The task column is wide and fixed: a name that wraps under the days is what pushed the
   // hours out of their columns.
-  const grid = { gridTemplateColumns: `320px repeat(${dates.length || days}, minmax(56px, 1fr))` };
+  const grid = { gridTemplateColumns: `300px repeat(${dates.length || days}, minmax(60px, 1fr))` };
   const over = sums.planned > sums.capacity && sums.capacity > 0;
+  /** Today's column carries a light navy band the whole way down. */
+  const band = (i: number) => (i === todayIndex ? 'bg-[#F3F6FB]' : '');
 
   if (error) return <p className="m-6 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>;
 
   return (
     <div className="px-6 pb-8">
-      {/* --- what the window holds, before any of the detail ---------------------------------- */}
-      <div className="grid gap-3 py-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat
-          tone="plain" Icon={Gauge} label="Capacity"
-          value={hours(sums.capacity)}
-          note={`${sums.workingDays} working day${sums.workingDays === 1 ? '' : 's'} in view`}
-        />
-        <Stat
-          tone={over ? 'red' : 'plain'} Icon={Droplets} label="Planned"
-          value={hours(sums.planned)}
-          note={sums.capacity ? `${Math.round((sums.planned / sums.capacity) * 100)}% of capacity` : 'no capacity in view'}
-          share={sums.capacity ? sums.planned / sums.capacity : 0}
-        />
-        <Stat
-          tone={over ? 'red' : 'plain'} Icon={Layers} label={over ? 'Over by' : 'Still free'}
-          value={over ? hours(sums.planned - sums.capacity) : hours(sums.free)}
-          note={over ? 'more planned than you have' : 'room left in these days'}
-        />
-        <Stat
-          tone={sums.overDays ? 'orange' : 'plain'} Icon={TriangleAlert} label="Days over"
-          value={String(sums.overDays)}
-          note={sums.overDays ? 'these days have spilled over' : 'no day is overloaded'}
-        />
-      </div>
-
-      {/* --- the window itself ---------------------------------------------------------------- */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      {/* --- the window: dates, span, filter, and the key -------------------------------------- */}
+      <div className="flex flex-wrap items-center gap-2 py-4">
         <button
           type="button"
           onClick={() => setStart(mondayOf(new Date()))}
-          className="rounded-md border border-gray-200 bg-white px-3 py-1 text-sm text-gray-700 hover:bg-gray-50"
+          className="vf-tool rounded-md px-3 py-1 text-sm"
         >
           Today
         </button>
-        <button aria-label="Earlier" type="button" title="Earlier" onClick={() => step(-1)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
-        <button aria-label="Later" type="button" title="Later" onClick={() => step(1)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
-        <span className="text-sm font-medium text-gray-700">
-          {start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – {
-            new Date(start.getTime() + (days - 1) * DAY_MS).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
+        {/* ‹ the dates › -- the arrows sit either side of what they move. */}
+        <span className="flex items-center gap-0.5">
+          <button aria-label="Earlier" type="button" onClick={() => step(-1)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
+          <span className="px-1 text-sm font-semibold text-[#1B2A4A]">
+            {start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – {
+              new Date(start.getTime() + (days - 1) * DAY_MS).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
+          </span>
+          <button aria-label="Later" type="button" onClick={() => step(1)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
         </span>
-        <span className="ml-auto flex items-center gap-2">
+        <span role="group" aria-label="Span" className="ml-2 flex rounded-lg border border-[#D9E1EF] bg-white p-0.5">
+          {RANGES.map((r) => (
+            <button key={r.days} type="button" aria-pressed={days === r.days} onClick={() => setDays(r.days)}
+              className={`rounded-md px-2.5 py-0.5 text-[13px] ${days === r.days ? 'bg-brand-600 font-medium text-white' : 'text-gray-600 hover:bg-[#EEF2F8]'}`}>
+              {r.label}
+            </button>
+          ))}
+        </span>
+        <span className="ml-auto flex items-center gap-3">
+          <span className="hidden items-center gap-2.5 text-[11px] text-gray-500 lg:flex">
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[#234788]" />under 80%</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[#D97706]" />80–100%</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[#DC2626]" />over</span>
+            <span className="inline-flex items-center gap-1"><span className="h-0 w-3 border-t-2 border-dashed border-[#1B2A4A]" />logged</span>
+          </span>
           <TwoStepFilter
             fields={fields}
             onToggle={toggle}
-            onClear={(f) => (f.key === 'range' ? setDays(7) : setPicked((prev) => ({ ...prev, [f.key]: [] })))}
-            onClearAll={() => { setPicked({}); setDays(7); }}
+            onClear={(f) => setPicked((prev) => ({ ...prev, [f.key]: [] }))}
+            onClearAll={() => setPicked({})}
             align="right"
-            footer={(field) => (field.key === 'range' ? (
-              <form
-                className="flex items-center gap-1.5 border-t border-gray-100 px-3 py-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const n = Number(customDays);
-                  if (Number.isFinite(n) && n >= 1 && n <= 92) setDays(Math.round(n));
-                }}
-              >
-                <input
-                  value={customDays}
-                  onChange={(e) => setCustomDays(e.target.value)}
-                  placeholder="Custom"
-                  aria-label="Custom number of days"
-                  inputMode="numeric"
-                  className="w-16 rounded-md border border-gray-300 px-2 py-1 text-[13px]"
-                />
-                <span className="flex-1 text-[11px] text-gray-400">days, up to 92</span>
-                <button type="submit" className="rounded-md bg-teal-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-teal-700">
-                  Apply
-                </button>
-              </form>
-            ) : null)}
           />
         </span>
-
       </div>
 
       {!data ? <TaskRowsSkeleton rows={5} /> : (
-        <div>
         <div className="min-w-0">
-          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm" role="table" aria-label="My workload">
+          <div className="overflow-x-auto rounded-xl border border-[#E6E8EC] bg-white" role="table" aria-label="My workload">
             {/* Which months these days belong to. */}
             <div className="grid border-b border-gray-100" style={grid} role="row">
               <div className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">Work</div>
@@ -287,31 +241,32 @@ export const MyWorkloadView: React.FC<{
               ))}
             </div>
 
-            {/* The days. Today is circled; weekends are greyed. */}
-            <div className="grid border-b border-gray-200 bg-gray-50/70" style={grid} role="row">
-              <div className="px-3 py-2 text-xs font-medium text-gray-500">Person</div>
-              {dates.map((d) => {
-                const weekend = d.getDay() === 0 || d.getDay() === 6;
-                const isToday = isoDate(d) === today;
+            {/* The days. Today is circled in navy; days off are greyed. Click one to see it. */}
+            <div className="grid border-b border-[#E6E8EC]" style={grid} role="row">
+              <div />
+              {dates.map((d, i) => {
                 return (
-                  <div
+                  <button
                     key={d.toISOString()}
-                    className={`flex flex-col items-center gap-0.5 py-1.5 text-[11px] ${weekend ? 'bg-gray-100/70' : ''}`}
+                    type="button"
+                    onClick={() => setDayOpen(i)}
+                    aria-label={`Open ${d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}`}
+                    className={`flex flex-col items-center gap-0.5 py-1.5 text-[11px] hover:bg-[#EEF2F8] ${band(i)}`}
                   >
-                    <span className={weekend ? 'text-gray-400' : 'text-gray-500'}>
+                    <span className="text-gray-500">
                       {d.toLocaleDateString(undefined, { weekday: 'short' })}
                     </span>
-                    <span className={isToday
-                      ? 'flex h-5 w-5 items-center justify-center rounded-full bg-sky-600 font-semibold text-white'
-                      : `font-medium ${weekend ? 'text-gray-400' : 'text-gray-700'}`}>
+                    <span className={i === todayIndex
+                      ? 'flex h-5 w-5 items-center justify-center rounded-full bg-[#234788] font-semibold text-white'
+                      : 'font-medium text-gray-700'}>
                       {d.getDate()}
                     </span>
-                  </div>
+                  </button>
                 );
               })}
             </div>
 
-            {/* Your row: one glass per day. */}
+            {/* Your row: one level per day, the numbers written under it. */}
             <div className="grid items-stretch border-b border-gray-100 bg-white" style={grid} role="row">
               <button
                 type="button"
@@ -324,58 +279,57 @@ export const MyWorkloadView: React.FC<{
                   {row?.user ? row.user.display_name || row.user.email : 'Me'}
                 </span>
                 <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                  over ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                  over ? 'bg-red-100 text-red-700' : 'bg-[#EEF2F8] text-[#1C3A70]'}`}>
                   {hoursShort(sums.planned) || '0h'}/{hoursShort(sums.capacity) || '0h'}
                 </span>
               </button>
               {dates.map((d, i) => (
-                <Glass
-                  key={d.toISOString()}
-                  planned={row?.scheduled_seconds[i] ?? 0}
-                  capacity={row?.capacity_seconds[i] ?? 0}
-                />
+                <button key={d.toISOString()} type="button" onClick={() => setDayOpen(i)} className={`text-left ${band(i)}`}
+                  aria-label={`Open ${d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}`}>
+                  <Day
+                    planned={row?.scheduled_seconds[i] ?? 0}
+                    capacity={row?.capacity_seconds[i] ?? 0}
+                    usual={usualDay}
+                    logged={tracked[i] ?? 0}
+                    note={notes[i] ?? null}
+                  />
+                </button>
               ))}
             </div>
 
             {/* The tasks behind those levels. */}
             {open && (tasks.length ? tasks.map(({ t, total }) => {
-              // The full path can be "Space / Folder / List"; the last two segments are what
-              // actually tell one task's home from another's.
-              const where = (listName(t.list_id) ?? '').split(' / ').slice(-2).join(' / ');
-              const priority = t.priority ? PRIORITY_NAMES[t.priority] : undefined;
+              // The full path can be "Space / Folder / List"; the List is what tells them apart.
+              const where = (listName(t.list_id) ?? '').split(' / ').pop();
+              const priority = t.priority && t.priority <= 2 ? PRIORITY_NAMES[t.priority] : undefined;
               return (
                 <div key={t.id} className="group grid items-stretch border-b border-gray-50 text-xs last:border-b-0 hover:bg-gray-50/60" style={grid} role="row">
                   <button
                     type="button"
                     onClick={() => onOpenTask(t.id)}
                     className="flex min-w-0 items-center gap-2.5 py-2 pl-9 pr-3 text-left"
-                    title={where ? `${t.name} — ${where}` : t.name}
                   >
                     <StatusDot status={t.status} size={11} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] font-medium text-gray-800 group-hover:text-gray-950">{t.name}</span>
-                      {/* Where it lives and how urgent it is share the second line, so the name
-                          never has to compete with them for the first. */}
                       <span className="mt-0.5 flex items-center gap-1.5">
                         {priority && (
-                          <span className="flex shrink-0 items-center gap-1 text-[10px] text-gray-400">
+                          <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium" style={{ color: priority.color }}>
                             <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: priority.color }} />
                             {priority.label}
                           </span>
                         )}
-                        {where && <span className="min-w-0 truncate text-[11px] text-gray-400">{where}</span>}
+                        {where && <span className="min-w-0 truncate rounded bg-[#F2F4F7] px-1.5 text-[11px] text-[#667085]">{where}</span>}
                       </span>
                     </span>
-                    <span className="shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-gray-600 group-hover:bg-gray-200">
+                    <span className="shrink-0 rounded-md bg-[#EEF2F8] px-1.5 py-0.5 text-[11px] font-semibold text-[#1C3A70]">
                       {hoursShort(total)}
                     </span>
                   </button>
-                  {/* A day's share as a soft pill rather than a bare number: the row then reads
-                      as a shape across the week before any of it is read as figures. */}
                   {t.seconds_per_day.map((v, i) => (
-                    <div key={i} className="flex items-center justify-center px-1 py-1.5">
+                    <div key={i} className={`flex items-center justify-center px-1 py-1.5 ${band(i)}`}>
                       {v ? (
-                        <span className="w-full rounded-md bg-teal-50 py-1 text-center text-[11px] font-semibold tabular-nums text-teal-800 ring-1 ring-teal-100">
+                        <span className="w-full rounded-md bg-[#EEF2F8] py-1 text-center text-[11px] font-semibold tabular-nums text-[#1C3A70] ring-1 ring-[#D9E1EF]">
                           {hoursShort(v)}
                         </span>
                       ) : (
@@ -387,130 +341,186 @@ export const MyWorkloadView: React.FC<{
               );
             }) : (
               <div className="px-3 py-8 text-center text-sm text-gray-400">
-                {all.length ? 'Nothing matches these filters.' : ''}
+                {all.length ? 'Nothing matches these filters.' : 'Nothing with dates and an estimate lands in these days.'}
               </div>
             ))}
           </div>
 
-          <p className="mt-2 flex flex-wrap items-center justify-end gap-3 text-xs text-gray-400">
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded bg-teal-400" />under 80%</span>
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded bg-amber-400" />80–100%</span>
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded bg-red-500" />over capacity</span>
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded bg-gray-200" />not a working day</span>
-          </p>
-
-          {/* Work that cannot be placed in a day is the reason the glasses look emptier than the
-              week feels, so it is named rather than silently dropped. */}
-          {(data.unscheduled.length > 0 || data.no_estimate.length > 0) && (
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {data.unscheduled.length > 0 && (
-                <Aside icon={<CalendarOff size={13} />} title={`${data.unscheduled.length} with no dates`}
-                  items={data.unscheduled} onOpenTask={onOpenTask} />
-              )}
-              {data.no_estimate.length > 0 && (
-                <Aside icon={<Timer size={13} />} title={`${data.no_estimate.length} with no estimate`}
-                  items={data.no_estimate} onOpenTask={onOpenTask} />
-              )}
+          {/* Work that has dates but no estimate cannot be poured into a day -- the usual reason
+              a week looks emptier than it feels. Each one can be sized right here. */}
+          {data.no_estimate.length > 0 && (
+            <div className="mt-4 max-w-2xl rounded-xl border border-[#E6E8EC] bg-white px-4 py-3">
+              <p className="flex items-center gap-1.5 text-[13px] font-semibold text-[#1B2A4A]">
+                <Timer size={14} className="text-[#2F5699]" />
+                {data.no_estimate.length} with no estimate
+                <span className="font-normal text-gray-500">— not counted above until they have one</span>
+              </p>
+              <ul className="mt-2 divide-y divide-gray-100">
+                {data.no_estimate.slice(0, 8).map((t) => (
+                  <EstimateRow key={t.id} id={t.id} name={t.name} onOpen={() => onOpenTask(t.id)} onSaved={() => setReload((n) => n + 1)} />
+                ))}
+              </ul>
+              {data.no_estimate.length > 8 && <p className="mt-1 text-[11px] text-gray-400">and {data.no_estimate.length - 8} more</p>}
             </div>
           )}
         </div>
-        {/* "Personal insights" stood in a column on the right: heaviest work, overloaded days,
-            open slots. The week above already shows all three -- the glasses fill, tip red and
-            sit empty -- so the grid now has the full width it needs. */}
+      )}
+
+      {data && row && dayOpen !== null && dates[dayOpen] && (
+        <DayPanel
+          date={dates[dayOpen]}
+          planned={row.scheduled_seconds[dayOpen] ?? 0}
+          capacity={row.capacity_seconds[dayOpen] ?? 0}
+          logged={tracked[dayOpen] ?? 0}
+          note={notes[dayOpen] ?? null}
+          items={row.tasks.filter((t) => t.seconds_per_day[dayOpen] > 0)
+            .map((t) => ({ id: t.id, name: t.name, status: t.status, seconds: t.seconds_per_day[dayOpen], where: (listName(t.list_id) ?? '').split(' / ').pop() ?? '' }))
+            .sort((a, b) => b.seconds - a.seconds)}
+          onOpenTask={onOpenTask}
+          onClose={() => setDayOpen(null)}
+        />
+      )}
+    </div>
+  );
+};
+
+/** One day: a flat level filling from the bottom, and under it the numbers written out. */
+const Day: React.FC<{ planned: number; capacity: number; usual: number; logged: number; note: string | null }> = ({ planned, capacity, usual, logged, note }) => {
+  // A day with no hours of its own (a weekend, a holiday) is still a day you can plan into:
+  // it is drawn against an ordinary day and never counts as over.
+  const own = capacity > 0;
+  const scale = own ? capacity : usual;
+  const level: Level = own ? levelOf(planned, capacity) : planned > 0 ? 'light' : 'empty';
+  const share = Math.min(1, planned / scale);
+  const loggedShare = Math.min(1, logged / scale);
+  const label = `${hours(planned)} planned${own ? ` of ${hours(capacity)}` : ''}${own && planned > capacity ? `, ${hours(planned - capacity)} over` : ''}${logged ? `, ${hours(logged)} logged` : ''}${note ? `, ${note}` : ''}`;
+
+  return (
+    <div className="px-1.5 pb-1.5 pt-1.5" role="meter" aria-label={label} aria-valuenow={Math.round(share * 100)} aria-valuemin={0} aria-valuemax={100}>
+      {(
+        // A box, filled from the bottom to how full the day is. Still: nothing moves.
+        <div className={`vf-box relative overflow-hidden border ${level === 'over' ? 'border-red-200' : 'border-[#D9E1EF]'}`} style={{ height: GLASS_PX }}>
+          {share > 0 && (
+            <span aria-hidden className="vf-fill absolute inset-x-0 bottom-0"
+              style={{ height: `${Math.max(8, share * 100)}%`, '--deep': FILL[level], '--top': SURFACE[level] } as React.CSSProperties} />
+          )}
+          {/* What was actually logged: a dashed line at that height. */}
+          {logged > 0 && (
+            <span aria-hidden className="absolute inset-x-1 border-t-2 border-dashed border-[#1B2A4A]/70"
+              style={{ bottom: `${Math.max(2, loggedShare * 100)}%` }} />
+          )}
+        </div>
+      )}
+      {(
+        <div className="mt-1 text-center leading-tight">
+          <p className={`text-[11px] font-semibold tabular-nums ${level === 'over' ? 'text-red-700' : 'text-gray-700'}`}>
+            {hoursShort(planned) || '0h'}{own && <span className="font-normal text-gray-400"> / {hoursShort(capacity)}</span>}
+          </p>
+          {note && <p className="truncate text-[10px] font-medium text-[#2F5699]">{note}</p>}
+          {own && planned > capacity && <p className="text-[10px] font-semibold text-red-600">+{hoursShort(planned - capacity)}</p>}
+          {logged > 0 && <p className="text-[10px] text-gray-500">{hoursShort(logged)} logged</p>}
         </div>
       )}
     </div>
   );
 };
 
-/** One day, as a container filling up. Over capacity it is full and red, with the spill named. */
-const Glass: React.FC<{ planned: number; capacity: number }> = ({ planned, capacity }) => {
-  const level = levelOf(planned, capacity);
-  const skin = WATER[level];
-  const share = capacity > 0 ? Math.min(1, planned / capacity) : 0;
-  const title = capacity <= 0
-    ? 'Not a working day'
-    : `${hours(planned)} planned of ${hours(capacity)}${planned > capacity ? ` — ${hours(planned - capacity)} over` : ''}`;
-
+/** A task with dates but no estimate, sized in place: type "2h" and press Enter. */
+const EstimateRow: React.FC<{ id: string; name: string; onOpen: () => void; onSaved: () => void }> = ({ id, name, onOpen, onSaved }) => {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    const secs = parseDuration(text);
+    if (!secs) { notify.error(new Error('Write estimates like 2h or 1h 30m')); return; }
+    setBusy(true);
+    try { await workApi.updateTask(id, { time_estimate_seconds: secs }); onSaved(); } catch (e) { notify.error(e); setBusy(false); }
+  };
   return (
-    <div className={'p-1.5'}>
-      <div
-        title={title}
-        role="meter"
-        aria-label={title}
-        aria-valuenow={Math.round(share * 100)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        className={`relative flex items-end justify-center overflow-hidden rounded-lg border ${skin.glass}`}
-        style={{ height: GLASS_PX }}
-      >
-        {/* The water. It rises from the bottom, which is the only direction a level reads in. */}
-        {share > 0 && (
-          <span
-            aria-hidden
-            className={`absolute inset-x-0 bottom-0 ${skin.fill} transition-[height] duration-300`}
-            style={{ height: `${Math.max(8, share * 100)}%` }}
-          >
-            {/* A lighter band at the surface, so the level has an edge to read against. */}
-            <span className="absolute inset-x-0 top-0 h-[3px] bg-white/45" />
-          </span>
+    <li className="flex items-center gap-2 py-1.5">
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 truncate text-left text-[13px] text-gray-700 hover:text-brand-700">{name}</button>
+      <form onSubmit={(e) => { e.preventDefault(); save(); }} className="flex items-center gap-1">
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. 2h" aria-label={`Estimate for ${name}`} disabled={busy}
+          className="w-20 rounded-md border border-[#D9E1EF] px-2 py-0.5 text-[13px] outline-none focus:border-brand-500" />
+        <button type="submit" disabled={busy || !text.trim()} className="rounded-md bg-brand-600 px-2 py-0.5 text-[12px] font-medium text-white disabled:opacity-40">Set</button>
+      </form>
+    </li>
+  );
+};
+
+/** One day opened: what is on it, for how long, and a way to block it out in the Planner. */
+const DayPanel: React.FC<{
+  date: Date; planned: number; capacity: number; logged: number; note: string | null;
+  items: { id: string; name: string; status: Workload['rows'][number]['tasks'][number]['status']; seconds: number; where: string }[];
+  onOpenTask: (id: string) => void; onClose: () => void;
+}> = ({ date, planned, capacity, logged, note, items, onOpenTask, onClose }) => {
+  const { workspace } = useWork();
+  const [from, setFrom] = useState('09:00');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [onClose]);
+  /** Blocks out the given tasks one after another from the chosen time, each for its hours that day. */
+  const plan = async (which: typeof items) => {
+    if (!workspace) return;
+    const [h, m] = from.split(':').map(Number);
+    let at = new Date(date.getFullYear(), date.getMonth(), date.getDate(), h, m);
+    setBusy(true);
+    try {
+      for (const t of which) {
+        const end = new Date(at.getTime() + t.seconds * 1000);
+        await planningApi.addBlock(workspace.id, { task_id: t.id, start_at: at.toISOString(), end_at: end.toISOString() });
+        at = end;
+      }
+      notify.ok(which.length === 1 ? 'Added to your Planner' : `Added ${which.length} to your Planner`);
+    } catch (e) { notify.error(e); } finally { setBusy(false); }
+  };
+  return (
+    <Portal>
+      <div className="fixed inset-0 z-[120] bg-black/10" onClick={onClose} />
+      <aside role="dialog" aria-label={date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
+        className="fixed inset-y-0 right-0 z-[121] flex w-full max-w-sm flex-col border-l border-[#E6E8EC] bg-white shadow-2xl">
+        <header className="flex items-start gap-2 border-b border-[#E6E8EC] px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-base font-semibold text-[#1B2A4A]">{date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+            <p className="mt-0.5 text-[13px] text-gray-500">
+              {hours(planned)} planned{capacity > 0 && <> of {hours(capacity)}</>}
+              {capacity > 0 && planned > capacity && <b className="text-red-600"> · {hours(planned - capacity)} over</b>} · {hours(logged)} logged
+              {note && <> · {note}</>}
+            </p>
+          </div>
+          <button type="button" aria-label="Close" onClick={onClose} className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><X size={16} /></button>
+        </header>
+        <ul className="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto px-2">
+          {items.length === 0 && <li className="px-2 py-10 text-center text-sm text-gray-400">Nothing planned on this day.</li>}
+          {items.map((t) => (
+            <li key={t.id} className="flex items-center gap-2 px-2 py-2">
+              <StatusDot status={t.status} size={11} />
+              <button type="button" onClick={() => onOpenTask(t.id)} className="min-w-0 flex-1 text-left">
+                <span className="block truncate text-[13px] font-medium text-gray-800 hover:text-brand-700">{t.name}</span>
+                {t.where && <span className="block truncate text-[11px] text-gray-400">{t.where}</span>}
+              </button>
+              <span className="shrink-0 rounded-md bg-[#EEF2F8] px-1.5 py-0.5 text-[11px] font-semibold text-[#1C3A70]">{hoursShort(t.seconds)}</span>
+              <button type="button" disabled={busy} onClick={() => plan([t])} aria-label={`Add ${t.name} to the Planner`}
+                className="shrink-0 rounded-md p-1 text-[#2F5699] hover:bg-[#EEF2F8] disabled:opacity-40"><CalendarClock size={15} /></button>
+            </li>
+          ))}
+        </ul>
+        {items.length > 0 && (
+          <footer className="flex items-center gap-2 border-t border-[#E6E8EC] px-4 py-3">
+            <label className="flex items-center gap-1.5 text-[13px] text-gray-600">
+              From
+              <input type="time" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Starting at"
+                className="rounded-md border border-[#D9E1EF] px-2 py-1 text-[13px] text-gray-800" />
+            </label>
+            <button type="button" disabled={busy} onClick={() => plan(items)}
+              className="ml-auto flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
+              <CalendarClock size={14} /> Add all to Planner
+            </button>
+          </footer>
         )}
-        <span className={`relative w-full pb-1 text-center text-[11px] font-semibold ${
-          share > 0.55 ? 'text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]' : skin.text}`}>
-          {capacity <= 0 ? '' : hoursShort(planned) || '0h'}
-        </span>
-      </div>
-    </div>
+      </aside>
+    </Portal>
   );
 };
-
-// One look for the figures -- white, a blue icon -- with red and orange kept for a warning.
-const STAT_TONES = {
-  plain: { card: 'border-gray-200 bg-white', badge: 'bg-blue-600 text-white', bar: 'bg-blue-500', value: 'text-gray-900' },
-  orange: { card: 'border-orange-200 bg-orange-50', badge: 'bg-orange-500 text-white', bar: 'bg-orange-500', value: 'text-orange-900' },
-  red: { card: 'border-red-200 bg-red-50', badge: 'bg-red-600 text-white', bar: 'bg-red-500', value: 'text-red-900' },
-} as const;
-
-const Stat: React.FC<{
-  tone: keyof typeof STAT_TONES; Icon: React.ElementType; label: string; value: string; note: string;
-  /** Drawn as a bar under the number when the figure is a share of something. */
-  share?: number;
-}> = ({ tone, Icon, label, value, note, share }) => {
-  const skin = STAT_TONES[tone];
-  return (
-    <div className={`rounded-xl border px-4 py-3 shadow-sm ${skin.card}`}>
-      <div className="flex items-center gap-2">
-        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg shadow-sm ${skin.badge}`}><Icon size={15} /></span>
-        <span className="truncate text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</span>
-      </div>
-      <p className={`mt-2 text-2xl font-semibold leading-none ${skin.value}`}>{value}</p>
-      {share !== undefined && (
-        <span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-black/10">
-          <span className={`block h-full rounded-full ${skin.bar}`} style={{ width: `${Math.min(100, share * 100)}%` }} />
-        </span>
-      )}
-      <p className="mt-1.5 truncate text-[11px] text-gray-600/90">{note}</p>
-    </div>
-  );
-};
-
-const Aside: React.FC<{
-  icon: React.ReactNode; title: string;
-  items: { id: string; name: string }[]; onOpenTask: (id: string) => void;
-}> = ({ icon, title, items, onOpenTask }) => (
-  <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2">
-    <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">{icon}{title}</p>
-    <ul className="mt-1.5 space-y-0.5">
-      {items.slice(0, 6).map((t) => (
-        <li key={t.id}>
-          <button type="button" onClick={() => onOpenTask(t.id)}
-            className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs text-gray-700 hover:bg-amber-100/70">
-            <AlertTriangle size={11} className="shrink-0 text-amber-500" />
-            <span className="min-w-0 flex-1 truncate">{t.name}</span>
-          </button>
-        </li>
-      ))}
-      {items.length > 6 && <li className="px-1 text-[11px] text-amber-700/80">and {items.length - 6} more</li>}
-    </ul>
-  </div>
-);

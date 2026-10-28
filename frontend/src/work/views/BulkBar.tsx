@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { Archive, CalendarDays, CircleDot, Diamond, Flag, MoveRight, Shapes, Tag as TagIcon, Timer, Trash2, UserPlus, X } from 'lucide-react';
+import { Archive, CalendarClock, CalendarDays, CalendarRange, CircleDot, Download, FileSpreadsheet, FileText, Diamond, Flag, MoveRight, Shapes, Tag as TagIcon, Timer, Trash2, UserPlus, X } from 'lucide-react';
 import { workApi, type BulkEdit, type BulkResult, type Status, type Task, type UserRef } from '../api';
 import { NoMatch, PRIORITIES, SearchBox, fromDateInput, matchesSearch, parseDuration } from '../ui';
 import { useWritableLists } from '../task/TaskActions';
 import { useWork } from '../WorkContext';
 import { Popover } from './ViewControls';
 import { ask } from '../../components/ask';
+import { planningApi } from '../planningApi';
+import { exportTasks, taskRows } from './exportTasks';
 
 /** Who to add to or take off every selected task, searchable; Enter adds the first match. */
 const BulkPeople: React.FC<{ people: UserRef[]; onAdd: (p: UserRef) => void; onRemove: (p: UserRef) => void }> = ({ people, onAdd, onRemove }) => {
@@ -43,7 +45,31 @@ export const BulkBar: React.FC<{
   const [moveQ, setMoveQ] = useState('');
   const [estimate, setEstimate] = useState('');
   const lists = useWritableLists();
-  const { taskTypes } = useWork();
+  const { taskTypes, workspace, listName } = useWork();
+  // Add to Planner: the day and the hour to start, then each task in turn for its estimate (an
+  // hour when it has none), back to back.
+  const [planDay, setPlanDay] = useState(() => new Date().toLocaleDateString('en-CA'));
+  const [planAt, setPlanAt] = useState('09:00');
+  const plan = async () => {
+    if (!workspace) return;
+    const [h, m] = planAt.split(':').map(Number);
+    const [y, mo, d] = planDay.split('-').map(Number);
+    let at = new Date(y, mo - 1, d, h, m);
+    let made = 0;
+    try {
+      for (const t of selected) {
+        const end = new Date(at.getTime() + (t.time_estimate_seconds || 3600) * 1000);
+        await planningApi.addBlock(workspace.id, { task_id: t.id, start_at: at.toISOString(), end_at: end.toISOString() });
+        at = end;
+        made += 1;
+      }
+      setNote({ text: `Added ${made} to your Planner`, bad: false });
+    } catch (e) {
+      setNote({ text: made ? `Added ${made}; then: ${(e as Error).message}` : (e as Error).message, bad: true });
+    }
+  };
+  const exportSelected = (format: 'xlsx' | 'csv' | 'pdf') =>
+    exportTasks(format, `Selected tasks (${selected.length})`, taskRows(selected, [], people, listName), `Selected tasks (${selected.length})`);
   // Every word has to appear in the path, so "dev pms" finds "PMS - Dev" under a Dev Space.
   const matchingLists = useMemo(() => {
     const words = moveQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -76,9 +102,12 @@ export const BulkBar: React.FC<{
       {note && (
         <p className={`pointer-events-auto rounded-md px-3 py-1 text-xs shadow ${note.bad ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'}`}>{note.text}</p>
       )}
-      <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-1 rounded-xl bg-gray-900 px-3 py-2 text-sm text-white shadow-2xl">
-        <span className="mr-1 whitespace-nowrap font-medium">{selected.length} selected</span>
-        <button type="button" title="Clear selection" aria-label="Clear selection" onClick={onClear} className="mr-2 rounded p-1 text-gray-400 hover:bg-white/10 hover:text-white"><X size={14} /></button>
+      {/* The app's navy, so it stands apart from the white list it floats over. */}
+      <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-0.5 rounded-2xl bg-[#1B2A4A] py-1.5 pl-1.5 pr-2 text-sm text-white shadow-[0_16px_40px_-10px_rgba(16,24,40,0.45),0_2px_6px_rgba(16,24,40,0.15)] ring-1 ring-white/10">
+        <span className="mr-2 flex items-center gap-1 whitespace-nowrap rounded-xl bg-white py-1 pl-3 pr-1 font-semibold text-[#1B2A4A]">
+          {selected.length} selected
+          <button type="button" aria-label="Clear selection" onClick={onClear} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><X size={13} /></button>
+        </span>
 
         <Popover label="Set status" icon={<CircleDot size={14} />} text="Status" up dark width={220}>
           {(close) => statusNames.map((st) => (
@@ -137,6 +166,16 @@ export const BulkBar: React.FC<{
               <input type="date" aria-label="New due date" className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-800"
                 onChange={(e) => { const v = fromDateInput(e.target.value); if (v) { close(); run({ due_date: v }, 'Updated'); } }} />
               <button type="button" className={`${item} mt-1`} onClick={() => { close(); run({ due_date: null }, 'Updated'); }}><X size={13} /> Remove due date</button>
+            </>
+          )}
+        </Popover>
+
+        <Popover label="Set start date" icon={<CalendarRange size={14} />} text="Start date" up dark width={220}>
+          {(close) => (
+            <>
+              <input type="date" aria-label="New start date" className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-800"
+                onChange={(e) => { const v = fromDateInput(e.target.value); if (v) { close(); run({ start_date: v }, 'Updated'); } }} />
+              <button type="button" className={`${item} mt-1`} onClick={() => { close(); run({ start_date: null }, 'Updated'); }}><X size={13} /> Remove start date</button>
             </>
           )}
         </Popover>
@@ -211,9 +250,35 @@ export const BulkBar: React.FC<{
           )}
         </Popover>
 
+        <Popover label="Add to Planner" icon={<CalendarClock size={14} />} text="Planner" up dark width={230}>
+          {(close) => (
+            <form onSubmit={(e) => { e.preventDefault(); close(); plan(); }} className="space-y-2">
+              <p className="text-xs text-gray-500">Blocks out each task for its estimate, one after another.</p>
+              <div className="flex gap-1.5">
+                <input type="date" aria-label="Day" value={planDay} onChange={(e) => setPlanDay(e.target.value)}
+                  className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-800" />
+                <input type="time" aria-label="Starting at" value={planAt} onChange={(e) => setPlanAt(e.target.value)}
+                  className="w-24 rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-800" />
+              </div>
+              <button type="submit" className="w-full rounded-md bg-brand-600 px-2 py-1 text-xs font-medium text-white">Add {selected.length} to Planner</button>
+            </form>
+          )}
+        </Popover>
+
+        <Popover label="Export selected" icon={<Download size={14} />} text="Export" up dark width={190}>
+          {(close) => (
+            <>
+              <button type="button" className={item} onClick={() => { close(); exportSelected('xlsx'); }}><FileSpreadsheet size={13} /> Excel</button>
+              <button type="button" className={item} onClick={() => { close(); exportSelected('csv'); }}><FileSpreadsheet size={13} /> CSV</button>
+              <button type="button" className={item} onClick={() => { close(); exportSelected('pdf'); }}><FileText size={13} /> PDF</button>
+            </>
+          )}
+        </Popover>
+
+        <span className="mx-1 h-5 w-px bg-white/15" aria-hidden />
         <button type="button" onClick={() => run({ archived: true }, 'Archived')} className="flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-gray-100 hover:bg-white/10"><Archive size={14} /> Archive</button>
         <button type="button" onClick={async () => await ask.confirm({ danger: true, title: `Delete ${selected.length} task${selected.length === 1 ? '' : 's'} and their subtasks? This cannot be undone.` }) && run({ delete: true }, 'Deleted')}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-red-300 hover:bg-white/10"><Trash2 size={14} /> Delete</button>
+          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-red-300 hover:bg-white/10 hover:text-red-200"><Trash2 size={14} /> Delete</button>
       </div>
     </div>
   );

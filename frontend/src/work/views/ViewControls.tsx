@@ -1,7 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowDownUp, Check, Columns3, Filter, Layers3, Plus, UserRound } from 'lucide-react';
+import { ArrowDownUp, Check, Columns3, Filter, Layers3, Plus, UserRound, Users } from 'lucide-react';
 import type { Status, Task, TaskGroupRef, UserRef } from '../api';
-import { NoMatch, PRIORITIES, Portal, SearchBox, matchesSearch } from '../ui';
+import { Avatar, NoMatch, PRIORITIES, Portal, SearchBox, matchesSearch } from '../ui';
+import { useMe, useWork } from '../WorkContext';
 import { GROUP_BY_LABELS, type GroupBy } from './grouping';
 import { AdvancedFilters } from './AdvancedFilters';
 import {
@@ -12,8 +13,10 @@ import {
 /** A button that opens a panel below it (kept in a portal so nothing clips it). */
 export const Popover: React.FC<{
   label: string; icon: React.ReactNode; text: string; active?: boolean; width?: number; up?: boolean; dark?: boolean;
+  /** Less padding, for the small menus of switches. */
+  tight?: boolean;
   children: (close: () => void) => React.ReactNode;
-}> = ({ label, icon, text, active, width = 260, up, dark, children }) => {
+}> = ({ label, icon, text, active, width = 260, up, dark, tight, children }) => {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -45,14 +48,14 @@ export const Popover: React.FC<{
         onClick={() => setOpen(!open)}
         className={dark
           ? 'flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-sm text-gray-100 hover:bg-white/10'
-          : `flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-sm ${active ? 'bg-brand-50 text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`}
+          : `vf-tool flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-sm ${active ? 'font-medium' : ''}`}
       >
         {icon} {text}
       </button>
       {open && pos && (
         <Portal>
           <div ref={panel} role="dialog" aria-label={label} style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width }}
-            className="z-[150] max-h-[70vh] overflow-auto rounded-lg border border-gray-200 bg-white p-3 text-sm shadow-lg">
+            className={`vf-menu z-[150] max-h-[70vh] overflow-auto rounded-xl border text-sm ${tight ? 'p-1.5' : 'p-3'}`}>
             {children(() => setOpen(false))}
           </div>
         </Portal>
@@ -260,10 +263,30 @@ const ColumnChecks: React.FC<{
   );
 };
 
-/** "Me mode": only tasks assigned to you. Personal, so it isn't saved into the view. */
-export const MeButton: React.FC<{ on: boolean; onChange: (on: boolean) => void }> = ({ on, onChange }) => (
-  <button type="button" aria-pressed={on} title="Me mode: show only tasks assigned to me" onClick={() => onChange(!on)}
-    className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-sm ${on ? 'bg-brand-50 text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`}>
-    <UserRound size={14} /> Me
+/** "My team": a Manager's view of the people in the Teams they lead. Offered only to them. */
+export const TeamButton: React.FC<{ on: boolean; onChange: (on: boolean) => void }> = ({ on, onChange }) => (
+  <button type="button" aria-pressed={on} aria-label="My team: only tasks of the people in my Teams" onClick={() => onChange(!on)}
+    className={`flex items-center gap-1.5 whitespace-nowrap rounded-full border py-0.5 pl-1 pr-2.5 text-sm font-medium transition-colors ${
+      on ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}>
+    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-violet-100 text-violet-700"><Users size={12} /></span>
+    My team
   </button>
 );
+
+/**
+ * "Me mode": only tasks assigned to you, and -- where tasks are added -- each new one is put in
+ * your name. Personal, so it isn't saved into the view. Shows your picture when you have one.
+ */
+export const MeButton: React.FC<{ on: boolean; onChange: (on: boolean) => void }> = ({ on, onChange }) => {
+  const me = useMe();
+  const { members } = useWork();
+  const user = members.find((m) => m.user.id === me)?.user;
+  return (
+    <button type="button" aria-pressed={on} aria-label="Me mode: only my tasks, and new tasks assigned to me" onClick={() => onChange(!on)}
+      className={`flex items-center gap-1.5 whitespace-nowrap rounded-full border py-0.5 pl-0.5 pr-2.5 text-sm font-medium transition-colors ${
+        on ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}>
+      {user ? <Avatar user={user} size={20} /> : <span className="flex h-5 w-5 items-center justify-center rounded-full bg-gray-100"><UserRound size={12} /></span>}
+      Me mode
+    </button>
+  );
+};

@@ -910,6 +910,47 @@ select:not([multiple]):not([size]) {
 .mytasks-ui main[data-layout="workload"] .grid > div.rounded-xl { border-radius: 12px; box-shadow: none !important; }
 .mytasks-ui main[data-layout="workload"] .grid > div.rounded-xl > div > span:first-child { box-shadow: none !important; }
 
+/* My Tasks list, round 2: quieter rows so the name and what is late are what you see first. */
+/* One line per task; the List sits beside the name as a small grey label. */
+.mytasks-ui [data-task-row] { min-height: 44px; padding-top: 6px; padding-bottom: 6px; }
+.mytasks-ui [data-task-row] [data-list-chip] { background: #F2F4F7; color: #667085; }
+/* Status: a solid ring with a light wash of its colour, a size up; finished stays filled. */
+.mytasks-ui [data-task-row] [data-status-dot]:not([data-closed]) {
+  width: 15px !important; height: 15px !important; border-style: solid !important;
+  background-color: color-mix(in srgb, var(--dot) 16%, #fff) !important;
+}
+/* Dates: plain grey; a late one becomes a small red chip, so red means something again. */
+.mytasks-ui [data-task-row] button[aria-label^="Start date"],
+.mytasks-ui [data-task-row] button[aria-label^="Due date"] { color: #475467; }
+.mytasks-ui [data-task-row] [data-late] button[aria-label^="Due date"],
+.mytasks-ui [data-task-row] div[data-late]:not(:has(button)) {
+  width: auto; flex: 0 1 auto; justify-self: start; padding: 1px 8px; border-radius: 999px;
+  background: #FEF3F2; border: 1px solid #FECDCA; color: #B42318 !important; font-weight: 500;
+}
+.mytasks-ui [data-task-row] [data-late] button[aria-label^="Due date"] svg { color: #F04438; }
+/* Priority: only Urgent and High carry colour; Normal, Low and none go grey. */
+.mytasks-ui [data-task-row] [data-priority="3"] *,
+.mytasks-ui [data-task-row] [data-priority="4"] *,
+.mytasks-ui [data-task-row] [data-priority="0"] * { color: #98A2B3 !important; }
+.mytasks-ui [data-task-row] [data-priority="3"] span.rounded-full,
+.mytasks-ui [data-task-row] [data-priority="4"] span.rounded-full,
+.mytasks-ui [data-task-row] [data-priority="0"] span.rounded-full { background-color: #D0D5DD !important; }
+.mytasks-ui [data-task-row] [data-priority="1"] span.truncate,
+.mytasks-ui [data-task-row] [data-priority="2"] span.truncate { font-weight: 500; }
+/* Tags: a pale tint of their colour with darker text, not a solid block. */
+.mytasks-ui [data-tag] {
+  background-color: color-mix(in srgb, var(--tag) 12%, #fff) !important;
+  color: color-mix(in srgb, var(--tag) 80%, #000) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tag) 22%, #fff);
+}
+/* A missing field: a light grey "+ Add", not a dashed amber box. */
+.mytasks-ui [data-wanted] { border: 1px solid #EAECF0 !important; background: #F9FAFB !important; color: #98A2B3 !important; }
+/* Ungrouped, the one group is just "Tasks" -- a plain heading, not a grey status pill. */
+.mytasks-ui [data-group-by="none"] section > div:first-child > span.uppercase {
+  background: none !important; color: #1B2A4A !important; padding: 0; text-transform: none;
+  letter-spacing: 0; font-size: 14px;
+}
+
 /* --- A List: flat and clean, like My Tasks --------------------------------------------------------
    Same controls in the same places. The tabs and the toolbar stay white across the top; the
    list sits on the light grey page with each status group on a white card with a hairline. */
@@ -1712,7 +1753,10 @@ header.app-topbar > div:last-child { gap: 10px; }
 .header-bell .bell-count {
   position: absolute; top: -2px; right: -3px; min-width: 17px; padding: 0 4px; border-radius: 999px; text-align: center;
   background: #234788; color: #fff; font-size: 9.5px; font-weight: 600; line-height: 17px; box-shadow: 0 0 0 2px #fff;
+  z-index: 2;
 }
+/* Room for the count: it reaches past the bell's edge, and the profile picture sat on top of it. */
+.header-bell { margin-right: 8px; z-index: 1; }
 
 .header-bell.bell-tint { background: #EEF2F8; box-shadow: inset 0 0 0 1px #C9D5EA; color: #234788; }
 .header-bell.bell-tint:hover { background: #E3EAF6; box-shadow: inset 0 0 0 1px #9DB2D8; }
@@ -1902,3 +1946,112 @@ header.app-topbar > div:last-child { gap: 10px; }
 
 /* A Space, Folder or List page: its own name with a navy icon tile, the path to it above. */
 .loc-head-icon { background: #EEF2F8; color: #234788; }
+
+/* --- Menus: a pale navy body so they stand off the white list ---------------------------------
+   Filter, Fields, Show and the bulk bar's menus. The search stays white at the top; the row under
+   the pointer turns light navy with a thin navy bar down its left. */
+.vf-menu {
+  background: #F8FAFD; border-color: #D9E1EF !important;
+  box-shadow: 0 14px 32px -8px rgba(16, 24, 40, .20), 0 2px 6px rgba(16, 24, 40, .06);
+}
+.vf-menu-search { background: #fff; border-color: #E6E8EC !important; }
+.vf-menu .vf-menu-row { transition: background-color 120ms ease; }
+.vf-menu .vf-menu-row:hover { background: #EEF2F8; box-shadow: inset 2px 0 0 #234788; }
+.vf-menu .vf-menu-row[data-on] { background: #EEF2F8; }
+.vf-menu input[type="text"], .vf-menu input:not([type]), .vf-menu input[type="search"] { background-color: #fff; }
+
+/* --- List rows: done tick, dragging --------------------------------------------------------------- */
+/* Complete, picked from the circle: a green tick pops in, a green ring spreads out, then both fade. */
+.vf-done-burst { animation: vf-done-pop 900ms cubic-bezier(.22, 1, .36, 1) 1 forwards; }
+.vf-done-burst::after {
+  content: ''; position: absolute; inset: 0; border-radius: 999px; border: 2px solid #16A34A;
+  animation: vf-done-ring 700ms ease-out 1 forwards;
+}
+@keyframes vf-done-pop {
+  0% { transform: translate(-50%, -50%) scale(.3); opacity: 0; }
+  30% { transform: translate(-50%, -50%) scale(1.25); opacity: 1; }
+  55% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+}
+@keyframes vf-done-ring { from { transform: scale(1); opacity: .8; } to { transform: scale(2.4); opacity: 0; } }
+/* Dragging a row: it fades where it was, and a navy line shows where it will land. */
+[data-task-row][draggable="true"] { cursor: grab; }
+[data-task-row][data-dragging] { opacity: .45; }
+[data-task-row][data-drop] { box-shadow: inset 0 2px 0 #234788; }
+.group\/head[data-drop] { box-shadow: 0 2px 0 #234788; border-radius: 2px; }
+@media (prefers-reduced-motion: reduce) { .vf-done-burst, .vf-done-burst::after { animation-duration: 1ms; } }
+
+/* --- Toolbar buttons that open a menu: a navy hairline so they read as controls ---------------
+   Filter, Fields, Show, Group by, Sort. On the white or pale grey of a page, a white button with
+   a grey edge disappeared; these keep a white face with a navy edge and navy text. */
+.vf-tool {
+  background: #fff; color: #1C3A70; border: 1px solid #B3C3DF !important;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .06);
+}
+.vf-tool:hover { background: #EEF2F8; border-color: #5A7DB6 !important; }
+.vf-tool svg { color: #2F5699; }
+.vf-tool[aria-expanded="true"] { background: #EEF2F8; border-color: #234788 !important; box-shadow: 0 0 0 3px rgba(35, 71, 136, .12); }
+
+/* --- Board: pale columns, white cards with a hairline --------------------------------------------
+   The status colour is a dot in the header now, not a thick bar across the top. Finished cards
+   step back; a navy line shows where a dragged card will land. */
+.vf-board [data-board-column] { background: #F4F6FA; border-color: #E6E8EC; transition: box-shadow 120ms ease, background-color 120ms ease; }
+.vf-board [data-board-column][data-over] { background: #EEF2F8; box-shadow: inset 0 0 0 2px #8CA5CF; }
+.vf-board [data-board-card] { border-color: #E6E8EC; transition: border-color 120ms ease, box-shadow 120ms ease; }
+.vf-board [data-board-card]:hover { border-color: #B3C3DF; box-shadow: 0 2px 8px -2px rgba(16, 24, 40, .10); }
+.vf-board [data-board-card][data-done] { background: #FAFBFC; }
+.vf-board [data-board-card][data-done] .line-clamp-2 { color: #667085; }
+.vf-board [data-board-card][data-drop] { box-shadow: 0 -3px 0 #234788; }
+.vf-board [data-board-card][draggable="true"] { cursor: grab; }
+.vf-board [data-tag] {
+  background-color: color-mix(in srgb, var(--tag) 12%, #fff) !important;
+  color: color-mix(in srgb, var(--tag) 80%, #000) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tag) 22%, #fff);
+}
+
+/* --- Workload: each day a box, filled from the bottom to how full it is. Static, no motion. --- */
+.vf-box { border-radius: 6px; background: #F8FAFD; }
+.vf-fill { background: linear-gradient(to top, var(--deep), var(--top)); }
+
+/* --- Planner: calm blocks, the working day apart ------------------------------------------------
+   A task's block is pale navy with a navy edge; a block of your own (focus, a break) pale amber.
+   Meetings stay grey. The controls on a block are always there, never only on hover. */
+.vf-block[data-plan-block="task"] { background: #EEF2F8; color: #1B2A4A; box-shadow: inset 3px 0 0 #234788, inset 0 0 0 1px #D9E1EF; }
+.vf-block[data-plan-block="own"] { background: #FEF6E7; color: #78350F; box-shadow: inset 3px 0 0 #D97706, inset 0 0 0 1px #FDE3B5; }
+.vf-block[data-done] { background: #F4F6F8; color: #667085; box-shadow: inset 3px 0 0 #16A34A, inset 0 0 0 1px #E6E8EC; }
+.vf-block.is-dragging { box-shadow: inset 3px 0 0 #234788, 0 0 0 2px #8CA5CF, 0 6px 14px -4px rgba(16, 24, 40, .25); }
+.vf-block .vf-block-btn { color: currentColor; opacity: .7; }
+.vf-block .vf-block-btn:hover { opacity: 1; background: rgba(35, 71, 136, .10); }
+.vf-offhours { background: rgba(16, 24, 40, .028); }
+
+
+/* --- Sidebar: the page you open shines once -------------------------------------------------------
+   As a page becomes the active one its icon tile pops a little, brightens and glows in its own
+   colour, then settles. It plays when the row turns active and never repeats on its own. */
+.app-sidebar .side-row { --rail-glow: rgba(35, 71, 136, 0.65); }
+.app-sidebar .side-main a[href="/"], .app-sidebar .side-main a[href="/dashboards"] { --rail-glow: rgba(47, 111, 214, 0.75); }
+.app-sidebar .side-main a[href="/my-tasks"] { --rail-glow: rgba(112, 72, 216, 0.75); }
+.app-sidebar .side-main a[href="/timesheets"] { --rail-glow: rgba(240, 160, 40, 0.85); }
+/* It keeps a soft glow the whole time you are in that section; the pop plays once on arrival. */
+.app-sidebar .side-row.is-active > svg {
+  filter: drop-shadow(0 0 6px var(--rail-glow));
+  animation: rail-shine 900ms cubic-bezier(.22, 1, .36, 1) 1;
+}
+@keyframes rail-shine {
+  0% { transform: scale(.88); filter: brightness(1) drop-shadow(0 0 0 transparent); }
+  35% { transform: scale(1.12); filter: brightness(1.3) drop-shadow(0 0 10px var(--rail-glow)); }
+  100% { transform: scale(1); filter: brightness(1) drop-shadow(0 0 6px var(--rail-glow)); }
+}
+@media (prefers-reduced-motion: reduce) { .app-sidebar .side-row.is-active > svg { animation: none; } }
+
+/* --- The area right of the sidebar: Frost, a light blue-white, chosen 2026-10-28 ----------------
+   The pane and each page's own root take it; cards, tables and the top bar stay white on it. */
+.app-sidebar + main,
+.app-sidebar + main .mytasks-ui,
+.app-sidebar + main .location-ui,
+.app-sidebar + main .timesheet-ui,
+.app-sidebar + main .dash-3d,
+.app-sidebar + main .mytasks-ui > header,
+.app-sidebar + main .mytasks-ui > [role="tablist"],
+.app-sidebar + main .location-ui > header,
+.app-sidebar + main .location-ui > header + div { background: #E8EEF8 !important; }

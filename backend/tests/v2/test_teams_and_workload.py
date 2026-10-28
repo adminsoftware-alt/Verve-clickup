@@ -243,3 +243,17 @@ def test_workload_works_at_every_level(api, space, level):
     w = ok(api.get(f"{path}/workload", "owner", params={"start": monday.isoformat(), "days": 7}))
     rows = {r["user"]["id"]: r for r in w["rows"] if r["user"]}
     assert rows["member"]["scheduled_seconds"][0] == 2 * HOUR
+
+
+def test_my_workload_reports_hours_tracked_each_day(api, workspace, folderless_list):
+    task = ok(api.post(f"/lists/{folderless_list['id']}/tasks", "owner", {"name": "Logged"}), 201)
+    monday = date.today() - timedelta(days=date.today().weekday())
+    start = datetime.combine(monday, datetime.min.time(), timezone.utc) + timedelta(hours=10)
+    ok(api.post(f"/tasks/{task['id']}/time", "owner", {
+        "started_at": start.isoformat(), "ended_at": (start + timedelta(hours=2)).isoformat(),
+    }), 201)
+    w = ok(api.get(f"/workspaces/{workspace['id']}/my-workload", "owner", params={"start": monday.isoformat(), "days": 7}))
+    assert w["tracked_seconds"][0] == 2 * HOUR
+    assert sum(w["tracked_seconds"]) == 2 * HOUR
+    # Weekends carry no note; only a holiday is named.
+    assert w["day_notes"] == [None] * 7
