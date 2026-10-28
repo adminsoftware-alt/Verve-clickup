@@ -237,7 +237,33 @@ def start_timer(db: Session, opened: Opened[Task], description: Optional[str] = 
     )
     db.add(entry)
     db.flush()
+    _mark_started(db, opened)
     return entry
+
+
+def _mark_started(db: Session, opened: Opened[Task]) -> None:
+    """Timing a task that hasn't started yet means it has: move it to the List's first active status.
+
+    Goes through update_task so the change is logged and automations see it, like any other move.
+    """
+    from app.db.models import Status, StatusGroup, TaskList
+    from app.services.work import statuses as status_service
+    from app.services.work.tasks import update_task
+
+    task = opened.obj
+    current = db.get(Status, task.status_id)
+    if current is None or current.group != StatusGroup.not_started:
+        return
+    lst = db.get(TaskList, task.list_id)
+    if lst is None:
+        return
+    active = next((st for st in status_service.effective_statuses(db, lst) if st.group == StatusGroup.active), None)
+    if active is None:
+        return
+    try:
+        update_task(db, opened, s.TaskUpdate(status_id=active.id))
+    except Forbidden:
+        pass  # may track time on it but not move it: the timer still runs, the status stays
 
 
 def stop_timer(db: Session, user_id: str) -> TimeEntry:

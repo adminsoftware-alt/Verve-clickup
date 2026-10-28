@@ -537,7 +537,7 @@ def delete_row(db: Session, access: Access, data: t.RowIn) -> int:
     return len(entries)
 
 
-def pickable_tasks(db: Session, access: Access, query: str, limit: int = 20) -> List[t.PickTask]:
+def pickable_tasks(db: Session, access: Access, query: str, limit: int = 50) -> List[t.PickTask]:
     """Tasks the caller can track time on, for "Add task"."""
     q = select(Task).join(TaskList, TaskList.id == Task.list_id).join(Space, Space.id == TaskList.space_id).where(
         Space.workspace_id == access.workspace_id,
@@ -565,11 +565,17 @@ def pickable_tasks(db: Session, access: Access, query: str, limit: int = 20) -> 
     candidates = list(db.scalars(q.order_by(rank, Task.updated_at.desc()).limit(200)))
     statuses = {st.id: st for st in db.scalars(select(Status).where(Status.id.in_({x.status_id for x in candidates})))} if candidates else {}
     locate = _Locator(db)
+    own = set(db.scalars(select(TaskAssignee.task_id).where(
+        TaskAssignee.task_id.in_([x.id for x in candidates]), TaskAssignee.user_id == access.user_id,
+    ))) if candidates else set()
     out = []
     for task in candidates:
         if not _may_track(db, access, task):
             continue
-        out.append(t.PickTask(id=task.id, name=task.name, status=s.StatusOut.model_validate(statuses[task.status_id]), location=locate.of(task.list_id)))
+        out.append(t.PickTask(
+            id=task.id, name=task.name, status=s.StatusOut.model_validate(statuses[task.status_id]),
+            location=locate.of(task.list_id), updated_at=task.updated_at, mine=task.id in own,
+        ))
         if len(out) >= limit:
             break
     return out

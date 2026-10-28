@@ -11,8 +11,9 @@ import { BoardView } from './views/BoardView';
 import { TableView } from './views/TableView';
 import { NO_GROUP, buildGroups, progressOf } from './views/grouping';
 import { COLUMNS, applyFilters, readSettings, sortTasks, type ViewSettings } from './views/viewSettings';
-import { ColumnsButton, FilterButton, GroupByButton, MeButton, SortButton } from './views/ViewControls';
+import { FilterButton, GroupByButton, MeButton, SortButton } from './views/ViewControls';
 import { FilterPanel } from './views/FilterPanel';
+import { FieldsButton } from './views/QuickControls';
 import { ViewTabs, type ViewKey } from './views/ViewTabs';
 import { PlannerPage } from './planner/PlannerPage';
 import { TaskRowsSkeleton } from './Skeleton';
@@ -142,8 +143,12 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
   const selectedTasks = filtered.filter((t) => selected.has(t.id));
   const topBarSlot = useTopBarSlot();
   const title = (
-    <h1 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
-      <Layers size={18} className="text-brand-600" /> {scope === 'all' ? 'All Tasks' : scope === 'team' ? 'My Team’s Tasks' : 'My Tasks'}
+    <h1 className="ts-head-title flex items-center">
+      <span className="ts-head-icon"><Layers size={17} /></span>
+      <span className="flex min-w-0 flex-col">
+        <span className="ts-head-name">{scope === 'all' ? 'All Tasks' : scope === 'team' ? 'My Team’s Tasks' : 'My Tasks'}</span>
+        <span className="ts-head-sub">{scope === 'all' ? 'Every task you can open' : scope === 'team' ? 'What your team is working on' : scope === 'now' ? 'Yours, due today or already late' : 'Your work, across every List'}</span>
+      </span>
       {/* The Mine / Everyone switch used to sit here. Two controls were saying the same thing:
           the line underneath already gives both numbers, and narrowing to your own work is
           what Filter -> Assignee is for. One list, and the subtitle says what is in it. */}
@@ -155,7 +160,7 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
           room for it, it stays here. */}
       {topBarSlot
         ? createPortal(title, topBarSlot)
-        : <header className="border-b border-gray-200 px-6 pb-2 pt-4">{title}</header>}
+        : <header className="px-6 pb-3 pt-4">{title}</header>}
       <ViewTabs value={layout} onChange={setLayout} only={OFFERED} />
       {/* The Planner answers its own question and carry their own controls, so
           the filter toolbar would only be furniture above them. */}
@@ -189,7 +194,7 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
           )}
           {/* Which columns a row shows is not a filter, so it stands on its own beside one. */}
           {(layout === 'list' || layout === 'table') && (
-            <ColumnsButton hidden={settings.hidden} onChange={(h) => update('hidden', h)} label="Fields" />
+            <FieldsButton hidden={settings.hidden} onChange={(h) => update('hidden', h)} text="Fields" />
           )}
         {FEATURES.myTasksSortButton && <SortButton sort={settings.sort} onChange={(v) => update('sort', v)} />}
         {FEATURES.myTasksViewButtons && (layout === 'list' || layout === 'board') && <GroupByButton value={settings.groupBy} onChange={(g) => update('groupBy', g)} options={['none', 'progress', 'status', 'assignee', 'priority', 'due', 'tags']} />}
@@ -219,6 +224,7 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
             onCreate={async () => undefined}
             onMove={moveCard}
             onOpenTask={openTask}
+            onChanged={load}
           />
         ) : layout === 'list' ? (
           <ListView tasks={filtered} statuses={null} listName={where} groupBy={settings.groupBy} makeGroups={makeGroups}

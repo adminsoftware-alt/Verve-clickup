@@ -88,10 +88,11 @@ export const HoverCard: React.FC<{
 // --- the day card -----------------------------------------------------------------------------
 
 const Line: React.FC<{ label: string; percent: string; value: string; accent: string; strong?: boolean }> = ({ label, percent, value, accent, strong }) => (
-  <div className="flex items-center gap-2 py-[3px] pl-2.5" style={{ boxShadow: `inset 2px 0 0 ${accent}` }}>
-    <span className={`flex-1 truncate ${strong ? 'text-white' : 'text-gray-300'}`}>{label}</span>
+  <div className="flex items-center gap-2 py-1">
+    <span className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: accent }} />
+    <span className={`flex-1 truncate ${strong ? 'font-medium text-gray-900' : 'text-gray-600'}`}>{label}</span>
     <span className="w-10 shrink-0 text-right text-[11px] text-gray-400 tabular-nums">{percent}</span>
-    <span className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 text-[11px] font-medium text-white tabular-nums">{value}</span>
+    <span className={`w-16 shrink-0 text-right text-[12px] tabular-nums ${strong ? 'font-semibold text-gray-900' : 'font-medium text-gray-700'}`}>{value}</span>
   </div>
 );
 
@@ -100,25 +101,33 @@ export const DayCard: React.FC<{
   title: string; capacity: number; tracked: number; billable: number;
 }> = ({ title, capacity, tracked, billable }) => {
   const over = tracked > capacity;
+  // One bar for the day: billable and non-billable side by side against the capacity.
+  const scale = Math.max(capacity, tracked) || 1;
   return (
-    <div className="rounded-xl bg-gray-900 px-3 py-2.5 text-[13px] shadow-2xl ring-1 ring-black/20">
-      <p className="font-semibold text-white">{title}</p>
-      <div className="mt-1.5 flex items-center gap-2">
-        <span className="flex-1 text-gray-300">Total capacity</span>
-        <span className="rounded bg-white/10 px-1.5 py-0.5 text-[11px] font-medium text-white tabular-nums">{longHours(capacity)}</span>
+    <div className="overflow-hidden rounded-xl border border-[#D9E1EF] bg-white text-[13px] shadow-[0_18px_40px_-12px_rgba(16,24,40,0.28),0_2px_6px_rgba(16,24,40,0.06)]">
+      <div className="border-b border-[#EEF0F3] bg-[#F8FAFD] px-3.5 py-2.5">
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="font-semibold text-[#1B2A4A]">{title}</p>
+          <p className="text-[12px] text-gray-500"><span className={`font-semibold ${over ? 'text-red-600' : 'text-gray-900'}`}>{formatDuration(tracked) || '0h'}</span> of {formatDuration(capacity) || '0h'}</p>
+        </div>
+        <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-[#E6E8EC]">
+          <span style={{ width: `${(100 * billable) / scale}%`, backgroundColor: '#234788' }} />
+          <span style={{ width: `${(100 * (tracked - billable)) / scale}%`, backgroundColor: '#8CA5CF' }} />
+        </div>
       </div>
-      <div className="my-2 h-px bg-white/10" />
-      <Line label="Tracked time" percent={share(tracked, capacity)} value={longHours(tracked)} accent="#38bdf8" strong />
-      <Line label="Billable" percent={share(billable, tracked)} value={longHours(billable)} accent="#34d399" />
-      <Line label="Non-billable" percent={share(tracked - billable, tracked)} value={longHours(tracked - billable)} accent="#a78bfa" />
-      <div className="my-2 h-px bg-white/10" />
-      <Line
-        label={over ? 'Over capacity' : 'Remaining'}
-        percent={capacity ? `${Math.round((100 * Math.abs(tracked - capacity)) / capacity)}%` : '—'}
-        value={`${over ? '+' : ''}${longHours(Math.abs(tracked - capacity))}`}
-        accent={over ? '#f87171' : '#94a3b8'}
-        strong
-      />
+      <div className="px-3.5 py-2">
+        <Line label="Billable" percent={share(billable, tracked)} value={longHours(billable)} accent="#234788" />
+        <Line label="Non-billable" percent={share(tracked - billable, tracked)} value={longHours(tracked - billable)} accent="#8CA5CF" />
+        <div className="my-1 h-px bg-[#EEF0F3]" />
+        <Line label="Tracked" percent={share(tracked, capacity)} value={longHours(tracked)} accent="#1B2A4A" strong />
+        <Line
+          label={over ? 'Over capacity' : 'Remaining'}
+          percent={capacity ? `${Math.round((100 * Math.abs(tracked - capacity)) / capacity)}%` : '—'}
+          value={`${over ? '+' : ''}${longHours(Math.abs(tracked - capacity))}`}
+          accent={over ? '#DC2626' : '#D0D5DD'}
+          strong
+        />
+      </div>
     </div>
   );
 };
@@ -136,8 +145,8 @@ const clock = (iso: string) =>
  * question -- so it is answered on the cell.
  */
 export const CellCard: React.FC<{ title: string; task: string; entries: SheetEntry[]; total: number }> = ({ title, task, entries, total }) => (
-  <div className="rounded-xl bg-white p-2.5 text-[13px] shadow-2xl ring-1 ring-gray-200">
-    <p className="truncate font-semibold text-gray-900">{task}</p>
+  <div className="rounded-xl border border-[#D9E1EF] bg-white px-3.5 py-2.5 text-[13px] shadow-[0_18px_40px_-12px_rgba(16,24,40,0.28),0_2px_6px_rgba(16,24,40,0.06)]">
+    <p className="truncate font-semibold text-[#1B2A4A]">{task}</p>
     <p className="truncate text-[11px] text-gray-500">{title}</p>
     {entries.length === 0 ? (
       <p className="mt-2 text-[12px] text-gray-400">No time entries — this was typed straight into the cell.</p>

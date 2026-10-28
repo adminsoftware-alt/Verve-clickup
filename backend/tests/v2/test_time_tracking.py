@@ -133,3 +133,12 @@ def test_a_duration_ends_now_and_time_ahead_is_refused(api, folderless_list):
     # and an entry cannot be stretched into the future afterwards
     r = api.patch(f"/time/{entry['id']}", "member", {"ended_at": later.isoformat()})
     assert r.status_code == 400
+
+
+def test_starting_a_timer_moves_a_not_started_task_to_in_progress(api, folderless_list):
+    task = new_task(api, folderless_list["id"])
+    assert task["status"]["group"] == "not_started"
+    ok(api.post(f"/tasks/{task['id']}/timer", "owner"), 201)
+    after = ok(api.get(f"/tasks/{task['id']}", "owner"))
+    assert after["status"]["group"] == "active"
+    ok(api.post("/timer/stop", "owner"))

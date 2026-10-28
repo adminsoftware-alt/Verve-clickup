@@ -354,7 +354,11 @@ export type ShareKind = LocationKind | 'task';
 
 export interface WorkloadTask { id: string; name: string; list_id: string; status: Status; priority: number | null; seconds_per_day: number[] }
 export interface WorkloadRow { user: UserRef | null; capacity_seconds: number[]; scheduled_seconds: number[]; tasks: WorkloadTask[] }
-export interface Workload { days: string[]; rows: WorkloadRow[]; unscheduled: TaskSummary[]; no_estimate: TaskSummary[] }
+export interface Workload {
+  days: string[]; rows: WorkloadRow[]; unscheduled: TaskSummary[]; no_estimate: TaskSummary[];
+  /** My workload only: hours logged each day, and a holiday's name on its day. */
+  tracked_seconds?: number[]; day_notes?: (string | null)[];
+}
 
 export interface TimeEntry {
   id: string; task_id: string; user: UserRef; started_at: string; ended_at: string | null;

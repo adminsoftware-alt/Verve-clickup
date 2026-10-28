@@ -5,7 +5,7 @@ import {
   ListChecks, MapPin, Phone, Star, Tags, Type, Users,
 } from 'lucide-react';
 import type { CustomField, FieldType, Task, UserRef } from '../api';
-import type { LocatedNode } from '../WorkContext';
+import { useMe, type LocatedNode } from '../WorkContext';
 import { Avatar, NoMatch, Portal, SearchBox, matchesSearch } from '../ui';
 
 export const FIELD_TYPES: { type: FieldType; label: string; icon: React.ReactNode; hint: string }[] = [
@@ -140,6 +140,7 @@ export const FieldEditor: React.FC<{
   field: CustomField; value: unknown; people: UserRef[]; disabled?: boolean; compact?: boolean;
   onChange: (value: unknown) => void;
 }> = ({ field, value, people, disabled, compact, onChange }) => {
+  const me = useMe();
   const opts = field.config.options ?? [];
   const input = `w-full min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-gray-800 placeholder:text-gray-300 hover:border-gray-200 focus:border-brand-400 focus:bg-white focus:outline-none disabled:hover:border-transparent`;
   const commitText = (raw: string, current: unknown, parse: (s: string) => unknown = (s) => s) => {
@@ -278,8 +279,10 @@ export const FieldEditor: React.FC<{
           ? <span className="flex min-w-0 flex-wrap gap-1">{chosen.map((id) => { const o = opts.find((x) => x.id === id); return o ? <Chip key={id} color={o.color}>{o.name}</Chip> : null; })}</span>
           : <span className="flex -space-x-1">{chosen.map((id) => { const p = people.find((x) => x.id === id); return p ? <Avatar key={id} user={p} size={20} /> : null; })}</span>;
       const choices = field.type === 'labels'
-        ? opts.map((o) => ({ id: o.id, name: o.name, color: o.color as string | undefined }))
-        : people.map((p) => ({ id: p.id, name: p.display_name || p.email, color: undefined }));
+        ? opts.map((o) => ({ id: o.id, name: o.name, color: o.color as string | undefined, user: undefined as UserRef | undefined }))
+        // You first, then everyone else: picking yourself is the most common pick.
+        : [...people].sort((a, b) => Number(b.id === me) - Number(a.id === me))
+          .map((p) => ({ id: p.id, name: p.id === me ? `Me (${p.display_name || p.email})` : p.display_name || p.email, color: undefined, user: p as UserRef | undefined }));
       return (
         <Picker label={field.name} disabled={disabled} trigger={trigger}>
           {() => (
@@ -294,6 +297,7 @@ export const FieldEditor: React.FC<{
                 <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-gray-50">
                   <input type="checkbox" checked={chosen.includes(c.id)} onChange={() => toggle(c.id)} aria-label={c.name} />
                   {c.color && <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: c.color }} />}
+                  {c.user && <Avatar user={c.user} size={22} />}
                   <span className="truncate">{c.name}</span>
                 </label>
               )}

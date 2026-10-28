@@ -238,6 +238,14 @@ def test_add_task_picker_puts_my_open_tasks_first(api, org):
     assert mine["id"]
 
 
+def test_add_task_picker_says_which_tasks_are_mine_and_when_they_changed(api, org):
+    lst = org["list"]["id"]
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Assigned to member", "assignees": ["member"]}), 201)
+    found = {x["name"]: x for x in ok(api.get(f"/workspaces/{org['ws']}/timesheet/tasks", "member", params={"q": ""}))}
+    assert found["Assigned to member"]["mine"] is True and found["Assigned to member"]["updated_at"]
+    assert found["GST return"]["mine"] is False
+
+
 # --- approvals --------------------------------------------------------------------------------------------
 
 

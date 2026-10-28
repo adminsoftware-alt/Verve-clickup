@@ -351,22 +351,31 @@ export const TrackTime: React.FC<{
 
   return (
     <div className="w-[27rem] max-w-[calc(100vw-2rem)]" role="group" aria-label="Track time">
-      {/* --- what is on the clock already ---------------------------------------------------- */}
-      <div className="rounded-t-xl border-b border-gray-100 bg-gradient-to-b from-gray-50 to-white px-4 pb-3 pt-3.5">
-        <div className="flex items-baseline justify-between gap-3">
-          <span className="text-[13px] font-semibold text-gray-900">This task and its subtasks</span>
-          <span className="font-mono text-base font-semibold tabular-nums text-gray-900">
-            {formatDuration(time?.subtree_seconds ?? 0) || '0h'}
-          </span>
+      {/* --- what this is: logging time, on which day, and what is there already ------------- */}
+      <div className="flex items-center gap-3 border-b border-[#EEF0F3] bg-[#F8FAFD] px-4 py-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#234788] text-white"><Clock size={15} /></span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[14px] font-semibold text-[#1B2A4A]">Log time</p>
+          <p className="text-[12px] text-gray-500">
+            {onlyThatDay
+              ? at(day, '00:00').toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
+              : 'On this task'}
+          </p>
         </div>
-        <div className="mt-0.5 flex items-baseline justify-between gap-3 text-[12px] text-gray-500">
-          <span>Without subtasks</span>
-          <span className="font-mono tabular-nums">{formatDuration(time?.total_seconds ?? 0) || '0h'}</span>
+        <div className="text-right">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{onlyThatDay ? 'In this cell' : 'Logged so far'}</p>
+          <p className="font-mono text-[15px] font-semibold tabular-nums text-[#1B2A4A]">
+            {formatDuration(onlyThatDay ? byPerson.reduce((n, r) => n + r.total, 0) : time?.subtree_seconds ?? 0) || '0h'}
+          </p>
+          {!onlyThatDay && (time?.subtree_seconds ?? 0) !== (time?.total_seconds ?? 0) && (
+            <p className="text-[11px] text-gray-400">{formatDuration(time?.total_seconds ?? 0) || '0h'} without subtasks</p>
+          )}
         </div>
       </div>
 
       <div className="px-4 pb-3.5 pt-3">
         {/* --- how long ------------------------------------------------------------------------ */}
+        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">How long</p>
         <div className="flex items-center gap-2">
           <div className="flex-1">
             <DurationInput
@@ -405,8 +414,22 @@ export const TrackTime: React.FC<{
           )}
         </div>
 
+        {/* The usual lengths, one click each. */}
+        {canTrack && !running && (
+          <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Quick lengths">
+            {[15 * 60, 30 * 60, 3600, 2 * 3600, 4 * 3600].map((v) => (
+              <button key={v} type="button" onClick={() => setDuration(v)}
+                className={`rounded-full border px-2.5 py-0.5 text-[12px] font-medium tabular-nums transition-colors ${seconds === v
+                  ? 'border-[#234788] bg-[#234788] text-white' : 'border-[#D9E1EF] bg-white text-gray-700 hover:bg-[#EEF2F8]'}`}>
+                {formatDuration(v)}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* --- and when -------------------------------------------------------------------------- */}
-        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <p className="mb-1.5 mt-3.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">When</p>
+        <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <button
               type="button"
@@ -449,14 +472,15 @@ export const TrackTime: React.FC<{
         )}
 
         {/* --- what it was ----------------------------------------------------------------------- */}
+        <p className="mb-1.5 mt-3.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">What you did</p>
         <input
           value={note}
           aria-label="Notes"
           disabled={!canTrack}
           onChange={(e) => setNote(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void save(); } }}
-          placeholder="What you did (optional)"
-          className="mt-2.5 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-[13px] text-gray-900 placeholder:text-gray-400 transition-colors hover:border-gray-300 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:bg-gray-50"
+          placeholder="A short note (optional)"
+          className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-[13px] text-gray-900 placeholder:text-gray-400 transition-colors hover:border-gray-300 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:bg-gray-50"
         />
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -490,7 +514,7 @@ export const TrackTime: React.FC<{
 
         {error && <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[12px] text-red-700">{error}</p>}
 
-        <div className="mt-3 flex items-center justify-end gap-2">
+        <div className="-mx-4 -mb-3.5 mt-3.5 flex items-center justify-end gap-2 border-t border-[#EEF0F3] bg-[#F8FAFD] px-4 py-2.5">
           <button type="button" onClick={onClose} className="rounded-lg px-3 py-1.5 text-[13px] text-gray-600 transition-colors hover:bg-gray-100">Close</button>
           <button
             type="button"

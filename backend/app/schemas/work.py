@@ -1379,6 +1379,10 @@ class WorkloadOut(BaseModel):
     rows: List[WorkloadRow]
     unscheduled: List[TaskSummary]  # open tasks with no start or due date
     no_estimate: List[TaskSummary]  # scheduled open tasks without a time estimate
+    # My workload only: hours actually logged each day, and a holiday's name on its day,
+    # both aligned with `days`. Empty for a location's Workload.
+    tracked_seconds: List[int] = []
+    day_notes: List[Optional[str]] = []
 
 
 # --- time tracking -----------------------------------------------------------

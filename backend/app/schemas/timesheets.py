@@ -125,6 +125,9 @@ class PickTask(BaseModel):
     name: str
     status: StatusOut
     location: str
+    # When it last changed, and whether it is the caller's own: shown and filtered on in "Add task".
+    updated_at: Optional[datetime] = None
+    mine: bool = False
 
 
 # --- all timesheets --------------------------------------------------------------------------

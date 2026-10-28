@@ -193,11 +193,37 @@ def my_workload(
     def sort_key(t: Task):
         return (t.due_date or datetime.max.replace(tzinfo=timezone.utc), t.name.lower())
 
+    # What was actually logged each day -- planned against done. A running timer counts up to now.
+    from app.db.models import TimeEntry
+    from app.services.work.working_time import holiday_days
+
+    now = datetime.now(timezone.utc)
+    tracked = [0] * days
+    index = {d: i for i, d in enumerate(window)}
+    for entry in db.scalars(select(TimeEntry).where(
+        TimeEntry.user_id == access.user_id,
+        TimeEntry.started_at >= window_start,
+        TimeEntry.started_at < window_end,
+    )):
+        i = index.get(_local_date(entry.started_at, tz))
+        if i is None:
+            continue
+        seconds = entry.duration_seconds
+        if seconds is None:
+            seconds = int(((entry.ended_at or now) - entry.started_at).total_seconds())
+        tracked[i] += max(0, seconds)
+
+    # A holiday's name on its day. Weekends carry no note: people plan work on them too.
+    shut = holiday_days(db, access.workspace_id, window[0], window[-1])
+    notes = [shut.get(d) for d in window]
+
     return s.WorkloadOut(
         days=[d.isoformat() for d in window],
         rows=rows,
         unscheduled=[_summary(t, statuses) for t in sorted(unscheduled, key=sort_key)[:_LIST_LIMIT]],
         no_estimate=[_summary(t, statuses) for t in sorted(no_estimate, key=sort_key)[:_LIST_LIMIT]],
+        tracked_seconds=tracked,
+        day_notes=notes,
     )
 
 
