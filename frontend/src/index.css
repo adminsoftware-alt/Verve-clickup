@@ -584,9 +584,9 @@ select:not([multiple]):not([size]) {
   border-radius: 14px;
   box-shadow: var(--ui-shadow-xs);
 }
-/* A card you can click lifts a little under the pointer. */
-.ui-card-hover { transition: box-shadow 160ms var(--ui-ease), border-color 160ms var(--ui-ease), transform 160ms var(--ui-ease); }
-.ui-card-hover:hover { border-color: var(--ui-line-strong); box-shadow: var(--ui-shadow-sm); transform: translateY(-1px); }
+/* A card you can click darkens its edge under the pointer; it does not move. */
+.ui-card-hover { transition: box-shadow 160ms var(--ui-ease), border-color 160ms var(--ui-ease); }
+.ui-card-hover:hover { border-color: var(--ui-line-strong); box-shadow: var(--ui-shadow-sm); }
 /* A small heading over a group of cards. */
 .ui-eyebrow { font-size: 0.6875rem; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: #6B7280; }
 
@@ -696,4 +696,1072 @@ select:not([multiple]):not([size]) {
    about the app wants 16px inputs, so this applies only where the pointer is a finger. */
 @media (pointer: coarse) {
   input, select, textarea { font-size: 16px; }
+}
+
+/* --- Dashboards: classic, raised, finished ---------------------------------------------------------
+   Same cards in the same places. A soft grey page; every card a white surface lit from the top --
+   a hairline, a highlight along its top edge, a layered shadow under it -- that rises a touch
+   under the pointer. Icon chips are small lit tiles in each card's own colour. Restrained: no
+   glow, no tilt, no colour behind the text. */
+:root { --accent: #234788; --accent-soft: #EEF2F8; --accent-line: #D5DEEC; }
+.dash-3d {
+  background:
+    radial-gradient(1200px 400px at 50% -120px, rgba(35, 71, 136, 0.06), transparent 70%),
+    #F2F4F8;
+}
+.dash-3d .ui-card {
+  background: linear-gradient(180deg, #FFFFFF 0%, #FCFDFE 100%);
+  border: 1px solid #E2E6ED;
+  border-radius: 14px;
+  box-shadow:
+    inset 0 1px 0 #FFFFFF,
+    0 1px 2px rgba(16, 24, 40, 0.05),
+    0 6px 16px -8px rgba(16, 24, 40, 0.12);
+  transition: transform 180ms var(--ui-ease), box-shadow 180ms var(--ui-ease), border-color 180ms var(--ui-ease);
+}
+/* The Workload band (.wl-panel) and the grid cards (.dash-card) hold their own clickable parts,
+   so the white card itself stays still; only what is inside it answers the pointer. */
+.dash-3d .ui-card-hover:hover,
+.dash-3d section.ui-card:not(.wl-panel):not(.dash-card):hover {
+  border-color: #D3D9E3;
+  box-shadow:
+    inset 0 1px 0 #FFFFFF,
+    0 2px 4px rgba(16, 24, 40, 0.05),
+    0 14px 28px -12px rgba(16, 24, 40, 0.22);
+}
+
+/* Grid cards: a card that opens its tasks says so with the pointer and a navy title. */
+.dash-3d .dash-card.is-clickable { cursor: pointer; }
+.dash-3d .dash-card.is-clickable h2 { transition: color 150ms var(--ui-ease); }
+.dash-3d .dash-card.is-clickable:hover h2 { color: var(--accent); }
+
+/* The icon chip: a small lit tile in each card's colour -- lighter at the top, a white highlight
+   along its upper edge, a soft shadow of its own hue under it. Navy when none is given. */
+.tile-3d {
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  color: #fff;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--tile, var(--accent)) 72%, white) 0%,
+    var(--tile, var(--accent)) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.08),
+    0 3px 8px -2px color-mix(in srgb, var(--tile, var(--accent)) 45%, transparent);
+}
+
+/* A figure inside a card: a slightly pressed-in well with a light wash of its colour; its edge
+   darkens when it can be opened. */
+.dash-well {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tile, #94A3B8) 7%, white), #fff);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--tile, #94A3B8) 18%, white),
+    inset 0 1px 2px rgba(16, 24, 40, 0.04);
+  transition: background-color 150ms var(--ui-ease), box-shadow 150ms var(--ui-ease);
+}
+.dash-well:not(:disabled):hover {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--tile, #94A3B8) 34%, white),
+    0 6px 14px -8px color-mix(in srgb, var(--tile, #94A3B8) 60%, transparent);
+}
+/* The figures at the top: each card lit in its own light colour, with a band of it along the top. */
+.dash-3d .stat-card {
+  position: relative; overflow: hidden;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tile) 7%, white) 0%, #fff 70%);
+  border-color: color-mix(in srgb, var(--tile) 20%, #E2E6ED);
+}
+/* The colour line along the top: always there, so nothing appears or moves as the page scrolls. */
+.dash-3d .stat-card::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tile) 55%, white), var(--tile) 50%, color-mix(in srgb, var(--tile) 55%, white));
+}
+.dash-3d .stat-card:hover { border-color: color-mix(in srgb, var(--tile) 40%, white); }
+
+/* The small filter button on a card: a funnel in a square washed in the card's own colour (--tile,
+   navy where a card has none); filled with that colour, with a count, once filters are set. */
+.cf-trigger {
+  height: 28px; width: 28px; justify-content: center; border-radius: 8px; box-shadow: none !important;
+  border-color: color-mix(in srgb, var(--tile, #234788) 22%, white) !important;
+  background: color-mix(in srgb, var(--tile, #234788) 9%, white) !important;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.cf-trigger .cf-i-funnel { color: var(--tile, #234788); }
+.cf-trigger:hover {
+  background: color-mix(in srgb, var(--tile, #234788) 16%, white) !important;
+  border-color: color-mix(in srgb, var(--tile, #234788) 40%, white) !important;
+}
+.cf-trigger[data-active] { background: var(--tile, #234788) !important; border-color: var(--tile, #234788) !important; }
+.cf-trigger[data-active] .cf-i-funnel { color: #fff; fill: #fff; }
+.cf-trigger .cf-badge { background: #fff; color: var(--tile, #234788); box-shadow: 0 0 0 1.5px var(--tile, #234788); }
+
+/* Progress bars: lit from the top, in the colour they are given, navy otherwise. */
+.bar-3d {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tile, var(--accent)) 75%, white), var(--tile, var(--accent)));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+/* Charts: bars and slices sit on a soft shadow; a slice under the pointer grows and lifts. */
+.dash-3d .recharts-bar-rectangle path { filter: drop-shadow(0 2px 3px rgba(16, 24, 40, 0.14)); }
+.dash-3d .recharts-pie { filter: drop-shadow(0 4px 8px rgba(16, 24, 40, 0.14)); }
+.dash-3d .recharts-default-tooltip {
+  border: 1px solid #E2E6ED !important; border-radius: 10px !important;
+  box-shadow: 0 10px 24px -10px rgba(16, 24, 40, 0.3) !important; padding: 6px 10px !important;
+  font-size: 12px; font-weight: 500;
+}
+.dash-3d .recharts-default-tooltip .recharts-tooltip-item { padding: 0 !important; }
+
+/* The board's toolbar: one lit strip; the filter a raised button, the icon buttons tool-like. */
+.dash-3d > .ui-card:first-of-type, .dash-3d .ui-card.no-print.mb-6 { padding-top: 8px; padding-bottom: 8px; }
+.dash-3d .ui-card.mb-6 [aria-haspopup] > span,
+.dash-3d .ui-card.mb-6 button.rounded-md {
+  border-radius: 9px;
+}
+.dash-3d .ui-card.mb-6 button[aria-label="Refresh"]:hover svg { transform: rotate(180deg); }
+.dash-3d .ui-card.mb-6 button[aria-label="Refresh"] svg { transition: transform 400ms var(--ui-ease); }
+.dash-3d .ui-card.mb-6 button[aria-label="Refresh"]:hover,
+.dash-3d .ui-card.mb-6 [title="Save"]:hover { background: #EEF2F8; color: #234788; }
+/* Section headings ("At a glance"): a short navy bar before the words, the words in ink. */
+.dash-3d .ui-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: #344054; font-size: 0.72rem; letter-spacing: 0.09em; }
+.dash-3d .ui-eyebrow::before { content: ''; width: 3px; height: 13px; border-radius: 2px; background: linear-gradient(180deg, #3A63AE, #234788); }
+
+@media print {
+  .dash-3d { background: none; }
+  .dash-3d .ui-card { box-shadow: none; transform: none; }
+  .dash-3d .stat-card::before { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-3d section.ui-card:hover, .dash-3d .ui-card-hover:hover, .dash-well:not(:disabled):hover { transform: none; }
+}
+
+/* --- Top bar ---------------------------------------------------------------------------------
+   The sidebar keeps its committed look; only the bar across the top is restyled here. */
+/* The top bar: plain white with a hairline under it. The workspace name in ink, the search a
+   grey pill that turns white with a blue ring when you reach for it, the bell a round button. */
+.app-sidebar + main > header {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-bottom: 1px solid rgba(16, 24, 40, 0.07) !important;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+}
+/* The left of the bar: the page's own title when it sends one up, else the workspace name. */
+.topbar-title:empty::before {
+  content: attr(data-fallback);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 1rem; font-weight: 650; letter-spacing: -0.01em; color: #111827;
+}
+.topbar-title > nav { flex-wrap: nowrap; min-width: 0; white-space: nowrap; }
+.topbar-title h1, .topbar-title nav > span.text-lg { font-size: 1rem; letter-spacing: -0.01em; }
+/* The page's own name is the last thing to give way; the trail before it and the owner after
+   it shorten first. */
+.topbar-title h1 { flex-shrink: 0; max-width: 65%; overflow: hidden; text-overflow: ellipsis; }
+.topbar-title nav > a, .topbar-title nav > span.text-xs { min-width: 0; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
+/* On a List, Folder or Space the same rule: its own name keeps its room, the path before it
+   shortens first, and when the bar is narrow the path is left out so the name and Share fit. */
+.topbar-title { container-type: inline-size; }
+.topbar-title nav > span.text-lg { flex-shrink: 0.15; }
+.topbar-title nav > span.text-gray-500 { flex-shrink: 1; min-width: 2.5rem; }
+@container (max-width: 26rem) {
+  .topbar-title nav > span.text-gray-500,
+  .topbar-title nav > svg.lucide-chevron-right { display: none; }
+}
+.app-sidebar + main > header button[aria-label="Search (Ctrl+K)"] {
+  background: #F2F3F5;
+  border-color: transparent;
+  box-shadow: inset 0 1px 2px rgba(16, 24, 40, 0.05);
+}
+.app-sidebar + main > header button[aria-label="Search (Ctrl+K)"]:hover,
+.app-sidebar + main > header button[aria-label="Search (Ctrl+K)"]:focus-visible {
+  background: #fff;
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.10), 0 4px 12px -6px rgba(16, 24, 40, 0.15);
+}
+.app-sidebar + main > header button[aria-label="Search (Ctrl+K)"] kbd { background: #fff; }
+.app-sidebar + main > header [aria-label="Your account"] > span,
+.app-sidebar + main > header button[aria-label="Your account"] > span { transition: background-color 140ms var(--ui-ease); }
+
+
+/* --- The clean pages: one accent, the logo's navy ---------------------------------------------
+   `ui-clean` goes on a page (My Tasks, a List) or a floating panel (the task panel), and turns
+   every colour the app picks for itself inside it to the navy: the teal brand, the blue the
+   filters and tabs use, and the amber of the main buttons ("+ Task"). Status, tag and chart
+   colours are data and stay as they are. The Dashboards page (.dash-3d) shares it. */
+.ui-clean, .dash-3d {
+  --color-brand-50: #EEF2F8; --color-brand-100: #D9E1EF; --color-brand-200: #B3C3DF;
+  --color-brand-300: #8CA5CF; --color-brand-400: #5A7DB6; --color-brand-500: #2F5699;
+  --color-brand-600: #234788; --color-brand-700: #1C3A70; --color-brand-800: #162E59;
+  --color-brand-900: #102243;
+  --color-teal-50: #EEF2F8; --color-teal-100: #D9E1EF; --color-teal-200: #B3C3DF; --color-teal-300: #8CA5CF;
+  --color-teal-400: #5A7DB6; --color-teal-500: #2F5699; --color-teal-600: #234788; --color-teal-700: #1C3A70;
+  --color-teal-800: #162E59; --color-teal-900: #102243;
+  --color-blue-50: #EEF2F8; --color-blue-100: #D9E1EF; --color-blue-200: #B3C3DF; --color-blue-300: #8CA5CF;
+  --color-blue-400: #5A7DB6; --color-blue-500: #2F5699; --color-blue-600: #234788; --color-blue-700: #1C3A70;
+  --color-blue-800: #162E59; --color-blue-900: #102243;
+  --color-accent: #234788; --color-accent-hover: #1C3A70; --color-accent-ink: #FFFFFF;
+}
+
+/* --- My Tasks: flat and clean, like the Dashboards -------------------------------------------
+   Same controls in the same places. The title and the tabs read as one white header; the work
+   sits on the light grey page in white cards with a hairline, no shadows. */
+.mytasks-ui { background: #F7F8FA !important; }
+/* One header: the title and the tabs on white, a single hairline under the tabs. */
+.mytasks-ui > header { background: #fff; border-bottom: 0 !important; padding-bottom: 4px !important; }
+.mytasks-ui > header h1 { font-size: 1.125rem; letter-spacing: -0.01em; }
+.mytasks-ui > [role="tablist"] { background: #fff; border-bottom-color: #E6E8EC !important; }
+.mytasks-ui > [role="tablist"] button { font-weight: 500; }
+.mytasks-ui > [role="tablist"] button[aria-selected="true"] { font-weight: 600; }
+.mytasks-ui > [role="tablist"] button > span { border-radius: 6px; }
+/* The filter strip sits on the grey page rather than in a white band of its own. */
+.mytasks-ui > [role="tablist"] + div { background: transparent; border-bottom: 0 !important; padding-top: 12px; padding-bottom: 4px; }
+.mytasks-ui > [role="tablist"] + div > button,
+.mytasks-ui > [role="tablist"] + div button[aria-haspopup] { background: #fff; }
+/* List: each group on a white card with a hairline. */
+.mytasks-ui main[data-layout="list"] section {
+  margin-top: 12px; padding: 10px 12px 6px;
+  background: #fff; border: 1px solid #E6E8EC; border-radius: 12px;
+}
+/* Workload: the four figures as plain white cards. */
+.mytasks-ui main[data-layout="workload"] .grid > div.rounded-xl { border-radius: 12px; box-shadow: none !important; }
+.mytasks-ui main[data-layout="workload"] .grid > div.rounded-xl > div > span:first-child { box-shadow: none !important; }
+
+/* --- A List: flat and clean, like My Tasks --------------------------------------------------------
+   Same controls in the same places. The tabs and the toolbar stay white across the top; the
+   list sits on the light grey page with each status group on a white card with a hairline. */
+.location-ui { background: #F7F8FA !important; }
+.location-ui > header { background: #fff; border-bottom-color: #E6E8EC !important; }
+.location-ui > header + div { background: #fff; border-bottom-color: #E6E8EC !important; }
+.location-ui main[data-layout="list"] section {
+  margin-top: 12px; padding: 10px 12px 6px;
+  background: #fff; border: 1px solid #E6E8EC; border-radius: 12px;
+}
+/* The sideways-scroll shadow is drawn with white covers that only vanish on a white page; on the
+   grey of the clean pages they showed as white bands, so the list there goes without it. */
+.mytasks-ui main .scroll-x,
+.location-ui main .scroll-x { background: none; }
+
+/* --- Timesheet: flat and clean, like My Tasks ------------------------------------------------------
+   Same controls in the same places. White header with a hairline, the light grey page, the week
+   as one white card with a hairline; today's column and the hours bars in the navy. */
+.timesheet-ui { background: #F7F8FA !important; }
+.timesheet-ui > header { background: #fff; border-bottom-color: #E6E8EC !important; }
+.timesheet-ui > header > span:first-child { font-weight: 600; letter-spacing: -0.01em; }
+/* The page's icon sits in a small navy tile, as a tool's section header does. */
+.timesheet-ui > header > span:first-child svg {
+  box-sizing: content-box; padding: 6px; border-radius: 8px;
+  color: #234788; background: #EEF2F8; box-shadow: inset 0 0 0 1px #D9E1EF;
+}
+.timesheet-ui > header button {
+  border-color: #E6E8EC; background: #fff; font-weight: 500; color: #344054;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+}
+.timesheet-ui > header button:hover { border-color: #B3C3DF; color: #234788; background: #F8FAFD; }
+.timesheet-ui > header button:hover svg { transform: rotate(45deg); }
+.timesheet-ui > header button svg { transition: transform 260ms var(--ui-ease); }
+
+/* The controls beside it: white, a hairline, a soft lift; navy under the pointer and in focus. */
+.timesheet-ui main label.border-gray-300,
+.timesheet-ui main [aria-haspopup] > span.border-gray-300 {
+  border-color: #E0E4EA; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+}
+.timesheet-ui main label.border-gray-300:hover,
+.timesheet-ui main [aria-haspopup] > span.border-gray-300:hover { border-color: #B3C3DF; background: #fff; }
+.timesheet-ui main [aria-haspopup][aria-expanded="true"] > span.border-gray-300 {
+  border-color: #234788; box-shadow: 0 0 0 3px rgba(35, 71, 136, 0.12);
+}
+.timesheet-ui main label.border-gray-300:focus-within { border-color: #234788; box-shadow: 0 0 0 3px rgba(35, 71, 136, 0.12); }
+
+/* The week itself: one white card, the column heads on a faint grey in small strong type. */
+.timesheet-ui .ui-card,
+.timesheet-ui main .scroll-x {
+  border: 1px solid #E3E7ED; border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 16px -8px rgba(16, 24, 40, 0.08);
+}
+.timesheet-ui [role="table"] > [role="row"]:first-child {
+  background: #F9FAFC; color: #667085; font-size: 12px; font-weight: 600; letter-spacing: 0.01em;
+}
+.timesheet-ui [role="table"] > [role="row"]:first-child > div:first-child { font-size: 12.5px; font-weight: 600; color: #475467; }
+/* Today: a navy bar over its column head, and its column washed the faintest navy. */
+.timesheet-ui [role="table"] > [role="row"]:first-child > .text-brand-700 { position: relative; color: #234788; background: #EEF2F8; }
+.timesheet-ui [role="table"] > [role="row"]:first-child > .text-brand-700::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: #234788;
+}
+/* A row: under the pointer it washes navy with a navy edge on the left, and the name turns navy. */
+.timesheet-ui [role="table"] > [role="row"] + [role="row"],
+.timesheet-ui [role="rowgroup"] > [role="row"]:first-child { transition: background-color 120ms ease, box-shadow 120ms ease; }
+.timesheet-ui [role="table"] > [role="row"] + [role="row"]:hover,
+.timesheet-ui [role="rowgroup"] > [role="row"]:first-child:hover { background: #F5F8FC; box-shadow: inset 3px 0 0 #234788; }
+.timesheet-ui [role="table"] > [role="row"] + [role="row"]:hover .text-gray-900.font-medium.truncate,
+.timesheet-ui [role="rowgroup"] > [role="row"]:first-child:hover button.font-medium { color: #234788; }
+.timesheet-ui [role="table"] > [role="row"] + [role="row"]:active { background: #EEF2F8; }
+/* The figures: an empty day a quiet dash, the hours bar thicker and rounded on a pale track. */
+.timesheet-ui [role="table"] .text-gray-300 { color: #D0D5DD; }
+.timesheet-ui [role="table"] .h-1.rounded-full { height: 5px; background: #EDF0F5; }
+.timesheet-ui [role="table"] .h-1.rounded-full > div { border-radius: 999px; }
+.timesheet-ui [role="table"] .h-1\.5.rounded-full { height: 6px; background: #EDF0F5; }
+/* Total: the week's sum reads as the answer. */
+.timesheet-ui [role="table"] > [role="row"] > div:last-child > .text-sm.font-medium { font-weight: 650; color: #101828; }
+/* Add task: the main action, with a soft navy lift. */
+.timesheet-ui [role="table"] button.bg-brand-600 { box-shadow: 0 1px 2px rgba(16, 24, 40, 0.1), 0 2px 6px -2px rgba(35, 71, 136, 0.35); }
+.timesheet-ui [role="table"] button.bg-brand-600:hover { box-shadow: 0 2px 4px rgba(16, 24, 40, 0.1), 0 6px 14px -4px rgba(35, 71, 136, 0.45); }
+
+/* The week picker: weeks as rows. The week on screen a navy band, the hovered one a pale band,
+   today a navy ring; quick weeks along the foot. */
+.week-picker {
+  width: 320px; padding: 14px 14px 12px; border-radius: 16px; background: #fff;
+  border: 1px solid #E3E7ED;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 12px 32px -8px rgba(16, 24, 40, 0.18), 0 4px 10px -4px rgba(16, 24, 40, 0.06);
+  animation: week-picker-in 140ms var(--ui-ease, ease-out);
+  transform-origin: top left;
+}
+@keyframes week-picker-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+.week-picker-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 10px; }
+.week-picker-month { font-size: 14.5px; font-weight: 650; letter-spacing: -0.01em; color: #101828; }
+.week-picker-step {
+  display: inline-flex; height: 28px; width: 28px; align-items: center; justify-content: center;
+  border-radius: 8px; color: #475467; transition: background-color 120ms ease, color 120ms ease;
+}
+.week-picker-step:hover { background: #EEF2F8; color: #234788; }
+.week-picker-names, .week-picker-row > span { display: grid; grid-template-columns: repeat(7, 1fr); }
+.week-picker-names { display: grid; padding: 0 4px 6px; font-size: 11px; font-weight: 600; color: #98A2B3; text-align: center; letter-spacing: 0.02em; }
+.week-picker-row {
+  display: grid; grid-template-columns: repeat(7, 1fr); width: 100%; padding: 2px 4px; margin: 2px 0;
+  border-radius: 10px; transition: background-color 120ms ease, color 120ms ease;
+}
+.week-picker-row > span {
+  display: flex; height: 32px; align-items: center; justify-content: center;
+  font-size: 13px; font-variant-numeric: tabular-nums; color: #344054; border-radius: 8px;
+}
+.week-picker-row > span.is-out { color: #C0C6D0; }
+.week-picker-row > span.is-today { font-weight: 700; color: #234788; box-shadow: inset 0 0 0 1.5px #234788; }
+.week-picker-row.is-hover { background: #F2F5FA; }
+.week-picker-row.is-on { background: #234788; box-shadow: 0 2px 8px -2px rgba(35, 71, 136, 0.45); }
+.week-picker-row.is-on > span { color: #fff; font-weight: 600; }
+.week-picker-row.is-on > span.is-out { color: rgba(255, 255, 255, 0.6); }
+.week-picker-row.is-on > span.is-today { box-shadow: inset 0 0 0 1.5px #fff; }
+.week-picker-foot { display: flex; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #EEF0F3; }
+.week-picker-foot button {
+  flex: 1; height: 30px; border-radius: 8px; font-size: 12.5px; font-weight: 500; color: #344054;
+  border: 1px solid #E3E7ED; background: #fff; transition: all 120ms ease;
+}
+.week-picker-foot button:hover { border-color: #B3C3DF; color: #234788; background: #F8FAFD; }
+.week-picker-foot button.is-main { color: #234788; background: #EEF2F8; border-color: #D9E1EF; font-weight: 600; }
+
+/* The week navigator: one joined control (back, the week, forward), then Today. */
+.wk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wk button { transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
+.wk-caret { color: #98A2B3; transition: transform 160ms ease; }
+.wk-cal { color: #234788; }
+.wk button[aria-expanded="true"] .wk-caret, .wk button:hover .wk-caret { color: #234788; }
+
+.wk-seg {
+  display: inline-flex; align-items: stretch; height: 36px; border-radius: 10px; background: #fff;
+  border: 1px solid #E0E4EA; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+}
+.wk-seg-btn { display: inline-flex; width: 36px; align-items: center; justify-content: center; color: #475467; }
+.wk-seg-btn:first-child { border-radius: 9px 0 0 9px; }
+.wk-seg-btn:last-child { border-radius: 0 9px 9px 0; }
+.wk-seg-btn:hover { background: #F3F6FB; color: #234788; }
+.wk-seg-range {
+  display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; min-width: 150px; justify-content: center;
+  border-left: 1px solid #EEF0F3; border-right: 1px solid #EEF0F3;
+  font-size: 14.5px; font-weight: 650; letter-spacing: -0.01em; color: #101828; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.wk-seg-range:hover, .wk-seg-range[aria-expanded="true"] { background: #F3F6FB; color: #234788; }
+.wk-today {
+  display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: 10px;
+  font-size: 13px; font-weight: 600; color: #234788; background: #EEF2F8; border: 1px solid #D9E1EF;
+}
+.wk-today:hover:not(:disabled) { background: #E3EAF5; border-color: #B3C3DF; }
+.wk-today:disabled { color: #475467; background: transparent; border-color: transparent; font-weight: 500; cursor: default; }
+.wk-dot { height: 7px; width: 7px; border-radius: 999px; background: #234788; box-shadow: 0 0 0 3px rgba(35, 71, 136, 0.15); }
+
+/* A week still on its way: the old one fades back under a thin running navy bar, so the click is
+   answered at once even when the server is slow. */
+.ts-week { position: relative; transition: opacity 160ms ease; }
+.ts-week.is-busy { opacity: 0.55; pointer-events: none; }
+.ts-week.is-busy::before {
+  content: ''; position: absolute; z-index: 5; left: 0; right: 0; top: -1px; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, transparent 0%, #234788 40%, #5B7FC4 60%, transparent 100%);
+  background-size: 50% 100%; background-repeat: no-repeat;
+  animation: ts-week-run 900ms linear infinite;
+}
+@keyframes ts-week-run { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+@media (prefers-reduced-motion: reduce) { .ts-week.is-busy::before { animation: none; background: #234788; } }
+
+/* The page title: on the page, not in a bar. A solid navy tile, the name over what the page is for,
+   today's date and Settings on the right. */
+.timesheet-ui > header.ts-head { background: transparent; border-bottom-color: transparent !important; padding-top: 16px; padding-bottom: 0; }
+.timesheet-ui > header.ts-head > span:first-child svg { padding: 0; background: none; box-shadow: none; border-radius: 0; color: inherit; }
+.ts-head-title { gap: 12px; padding: 0 !important; }
+.ts-head-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  height: 38px; width: 38px; border-radius: 10px; color: #fff;
+  background: linear-gradient(180deg, #2E5AA6 0%, #234788 100%);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12), 0 4px 10px -3px rgba(35, 71, 136, 0.45);
+}
+.ts-head-icon svg { width: 18px; height: 18px; }
+.ts-head-name { font-size: 18.5px; font-weight: 650; letter-spacing: -0.02em; color: #101828; line-height: 1.2; }
+.ts-head-sub { font-size: 12.5px; font-weight: 400; color: #667085; line-height: 1.3; margin-top: 2px; }
+.ts-head-today {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 8px;
+  font-size: 12.5px; font-weight: 500; color: #475467; background: #fff; box-shadow: inset 0 0 0 1px #E3E7ED;
+  font-variant-numeric: tabular-nums;
+}
+.ts-head-today svg { color: #234788; }
+.timesheet-ui > header.ts-head .ts-head-settings { height: 32px; border-radius: 8px; }
+
+/* --- Sidebar: in the logo's colours ------------------------------------------------------------
+   Same rows, order and spacing as before; the mint turns to white and the logo's navy. The page
+   you are on is a soft navy block with a navy edge, icons are slate, Folders navy. Overrides the
+   older mint rules above rather than editing them. */
+.app-sidebar {
+  background: linear-gradient(180deg, #FFFFFF 0%, #F7F9FC 100%) !important;
+  border-right: 1px solid #E6E8EC !important;
+}
+.app-sidebar .text-gray-300 { color: #B8C0CC; }
+.app-sidebar .text-gray-400 { color: #94A0B2; }
+.app-sidebar .text-gray-500 { color: #6B7689; }
+.app-sidebar .text-gray-600,
+.app-sidebar .text-gray-700,
+.app-sidebar .text-gray-800,
+.app-sidebar .text-gray-900 { color: #1F2A44; }
+.app-sidebar .hover\:bg-black\/5:hover,
+.app-sidebar .hover\:bg-black\/10:hover,
+.app-sidebar .hover\:bg-gray-50:hover,
+.app-sidebar .hover\:bg-gray-100:hover { background-color: rgba(35, 71, 136, 0.06); }
+.app-sidebar .hover\:text-gray-600:hover,
+.app-sidebar .hover\:text-gray-700:hover,
+.app-sidebar .hover\:text-gray-800:hover,
+.app-sidebar .hover\:text-gray-900:hover { color: #142B57; }
+.app-sidebar .bg-brand-50,
+.app-sidebar .bg-amber-50 { background-color: #EEF2F8; }
+.app-sidebar .text-brand-600,
+.app-sidebar .text-brand-700 { color: #234788; }
+.app-sidebar .border-gray-100,
+.app-sidebar .border-gray-200 { border-color: #E6E8EC; }
+
+.app-sidebar .side-space > span > span:not(.rounded-md) { color: #142B57; }
+.app-sidebar .side-folder > span > svg { color: #5A7DB6; }
+.app-sidebar .side-folder:hover > span > svg { color: #234788; }
+.app-sidebar .side-list > span > svg { color: #94A0B2; }
+.app-sidebar .side-list:hover > span > svg { color: #234788; }
+.app-sidebar .side-list > span > span { color: #3A4660; }
+.app-sidebar .side-branch::before { background: #E1E5EC; }
+
+.app-sidebar .side-row { color: #2B3650; }
+.app-sidebar .side-row > svg,
+.app-sidebar .side-row > span > svg { color: #7B8699; }
+.app-sidebar .side-row:hover { background-color: rgba(35, 71, 136, 0.06); color: #142B57; }
+.app-sidebar .side-row:hover > svg,
+.app-sidebar .side-row:hover > span > svg { color: #234788; }
+.app-sidebar .side-row.is-active,
+.app-sidebar .side-row.is-active:hover {
+  background-color: #EEF2F8;
+  box-shadow: inset 3px 0 0 #234788;
+  color: #1C3A70;
+}
+.app-sidebar .side-row.is-active > svg,
+.app-sidebar .side-row.is-active > span > svg,
+.app-sidebar .side-row.is-active > span > span { color: #234788; }
+.app-sidebar .side-head { color: #8A94A6; }
+.app-sidebar .side-rule { border-top-color: #E6E8EC; }
+.app-sidebar::-webkit-scrollbar-thumb { background: rgba(35, 71, 136, 0.18); }
+
+/* --- A tool, not a web page: how every control answers the pointer -------------------------------
+   One accent everywhere -- the logo's navy -- including the menus and pop-ups that open outside a
+   page. A button gives a little under a click, a menu row lights navy under the pointer, focus is
+   a navy ring, and hints are small dark bubbles (components/Tooltips.tsx) instead of the browser's. */
+:root {
+  --color-brand-50: #EEF2F8; --color-brand-100: #D9E1EF; --color-brand-200: #B3C3DF;
+  --color-brand-300: #8CA5CF; --color-brand-400: #5A7DB6; --color-brand-500: #2F5699;
+  --color-brand-600: #234788; --color-brand-700: #1C3A70; --color-brand-800: #162E59;
+  --color-brand-900: #102243;
+  --color-accent: #234788; --color-accent-hover: #1C3A70; --color-accent-ink: #FFFFFF;
+  accent-color: #234788;
+}
+::selection { background: #D9E1EF; color: #102243; }
+button:focus-visible, a:focus-visible, [role="button"]:focus-visible, [role="tab"]:focus-visible, [role="menuitem"]:focus-visible {
+  outline-color: #234788;
+}
+@layer base {
+  button, [role="button"] { -webkit-tap-highlight-color: transparent; }
+  /* A click presses the control in a touch; rows and tabs stay still. */
+  button:not(:disabled):not([role="menuitem"]):not([role="tab"]):not([role="option"]):not(.w-full):active {
+    transform: scale(0.96);
+    transition: transform 60ms ease-out;
+  }
+}
+
+/* Menus and drop-downs: a crisp white card with a soft shadow; rows highlight navy. */
+[role="menu"] { border-radius: 12px !important; padding: 5px !important; border-color: #E3E7ED !important; }
+[role="menu"] [role="menuitem"] { border-radius: 8px; transition: background-color 90ms ease, color 90ms ease; }
+[role="menu"] [role="menuitem"]:not(.text-red-600):hover { background: #EEF2F8 !important; color: #142B57 !important; }
+[role="menu"] [role="menuitem"]:not(.text-red-600):hover .text-gray-400 { color: #234788; }
+[role="menu"] [role="menuitem"]:not(.text-red-600):active { background: #D9E1EF !important; }
+
+/* The hint bubble. */
+/* Hover hints, classic and quiet: a small white label with a hairline and a soft shadow, a tiny
+   pointer to its control, and a short fade. No dark slab. */
+@keyframes ui-tip-in { from { opacity: 0; transform: translate(-50%, calc(-100% + 2px)); } to { opacity: 1; transform: translate(-50%, -100%); } }
+@keyframes ui-tip-in-below { from { opacity: 0; transform: translate(-50%, -2px); } to { opacity: 1; transform: translate(-50%, 0); } }
+.ui-tip {
+  position: fixed; z-index: 1000; pointer-events: none; transform: translate(-50%, -100%);
+  width: max-content; max-width: 240px; padding: 4px 8px; border-radius: 6px;
+  background: #FFFFFF; color: #1B2A4A; border: 1px solid #DFE4EC;
+  font-size: 11.5px; font-weight: 500; line-height: 1.35; letter-spacing: 0.005em;
+  box-shadow: 0 4px 12px -4px rgba(16, 24, 40, 0.16), 0 1px 2px rgba(16, 24, 40, 0.05);
+  animation: ui-tip-in 140ms var(--ui-ease);
+  white-space: pre-line; text-align: center;
+}
+/* The pointer: a small white square turned 45deg, its two outer edges drawn with the hairline. */
+.ui-tip::after {
+  content: ''; position: absolute; left: 50%; width: 7px; height: 7px; background: #FFFFFF;
+  transform: translateX(-50%) rotate(45deg);
+  bottom: -4.5px; border-right: 1px solid #DFE4EC; border-bottom: 1px solid #DFE4EC;
+}
+.ui-tip.is-below { transform: translate(-50%, 0); animation-name: ui-tip-in-below; }
+.ui-tip.is-below::after { bottom: auto; top: -4.5px; border: 0; border-left: 1px solid #DFE4EC; border-top: 1px solid #DFE4EC; }
+@media (prefers-reduced-motion: reduce) {
+  .ui-tip { animation: none; }
+  button:active { transform: none !important; }
+}
+
+/* --- Sidebar: premium, classic ---------------------------------------------------------------------
+   Same rows, same order. The column is a lit white panel with a soft edge; each top row carries its
+   icon in a small tile; the page you are on is a raised white pill whose tile turns solid navy.
+   The tree keeps its quiet rows, with a navy pill for the List you are in. */
+.app-sidebar {
+  background: linear-gradient(180deg, #FFFFFF 0%, #FAFBFD 55%, #F4F6FA 100%) !important;
+  border-right: 0 !important;
+  box-shadow: 1px 0 0 #E4E8EE, 6px 0 24px -16px rgba(16, 24, 40, 0.18);
+}
+/* The logo sits on its own, with a hairline under it. */
+.app-sidebar > div:first-child { padding-bottom: 16px; border-bottom: 1px solid #EDF0F4; margin-bottom: 14px !important; }
+
+/* Top rows (Dashboards, My Tasks, Timesheet ...): the ones whose icon is a direct child. */
+.app-sidebar .side-row:has(> svg) {
+  min-height: 38px; border-radius: 10px; font-weight: 500; color: #2B3650;
+  transition: background-color 140ms ease, box-shadow 160ms ease, color 140ms ease;
+}
+.app-sidebar .side-row > svg {
+  box-sizing: content-box; padding: 5px; border-radius: 8px;
+  color: #5B6880; background: #F1F4F9; box-shadow: inset 0 0 0 1px #E4E9F1;
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms var(--ui-ease);
+}
+.app-sidebar .side-row:has(> svg):hover { background: rgba(35, 71, 136, 0.05); color: #142B57; }
+.app-sidebar .side-row:has(> svg):hover > svg {
+  color: #234788; background: #fff;
+  box-shadow: inset 0 0 0 1px #D5DEEC, 0 2px 6px -2px rgba(35, 71, 136, 0.25);
+  transform: translateY(-1px);
+}
+.app-sidebar .side-row.is-active:has(> svg),
+.app-sidebar .side-row.is-active:has(> svg):hover {
+  background: #fff; color: #142B57; font-weight: 600;
+  box-shadow: inset 0 0 0 1px #E3E8F0, 0 1px 2px rgba(16, 24, 40, 0.06), 0 6px 14px -8px rgba(16, 24, 40, 0.2);
+}
+.app-sidebar .side-row.is-active > svg,
+.app-sidebar .side-row.is-active:hover > svg {
+  color: #fff; transform: none;
+  background: linear-gradient(180deg, #3A63AE 0%, #234788 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 3px 8px -2px rgba(35, 71, 136, 0.45);
+}
+/* A count beside a row: a small grey pill, navy on the page you are on. */
+.app-sidebar .side-row > .text-xs.text-gray-400 {
+  min-width: 20px; padding: 1px 7px; border-radius: 999px; text-align: center;
+  background: #EEF1F6; color: #5B6880; font-weight: 600; font-size: 11px;
+}
+.app-sidebar .side-row.is-active > .text-xs.text-gray-400 { background: #EEF2F8; color: #234788; }
+
+/* The section heading and its +. */
+.app-sidebar .side-head { color: #7A8599; font-weight: 700; letter-spacing: 0.1em; }
+
+/* The tree: rounded rows, a soft wash under the pointer, the open List a navy pill with a bar. */
+.app-sidebar .side-space, .app-sidebar .side-folder, .app-sidebar .side-list { border-radius: 8px; }
+.app-sidebar .side-space .rounded-md {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 rgba(0, 0, 0, 0.1), 0 2px 5px -1px rgba(16, 24, 40, 0.25);
+}
+.app-sidebar .side-space > span > span:not(.rounded-md) { font-weight: 600; }
+.app-sidebar .side-list.is-active,
+.app-sidebar .side-folder.is-active,
+.app-sidebar .side-space.is-active {
+  position: relative; box-shadow: none; background: #EEF2F8; color: #1C3A70; font-weight: 600;
+}
+.app-sidebar .side-list.is-active::before,
+.app-sidebar .side-folder.is-active::before,
+.app-sidebar .side-space.is-active::before {
+  content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 3px; background: #234788;
+}
+.app-sidebar .side-list.is-active > span > span { color: #1C3A70; }
+/* The bottom rows (All Spaces, Teams & People, Admin ...): the same tile treatment on hover. */
+.app-sidebar .side-rule { border-top-color: #EDF0F4; }
+
+/* Dashboard toolbars: two small floating pills above the cards instead of one bar across the
+   page -- filters on the left, the board's actions on the right. */
+.dash-pill {
+  background: #fff;
+  border: 1px solid #E6E9EF;
+  border-radius: 12px;
+  padding: 4px 6px;
+  min-height: 40px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 6px 16px -10px rgba(16, 24, 40, 0.18);
+}
+.dash-pill .dash-chip { animation: dash-chip-in 160ms var(--ui-ease, ease-out); }
+@keyframes dash-chip-in { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .dash-pill .dash-chip { animation: none; }
+}
+
+/* Refresh pill: the tick pops in, each label fades in. Download: the arrow drops into the tray. */
+.fresh-tick { animation: fresh-pop 260ms cubic-bezier(.34, 1.56, .64, 1); }
+.fresh-label { animation: fresh-fade 200ms ease-out; }
+@keyframes fresh-pop { from { transform: scale(0.4); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fresh-fade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+.dash-dl .dl-arrow { transition: transform 200ms ease-out; }
+/* Once per hover: the arrow slides in from above and settles into the tray. Moving the pointer
+   away and back plays it again. */
+.dash-dl:hover .dl-arrow { animation: dl-drop 520ms cubic-bezier(.22, 1, .36, 1) 1; }
+@keyframes dl-drop {
+  0% { transform: translateY(-7px); opacity: 0; }
+  60% { transform: translateY(2px); opacity: 1; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fresh-tick, .fresh-label, .dash-dl:hover .dl-arrow { animation: none; }
+}
+
+/* Filter values (Status, Priority…): each option's icon on a light wash of its own colour; a
+   picked row takes that wash across the row and a solid tick in the same colour. */
+.filter-opt .filter-opt-icon {
+  color: var(--opt);
+  background: color-mix(in srgb, var(--opt) 12%, white);
+  transition: transform 160ms ease-out;
+}
+.filter-opt:hover .filter-opt-icon { transform: scale(1.06); }
+/* Picked: a soft tint of the row's own colour, no outline, so picked rows sitting one under
+   another read as separate rows rather than one boxed block. */
+.filter-opt.is-on { background: color-mix(in srgb, var(--opt) 8%, white); }
+.filter-opt.is-on:hover { background: color-mix(in srgb, var(--opt) 12%, white); }
+.filter-opt.is-on .filter-opt-check {
+  background: var(--opt);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--opt) 40%, transparent);
+  animation: fresh-pop 220ms cubic-bezier(.34, 1.56, .64, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .filter-opt.is-on .filter-opt-check { animation: none; }
+  .filter-opt:hover .filter-opt-icon { transform: none; }
+}
+
+/* Workload & Time tiles: capacity, then each share of it as a dial and a figure.
+   The dials fill on arrival; tiles that open tasks take a ring of their colour on hover. */
+.wl-ring { transition: stroke-dashoffset 1100ms cubic-bezier(0.45, 0, 0.2, 1); }
+.wl-tile { transition: box-shadow 160ms ease; }
+button.wl-tile:not(:disabled):hover { box-shadow: 0 6px 14px -10px color-mix(in srgb, var(--tile) 70%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--tile) 30%, white); }
+@media (prefers-reduced-motion: reduce) { .wl-ring, .wl-tile { transition: none; } }
+
+/* The full-size filter button (Workload, chart cards, "Filter all cards"): "Filter" and a caret on
+   white, as before, with a softer edge, a navy hover and ring while open, and a navy count. */
+.cf-pill { background: #fff; color: #344054; border: 1px solid #E4E7EC; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05); transition: border-color 140ms ease, box-shadow 140ms ease, color 140ms ease; }
+.cf-pill .cf-pill-caret { color: #98A2B3; }
+.cf-pill .cf-pill-count { background: #234788; color: #fff; }
+.cf-pill:hover { border-color: #B3C3DF; color: #234788; }
+.cf-pill:hover .cf-pill-caret { color: #234788; }
+.cf-pill[aria-expanded="true"] { border-color: #234788; color: #234788; box-shadow: 0 0 0 3px rgba(35, 71, 136, 0.12); }
+.cf-pill[data-active] { background: #F5F8FD; border-color: #C9D5EA; color: #142B57; }
+
+/* Chart slices and bars open their tasks, so they show the hand like any other link. */
+.dash-3d .recharts-pie-sector, .dash-3d .recharts-sector, .dash-3d .recharts-bar-rectangle { cursor: pointer; }
+
+/* Dashboard cards: the refresh arrows turn while a card reloads; an empty bar card shows its
+   bars sinking to the baseline before it says there is nothing to show. */
+.card-refresh-spin { animation: card-refresh-turn 700ms linear infinite; }
+@keyframes card-refresh-turn { to { transform: rotate(360deg); } }
+.empty-bar { transform-origin: bottom; animation: empty-bar-sink 900ms cubic-bezier(.55, 0, .3, 1) forwards; }
+@keyframes empty-bar-sink { 0% { transform: scaleY(1); opacity: 1; } 100% { transform: scaleY(0.05); opacity: .9; } }
+.empty-bars-label { opacity: 0; animation: fresh-fade 300ms ease-out 900ms forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .card-refresh-spin { animation: none; }
+  .empty-bar { animation: none; transform: scaleY(0.05); }
+  .empty-bars-label { animation: none; opacity: 1; }
+}
+/* An empty pie card: the ring draws itself closed, then the words fade in. */
+.empty-ring { stroke-dasharray: 100; stroke-dashoffset: 100; animation: empty-ring-close 900ms cubic-bezier(.55, 0, .3, 1) forwards; }
+@keyframes empty-ring-close { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .empty-ring { animation: none; stroke-dashoffset: 0; } }
+
+/* --- Verveflow brand -----------------------------------------------------------------------------
+   The logo (components/BrandMark.tsx): the card-stack mark with "verveflow" beside it in Poppins.
+   The sidebar is shaded a soft blue rather than plain white; the page behind
+   every screen carries the same tint (Layout.tsx). */
+.brand-lockup { display: flex; align-items: center; gap: 10px; }
+.brand-lockup-name {
+  font-family: 'Poppins', 'Inter', system-ui, sans-serif; font-weight: 700; font-size: 25px;
+  letter-spacing: -0.03em; line-height: 1; color: #1B2A4A;
+}
+.brand-lockup-name > span { color: #234788; }
+.app-sidebar {
+  background: linear-gradient(180deg, #F3F6FC 0%, #EAF0F9 55%, #E3EAF6 100%) !important;
+  box-shadow: 1px 0 0 #DCE3EF, 6px 0 24px -16px rgba(16, 24, 40, 0.18);
+}
+.app-sidebar > div:first-child { border-bottom-color: #DCE3EF; }
+
+/* --- Trial look: "Classic navy" shell ------------------------------------------------------------
+   Switched on by data-shell="classic" on <html> (index.html); remove that attribute, or this whole
+   block, to go back. The sidebar turns deep navy with soft white text, and the work area runs
+   edge to edge beside it with a white top bar. Only the frame is restyled: the pages inside keep
+   their own look. */
+html[data-shell="classic"] .app-shell { background: #13254d !important; }
+html[data-shell="classic"] .app-sidebar {
+  background: linear-gradient(180deg, #13254d 0%, #172c5a 60%, #1a3164 100%) !important;
+  box-shadow: none !important; border: 0 !important; border-radius: 0 !important;
+}
+html[data-shell="classic"] .app-sidebar > div:first-child { border-bottom-color: rgba(255, 255, 255, 0.1); }
+html[data-shell="classic"] .app-sidebar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); }
+
+html[data-shell="classic"] .app-sidebar .brand-lockup-name { color: #ffffff; }
+html[data-shell="classic"] .app-sidebar .brand-lockup-name > span { color: #9DB6E8; }
+/* The logo in white: the cards behind turn translucent white, the front card white, the tick navy. */
+html[data-shell="classic"] .app-sidebar .brand-lockup rect:nth-of-type(1) { fill: rgba(255, 255, 255, 0.22); }
+html[data-shell="classic"] .app-sidebar .brand-lockup rect:nth-of-type(2) { fill: rgba(255, 255, 255, 0.5); }
+html[data-shell="classic"] .app-sidebar .brand-lockup rect:nth-of-type(3) { fill: #ffffff; }
+html[data-shell="classic"] .app-sidebar .brand-lockup path { stroke: #234788; }
+
+/* Top rows: soft white text, icons in faint glass tiles; the page you are on a lit row with a white tile. */
+html[data-shell="classic"] .app-sidebar .side-row { color: #D3DCEE; }
+html[data-shell="classic"] .app-sidebar .side-row > svg,
+html[data-shell="classic"] .app-sidebar .side-row > span > svg { color: #A9B8D8; }
+html[data-shell="classic"] .app-sidebar .side-row:has(> svg) { color: #D3DCEE; }
+html[data-shell="classic"] .app-sidebar .side-row > svg {
+  background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+html[data-shell="classic"] .app-sidebar .side-row:hover,
+html[data-shell="classic"] .app-sidebar .side-row:has(> svg):hover { background: rgba(255, 255, 255, 0.07); color: #ffffff; }
+html[data-shell="classic"] .app-sidebar .side-row:has(> svg):hover > svg {
+  color: #ffffff; background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+html[data-shell="classic"] .app-sidebar .side-row.is-active:has(> svg),
+html[data-shell="classic"] .app-sidebar .side-row.is-active:has(> svg):hover {
+  background: rgba(255, 255, 255, 0.12); color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+html[data-shell="classic"] .app-sidebar .side-row.is-active > svg,
+html[data-shell="classic"] .app-sidebar .side-row.is-active:hover > svg {
+  background: #ffffff; color: #234788; box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+}
+html[data-shell="classic"] .app-sidebar .side-row > .text-xs.text-gray-400 { background: rgba(255, 255, 255, 0.1); color: #D3DCEE; }
+html[data-shell="classic"] .app-sidebar .side-row.is-active > .text-xs.text-gray-400 { background: #ffffff; color: #234788; }
+
+/* Section heading and the Spaces tree. */
+html[data-shell="classic"] .app-sidebar .side-head { color: #7F91B8; }
+html[data-shell="classic"] .app-sidebar .side-head svg { color: #7F91B8; }
+html[data-shell="classic"] .app-sidebar .side-rule { border-top-color: rgba(255, 255, 255, 0.1); }
+html[data-shell="classic"] .app-sidebar .side-space > span > span:not(.rounded-md) { color: #ffffff; }
+html[data-shell="classic"] .app-sidebar .side-folder > span > svg { color: #9DB6E8; }
+html[data-shell="classic"] .app-sidebar .side-list > span > svg { color: #7F91B8; }
+html[data-shell="classic"] .app-sidebar .side-list > span > span { color: #C3CEE6; }
+html[data-shell="classic"] .app-sidebar .side-branch::before { background: rgba(255, 255, 255, 0.12); }
+html[data-shell="classic"] .app-sidebar .side-list.is-active,
+html[data-shell="classic"] .app-sidebar .side-folder.is-active,
+html[data-shell="classic"] .app-sidebar .side-space.is-active { background: rgba(255, 255, 255, 0.12); color: #ffffff; }
+html[data-shell="classic"] .app-sidebar .side-list.is-active::before,
+html[data-shell="classic"] .app-sidebar .side-folder.is-active::before,
+html[data-shell="classic"] .app-sidebar .side-space.is-active::before { background: #9DB6E8; }
+html[data-shell="classic"] .app-sidebar .side-list.is-active > span > span { color: #ffffff; }
+html[data-shell="classic"] .app-sidebar .side-row .text-gray-400,
+html[data-shell="classic"] .app-sidebar .side-row .text-gray-500 { color: #8FA0C4; }
+
+/* The work area runs edge to edge beside the navy sidebar, white top bar along its top. It used
+   to sit inset as a rounded panel with a 10px navy band round it; that band read as a stray blue
+   line over the page and cost room on every screen, so it went (2026-10-27, the user's call). */
+html[data-shell="classic"] .app-sidebar + main { background: #F5F7FB; }
+html[data-shell="classic"] .app-sidebar + main > header {
+  background: #ffffff !important;
+  border-bottom: 1px solid #E6EAF1 !important;
+  box-shadow: 0 1px 0 rgba(16, 24, 40, 0.02);
+}
+html[data-shell="classic"] .app-sidebar + main > header button[aria-label="Search (Ctrl+K)"] {
+  background: #F3F5F9; box-shadow: inset 0 0 0 1px #E3E8F0;
+}
+html[data-shell="classic"] .topbar-title:empty::before { color: #1B2A4A; }
+html[data-shell="classic"] .app-sidebar .side-folder,
+html[data-shell="classic"] .app-sidebar .side-folder > span > span { color: #E3E9F5; }
+html[data-shell="classic"] .app-sidebar .side-space,
+html[data-shell="classic"] .app-sidebar .side-list { color: #C3CEE6; }
+
+/* --- Sidebar: logo band, fold button, and the narrow (icons only) sidebar -----------------------
+   The logo sits in its own band across the full width, with no line under it; the Spaces section
+   ends without a rule. The fold button in the band slides the sidebar down to its icons and back
+   (Layout.tsx keeps the choice). */
+.app-sidebar { transition: width 200ms var(--ui-ease, ease); }
+.app-sidebar > .side-brand {
+  display: flex; align-items: center; gap: 8px;
+  margin: -20px -12px 14px !important; padding: 18px 12px 18px 16px !important;
+  border-bottom: 0 !important;
+  background: rgba(35, 71, 136, 0.06);
+}
+.side-fold {
+  margin-left: auto; flex: none; width: 26px; height: 26px; border-radius: 8px;
+  display: grid; place-items: center; color: #5B6880; background: #fff;
+  box-shadow: inset 0 0 0 1px #E3E8F0;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.side-fold:hover { color: #234788; }
+.app-sidebar .side-rule { border-top-color: transparent !important; }
+
+html[data-shell="classic"] .app-sidebar > .side-brand { background: #0D1B3A; }
+html[data-shell="classic"] .side-fold { background: rgba(255, 255, 255, 0.08); color: #A9B8D8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+html[data-shell="classic"] .side-fold:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+
+/* Narrow: the logo mark and the fold button stacked, the main rows as icons, the tree put away. */
+.app-sidebar.is-collapsed > .side-brand { flex-direction: column; justify-content: center; gap: 12px; padding: 16px 0 !important; }
+.app-sidebar.is-collapsed .side-fold { margin-left: 0; }
+.app-sidebar.is-collapsed .brand-lockup-name { display: none; }
+.app-sidebar.is-collapsed .side-row > :not(svg) { display: none; }
+.app-sidebar.is-collapsed .side-row:has(> svg) { justify-content: center; padding-left: 0 !important; padding-right: 0 !important; }
+.app-sidebar.is-collapsed .side-row:not(:has(> svg)),
+.app-sidebar.is-collapsed .side-branch,
+.app-sidebar.is-collapsed div:has(> .side-head),
+.app-sidebar.is-collapsed nav[aria-label="Favourites"] { display: none; }
+.app-sidebar.is-collapsed .side-row:has(> svg) { font-size: 0; gap: 0; }
+.app-sidebar.is-collapsed .side-space,
+.app-sidebar.is-collapsed .side-folder,
+.app-sidebar.is-collapsed .side-list { display: none; }
+
+/* --- Sidebar: narrower and tidier --------------------------------------------------------------
+   The tree used to indent twice per level (the branch's margin plus the row's own padding), which
+   pushed Lists far right and cut their names short. Now each level steps in once, by 12px, and a
+   row keeps a small fixed inset, so names get the room. Rows are a touch tighter throughout. */
+.app-sidebar .side-branch { margin-left: 12px !important; }
+.app-sidebar .side-branch .side-row { padding-left: 6px !important; }
+.app-sidebar .side-row { min-height: 30px; font-size: 13px; }
+.app-sidebar .side-row:has(> svg) { min-height: 36px; }
+.app-sidebar .side-row > svg { padding: 4px; }
+.app-sidebar .side-head { font-size: 10.5px; }
+/* At 216px the logo and the fold button share the band: the mark and name a size smaller here. */
+.app-sidebar .brand-lockup { gap: 9px; min-width: 0; }
+.app-sidebar .brand-lockup svg { width: 32px; height: 32px; }
+.app-sidebar .brand-lockup-name { font-size: 18.5px; }
+
+/* --- Sidebar: the main pages as their own panel, each with its own colour ------------------------
+   Dashboard, My Tasks and Timesheet sit together in a soft panel apart from the Spaces tree, and
+   each carries its own icon colour (Dashboard blue, My Tasks violet, Timesheet amber) so they read
+   at a glance. The page you are on keeps its lit row; its tile turns solid in its colour. */
+.app-sidebar .side-main {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px; border-radius: 14px;
+  background: rgba(35, 71, 136, 0.05); box-shadow: inset 0 0 0 1px rgba(35, 71, 136, 0.08);
+}
+.app-sidebar .side-main nav { gap: 2px; }
+.app-sidebar .side-main a[href="/"] > svg,
+.app-sidebar .side-main a[href="/dashboards"] > svg { color: #2F6FD6; background: #E6EFFC; }
+.app-sidebar .side-main a[href="/my-tasks"] > svg { color: #7048D8; background: #EFEAFD; }
+.app-sidebar .side-main a[href="/timesheets"] > svg { color: #B7791F; background: #FCF2DF; }
+
+html[data-shell="classic"] .app-sidebar .side-main {
+  background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+html[data-shell="classic"] .app-sidebar .side-main a[href="/"] > svg,
+html[data-shell="classic"] .app-sidebar .side-main a[href="/dashboards"] > svg { color: #93C2FF; background: rgba(96, 165, 250, 0.16); box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.2); }
+html[data-shell="classic"] .app-sidebar .side-main a[href="/my-tasks"] > svg { color: #C9B6FF; background: rgba(167, 139, 250, 0.16); box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.22); }
+html[data-shell="classic"] .app-sidebar .side-main a[href="/timesheets"] > svg { color: #FCD27A; background: rgba(251, 191, 36, 0.14); box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.2); }
+/* The page you are on: the tile fills with that page's colour. */
+.app-sidebar .side-main a[href="/"].is-active > svg,
+.app-sidebar .side-main a[href="/dashboards"].is-active > svg { color: #fff !important; background: #2F6FD6 !important; box-shadow: 0 3px 8px -2px rgba(47, 111, 214, 0.5) !important; }
+.app-sidebar .side-main a[href="/my-tasks"].is-active > svg { color: #fff !important; background: #7048D8 !important; box-shadow: 0 3px 8px -2px rgba(112, 72, 216, 0.5) !important; }
+.app-sidebar .side-main a[href="/timesheets"].is-active > svg { color: #fff !important; background: #D08A1E !important; box-shadow: 0 3px 8px -2px rgba(208, 138, 30, 0.5) !important; }
+.app-sidebar.is-collapsed .side-main { padding: 4px; }
+
+/* Narrow sidebar: the Spaces stay, as their letter badges under the main pages. */
+.app-sidebar.is-collapsed .side-space {
+  display: flex !important; justify-content: center; padding: 0 !important; min-height: 36px; font-size: 13px;
+}
+.app-sidebar.is-collapsed .side-space > :not(:nth-child(2)) { display: none !important; }
+.app-sidebar.is-collapsed .side-space > :nth-child(2) { display: flex !important; }
+.app-sidebar.is-collapsed .side-space .rounded-md { width: 28px !important; height: 28px !important; font-size: 12px; border-radius: 8px; }
+
+/* --- Sidebar main pages, take two: no panel ------------------------------------------------------
+   The glass panel round Dashboard, My Tasks and Timesheet is gone. They stand apart instead by
+   round colour badges for their icons, slightly larger text, and extra room before Spaces. */
+.app-sidebar .side-main,
+html[data-shell="classic"] .app-sidebar .side-main {
+  padding: 0; background: none; box-shadow: none; border-radius: 0; margin-bottom: 10px;
+}
+.app-sidebar .side-main .side-row:has(> svg) { min-height: 40px; font-size: 14px; }
+.app-sidebar .side-main .side-row > svg { border-radius: 999px !important; padding: 6px; }
+/* The page you are on: no outlined glass box, a soft fill and a short bar in the page's colour. */
+.app-sidebar .side-main .side-row.is-active:has(> svg),
+.app-sidebar .side-main .side-row.is-active:has(> svg):hover {
+  position: relative; box-shadow: none !important; background: rgba(35, 71, 136, 0.07) !important;
+}
+html[data-shell="classic"] .app-sidebar .side-main .side-row.is-active:has(> svg),
+html[data-shell="classic"] .app-sidebar .side-main .side-row.is-active:has(> svg):hover { background: rgba(255, 255, 255, 0.08) !important; }
+.app-sidebar .side-main .side-row.is-active:has(> svg)::before {
+  content: ''; position: absolute; left: -12px; top: 9px; bottom: 9px; width: 4px; border-radius: 0 4px 4px 0; background: #234788;
+}
+.app-sidebar .side-main a[href="/"].is-active::before,
+.app-sidebar .side-main a[href="/dashboards"].is-active::before { background: #5A9BF6; }
+.app-sidebar .side-main a[href="/my-tasks"].is-active::before { background: #9B7BF0; }
+.app-sidebar .side-main a[href="/timesheets"].is-active::before { background: #F0B44C; }
+.app-sidebar.is-collapsed .side-main .side-row.is-active:has(> svg)::before { left: -12px; }
+
+/* "Clear" and "Clear all" in every filter drop-down: a small rose chip with a ×, so the way to
+   undo a filter is found at a glance. */
+.filter-clear {
+  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+  padding: 2px 8px 2px 6px; border-radius: 999px;
+  background: #FFF1F2; color: #BE123C; box-shadow: inset 0 0 0 1px #FECDD3;
+  font-size: 11px; font-weight: 600; line-height: 1.4; white-space: nowrap;
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+.filter-clear::before { content: '\00D7'; font-size: 13px; font-weight: 700; line-height: 1; }
+.filter-clear:hover { background: #E11D48; color: #fff; box-shadow: inset 0 0 0 1px #E11D48; }
+
+/* --- Top bar: the firm's logo, one clean line, quiet controls ------------------------------------
+   Solid white with one hairline under it, the same 64px tall as the sidebar's logo band so the two
+   bottom edges make one line across the app. Verve Advisory's logo leads, then a thin rule and the
+   page's title. Search is a light field, the bell a round button with a navy count, and you are a
+   navy avatar with your name and a small chevron. */
+.app-sidebar + main > header.app-topbar,
+html[data-shell="classic"] .app-sidebar + main > header.app-topbar {
+  background: #ffffff !important;
+  border-bottom: 1px solid #E6EAF1 !important;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+@media (min-width: 640px) {
+  .app-sidebar:not(.is-collapsed) > .side-brand { box-sizing: border-box; flex: none; height: 64px; padding-top: 0 !important; padding-bottom: 0 !important; }
+}
+.topbar-logo { display: flex; align-items: center; flex: none; }
+.topbar-logo img { height: 30px; width: auto; display: block; }
+@media (max-width: 639px) { .topbar-logo img { height: 20px; } }
+.topbar-sep { flex: none; width: 1px; height: 22px; background: #E3E8F0; }
+.topbar-sep:has(+ .topbar-title:empty) { display: none; }
+.topbar-title h1, .topbar-title nav > span.text-lg { color: #1B2A4A; font-weight: 600; }
+
+/* Search: a light field with a hairline, navy ring when you reach for it. */
+.app-sidebar + main > header button[aria-label="Search (Ctrl+K)"],
+html[data-shell="classic"] .app-sidebar + main > header button[aria-label="Search (Ctrl+K)"] {
+  height: 38px; border-radius: 10px;
+  background: #F6F8FB; border: 1px solid #E3E8F0; box-shadow: none; color: #667085;
+}
+.app-sidebar + main > header button[aria-label="Search (Ctrl+K)"]:hover,
+.app-sidebar + main > header button[aria-label="Search (Ctrl+K)"]:focus-visible {
+  background: #fff; border-color: #B3C3DF; box-shadow: 0 0 0 3px rgba(35, 71, 136, 0.08);
+}
+.app-sidebar + main > header button[aria-label="Search (Ctrl+K)"] svg,
+.app-sidebar + main > header button[aria-label="Search (Ctrl+K)"]:hover svg { color: #667085; }
+.app-sidebar + main > header button[aria-label="Search (Ctrl+K)"] kbd {
+  background: #fff; border-color: #E3E8F0; color: #98A2B3; font-weight: 500;
+}
+
+/* You: a navy avatar, your name and a chevron in a soft pill. */
+.app-sidebar + main > header button[aria-label="Your account"] > span {
+  padding: 3px 10px 3px 3px; border-radius: 999px; box-shadow: inset 0 0 0 1px #E6EAF1;
+}
+.app-sidebar + main > header button[aria-label="Your account"] > span:hover,
+.app-sidebar + main > header button[aria-label="Your account"][aria-expanded="true"] > span { background: #F6F8FB; }
+.app-sidebar + main > header button[aria-label="Your account"] > span > span.text-sm { color: #1B2A4A; }
+
+/* --- Top bar, round two --------------------------------------------------------------------------
+   Where the page's own header is white too (My Tasks, a List), the bar has no line under it, so the
+   two read as one header with one line, under the tabs. The bell and you sit 10px apart, each in a
+   hairline ring; on a phone the search is a round button to match them. */
+.app-sidebar + main:has(.mytasks-ui, .location-ui) > header.app-topbar,
+html[data-shell="classic"] .app-sidebar + main:has(.mytasks-ui, .location-ui) > header.app-topbar {
+  border-bottom-color: transparent !important;
+}
+header.app-topbar > div:last-child { gap: 10px; }
+.topbar-title h1 svg, .topbar-title nav > svg:first-child { color: #234788; }
+
+/* The assistant's button: a flat navy circle with a white bubble, no turning colour ring or
+   breathing glow. Its panel keeps its own look. */
+.assistant-launcher { animation: none; box-shadow: 0 6px 16px -6px rgba(27, 42, 74, 0.45); }
+.assistant-launcher-ring { display: none; }
+.assistant-launcher > span:nth-of-type(2) { background: #234788; }
+.assistant-launcher:hover > span:nth-of-type(2) { background: #1B3A72; }
+.assistant-launcher path { stroke: #fff; }
+.assistant-launcher circle { fill: #fff; animation: none; }
+.assistant-hint { background: #fff; border: 1px solid #E3E8F0; }
+.assistant-hint > span { border-color: #E3E8F0; color: #667085; }
+@media (max-width: 639px) {
+  .app-sidebar + main > header button[aria-label="Search (Ctrl+K)"],
+  html[data-shell="classic"] .app-sidebar + main > header button[aria-label="Search (Ctrl+K)"] { width: 36px; height: 36px; flex: none; border-radius: 999px; padding: 0; }
+}
+
+/* --- Stat cards: they stay where they are -------------------------------------------------------
+   Scrolling passes the pointer over every card, so a card that rose, or an icon that grew and
+   tipped, made the whole row shuffle. Under the pointer only the edge and the shadow deepen. */
+.dash-3d .stat-card { transition: box-shadow 160ms ease, border-color 160ms ease; }
+.dash-3d .stat-card:hover { box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 6px 14px -10px rgba(16, 24, 40, 0.18); }
+
+/* Estimate-against-actual, look D: a box filling with water. The body is a soft wash of the
+   colour; two waves drift across its surface at different speeds; it rises on first draw. */
+.water { transition: height 1200ms cubic-bezier(.22, .8, .25, 1); }
+.water-body { position: absolute; inset: 9px 0 0 0; background: linear-gradient(180deg, color-mix(in srgb, var(--water) 16%, white), color-mix(in srgb, var(--water) 24%, white)); }
+.water-wave { position: absolute; left: 0; top: 0; width: 200%; height: 10px; }
+.water-wave path { fill: color-mix(in srgb, var(--water) 16%, white); }
+.water-wave-back { opacity: .6; animation: water-drift 7s linear infinite reverse; }
+.water-wave-back path { fill: color-mix(in srgb, var(--water) 26%, white); }
+.water-wave-front { animation: water-drift 4.5s linear infinite; }
+@keyframes water-drift { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+/* Settled: the waves stop where they are (paused, not reset, so nothing jumps). */
+.water.is-still .water-wave { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .water { transition: none; } .water-wave { animation: none; } }
+
+/* --- The bell: a ringing bell in a circle -----------------------------------------------------------
+   Five looks, each a class beside .header-bell, chosen on Settings -> Notifications (bellStyle.ts):
+     bell-hairline  white circle, thin grey ring, slate bell (the default)
+     bell-tint      soft navy circle, navy ring, navy bell
+     bell-solid     navy circle, white bell
+     bell-outline   white circle, navy ring, filled navy bell
+     bell-raised    white circle with a soft shadow, navy bell
+   It swings when you point at it, and rings twice when a new notification arrives (.is-ringing). */
+.header-bell {
+  position: relative; display: flex; align-items: center; justify-content: center; flex: none;
+  width: 38px; height: 38px; padding: 0 !important; border-radius: 999px;
+  background: #fff; box-shadow: inset 0 0 0 1px #E3E8F0; color: #5B6880;
+  transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
+}
+.header-bell .header-bell-icon { width: 19px; height: 19px; color: inherit; transform-origin: 50% 3px; }
+.header-bell:hover { color: #234788; box-shadow: inset 0 0 0 1px #B3C3DF; background: #F8FAFD; }
+.header-bell .bell-count {
+  position: absolute; top: -2px; right: -3px; min-width: 17px; padding: 0 4px; border-radius: 999px; text-align: center;
+  background: #234788; color: #fff; font-size: 9.5px; font-weight: 600; line-height: 17px; box-shadow: 0 0 0 2px #fff;
+}
+
+.header-bell.bell-tint { background: #EEF2F8; box-shadow: inset 0 0 0 1px #C9D5EA; color: #234788; }
+.header-bell.bell-tint:hover { background: #E3EAF6; box-shadow: inset 0 0 0 1px #9DB2D8; }
+
+.header-bell.bell-solid { background: #234788; box-shadow: 0 4px 10px -4px rgba(35, 71, 136, 0.55); color: #fff; }
+.header-bell.bell-solid:hover { background: #1C3A70; color: #fff; box-shadow: 0 4px 10px -4px rgba(35, 71, 136, 0.55); }
+.header-bell.bell-solid .bell-count { background: #fff; color: #234788; box-shadow: 0 0 0 1.5px #234788; }
+
+.header-bell.bell-outline { box-shadow: inset 0 0 0 1.5px #234788; color: #234788; }
+.header-bell.bell-outline .header-bell-icon path:first-of-type { fill: currentColor; }
+.header-bell.bell-outline:hover { background: #EEF2F8; box-shadow: inset 0 0 0 1.5px #234788; }
+
+.header-bell.bell-raised { box-shadow: 0 0 0 1px rgba(16, 24, 40, 0.04), 0 4px 12px -4px rgba(27, 42, 74, 0.25); color: #234788; }
+.header-bell.bell-raised:hover { box-shadow: 0 0 0 1px rgba(16, 24, 40, 0.05), 0 6px 16px -4px rgba(27, 42, 74, 0.32); background: #fff; }
+
+/* A swing from the top, settling back: once when you point at it, twice when something new comes
+   in -- with the count giving a small pop so the eye goes to it. */
+@keyframes bell-ring {
+  0% { transform: rotate(0); }
+  10% { transform: rotate(16deg); }
+  22% { transform: rotate(-14deg); }
+  34% { transform: rotate(11deg); }
+  46% { transform: rotate(-8deg); }
+  58% { transform: rotate(5deg); }
+  70% { transform: rotate(-3deg); }
+  82% { transform: rotate(1deg); }
+  100% { transform: rotate(0); }
+}
+@keyframes bell-count-pop { 0%, 100% { transform: scale(1); } 30% { transform: scale(1.3); } }
+.header-bell:hover .header-bell-icon,
+.header-bell:focus-visible .header-bell-icon { animation: bell-ring 900ms ease-in-out; }
+.bell-pick:hover .header-bell-icon { animation: bell-ring 900ms ease-in-out; }
+.header-bell.is-ringing .header-bell-icon { animation: bell-ring 900ms ease-in-out 2; }
+.header-bell.is-ringing .bell-count { animation: bell-count-pop 450ms ease-out 2; }
+@media (prefers-reduced-motion: reduce) {
+  .header-bell:hover .header-bell-icon,
+  .header-bell:focus-visible .header-bell-icon,
+  .bell-pick:hover .header-bell-icon,
+  .header-bell.is-ringing .header-bell-icon,
+  .header-bell.is-ringing .bell-count { animation: none; }
 }

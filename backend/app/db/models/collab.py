@@ -48,6 +48,16 @@ class TaskWatcher(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
 
 
+class TaskRead(Base):
+    """When someone last looked at a task's comments: what came after is "New" to them."""
+
+    __tablename__ = "task_reads"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class TaskActivity(Base):
     """One change to a task, for its history (who changed what, when)."""
 

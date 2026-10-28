@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, sendPasswordResetEmail } from 'firebase/auth';
 import { DevSignIn } from '../components/DevSignIn';
+import { BrandLockup } from '../components/BrandMark';
 import { auth } from '../core/firebase';
 import { isAllowedDomain } from '../utils/auth';
 import { Eye, EyeOff } from 'lucide-react';
@@ -230,11 +231,9 @@ export const Login: React.FC = () => {
             >
               {/* On the white form side the logo's own white background disappears, so it sits
                   cleanly above the heading whether or not the file is transparent. */}
-              <img
-                src="/verve-workflow-logo.png"
-                alt="Verve Workflow"
-                style={{ width: '200px', height: 'auto', display: 'block', margin: '0 auto 1.5rem' }}
-              />
+              <div style={{ display: 'flex', justifyContent: 'center', margin: '0 auto 1.75rem' }}>
+                <BrandLockup size={44} />
+              </div>
               <h2 style={{ marginBottom: '0.5rem', textAlign: 'center', color: '#111827', fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.03em' }}>
                 {isRegistering ? 'Create Account' : 'Welcome Back'}
               </h2>

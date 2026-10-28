@@ -6,11 +6,12 @@ import { Link, Navigate } from 'react-router-dom';
 import { useIsAdmin, useWork } from '../WorkContext';
 import { useMyTasks } from '../MyTasksContext';
 import { peopleApi } from '../teams/peopleApi';
-import type { UserRef } from '../api';
+import { peek, type UserRef } from '../api';
 import { dashApi } from './api';
 import { DashboardPage } from './DashboardPage';
 import { DailyThought } from './DailyThought';
 import { FirstRun } from './FirstRun';
+import { LinesSkeleton } from '../Skeleton';
 
 function greeting(now: Date): string {
   const hour = now.getHours();
@@ -26,9 +27,10 @@ function firstName(name: string | null | undefined, email: string): string {
 }
 
 export const HomePage: React.FC = () => {
-  const { workspace, hierarchy, me, allMembers, loading } = useWork();
+  const { workspace, me, allMembers, loading } = useWork();
   const isAdmin = useIsAdmin();
-  const [id, setId] = useState<string | null>(null);
+  // Coming back to this page, draw the board from last time while it is checked.
+  const [id, setId] = useState<string | null>(() => (workspace ? peek(() => dashApi.home(workspace.id))?.id ?? null : null));
   const [error, setError] = useState<string | null>(null);
   // Nothing assigned, and we have finished looking: this is somebody's first day, not a blip
   // while the list loads. The tasks are already fetched for the sidebar, so this costs nothing.
@@ -39,14 +41,14 @@ export const HomePage: React.FC = () => {
   useEffect(() => {
     // Wait for the role before asking for a board: an admin is sent on to the hub below, and
     // fetching first would draw the Company board for a moment on the way there.
-    if (!workspace || !hierarchy || isAdmin) return;
+    if (!workspace || isAdmin) return;
     let current = true;
     setError(null);
     dashApi.home(workspace.id)
       .then((dash) => { if (current) setId(dash.id); })
       .catch((e) => { if (current) setError((e as Error).message); });
     return () => { current = false; };
-  }, [workspace, hierarchy, isAdmin]);
+  }, [workspace, isAdmin]);
 
   // Only looked up when the band will actually show, which is once in someone's working life.
   useEffect(() => {
@@ -78,7 +80,7 @@ export const HomePage: React.FC = () => {
       </div>
     );
   }
-  if (!id) return <p className="p-10 text-center text-sm text-gray-400">{loading || workspace ? 'Loading…' : ''}</p>;
+  if (!id) return <p className="p-10 text-center text-sm text-gray-400">{loading || workspace ? <LinesSkeleton /> : ''}</p>;
   // The greeting moves into the band, where it has something to sit beside; the header keeps
   // the Dashboard's own name so the page still says what you are looking at.
   // No title: this is your own Dashboard, and "My work" above your own work says nothing.

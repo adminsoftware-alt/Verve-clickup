@@ -93,7 +93,8 @@ def test_comments_mentions_replies_and_watchers(api, org):
     assert "reply" in kinds(inbox(api, org, "owner"))
     thread = ok(api.get(f"/tasks/{tid}/comments", "member"))
     assert [c["parent_id"] for c in thread] == [None, first["id"]]
-    assert ok(api.get(f"/workspaces/{org['ws']}/replies", "owner"))[0]["body"] == "On it"
+    reply = next(i for i in inbox(api, org, "owner") if i["kind"] == "reply")
+    assert reply["comment"]["body"] == "On it" and reply["comment"]["parent_id"] == first["id"]
     watchers = ok(api.get(f"/tasks/{tid}/watchers", "owner"))
     assert {w["id"] for w in watchers["watchers"]} == {"owner", "member", "member2"}
 
@@ -102,14 +103,103 @@ def test_assigned_comments_and_reactions(api, org):
     tid = org["task"]["id"]
     c = ok(api.post(f"/tasks/{tid}/comments", "owner", {"body": "Send the file", "assignee_id": "member2"}), 201)
     assert "assigned_comment" in kinds(inbox(api, org, "member2"))
-    todo = ok(api.get(f"/workspaces/{org['ws']}/assigned-comments", "member2"))
-    assert [x["id"] for x in todo] == [c["id"]] and todo[0]["task"]["name"] == "Salary sheet"
+    todos = lambda: ok(api.get(f"/workspaces/{org['ws']}/inbox", "member2", params={"tab": "primary", "group": "comment_todos"}))
+    todo = todos()
+    assert [x["comment"]["id"] for x in todo] == [c["id"]] and todo[0]["task"]["name"] == "Salary sheet"
+    assert todo[0]["comment"]["assignee_id"] == "member2" and todo[0]["comment"]["resolved"] is False
     ok(api.patch(f"/comments/{c['id']}", "member2", {"resolved": True}))
-    assert ok(api.get(f"/workspaces/{org['ws']}/assigned-comments", "member2")) == []
+    assert todos()[0]["comment"]["resolved"] is True
     liked = ok(api.post(f"/comments/{c['id']}/reactions", "member", {"emoji": "👍"}))
     assert liked["reactions"] == [{"emoji": "👍", "count": 1, "mine": True, "users": ["Member"]}]
     assert api.patch(f"/comments/{c['id']}", "member", {"body": "hacked"}).status_code == 403
     assert api.delete(f"/comments/{c['id']}", "member").status_code == 204  # full access may delete
+
+
+def test_replying_from_the_inbox_lands_in_the_thread_and_reads_the_item(api, org):
+    tid = org["task"]["id"]
+    first = ok(api.post(f"/tasks/{tid}/comments", "owner", {"body": "Numbers for @Member2?", "mention_user_ids": ["member2"]}), 201)
+    ok(api.post(f"/tasks/{tid}/comments", "member", {"body": "I have some", "parent_id": first["id"]}), 201)
+    note = next(i for i in inbox(api, org, "member2") if i["kind"] == "mentioned")
+    sent = ok(api.post(f"/notifications/{note['id']}/reply", "member2", {"body": "Sending now"}), 201)
+    assert sent["parent_id"] == first["id"]
+    assert next(i for i in inbox(api, org, "member2") if i["id"] == note["id"])["read"] is True
+    assert "reply" in kinds(inbox(api, org, "owner"))
+    # A reply to a reply still joins the thread's first comment.
+    nested = next(i for i in inbox(api, org, "owner") if i["kind"] == "reply" and i["comment"]["body"] == "Sending now")
+    assert ok(api.post(f"/notifications/{nested['id']}/reply", "owner", {"body": "Thanks"}), 201)["parent_id"] == first["id"]
+    # Only your own items, and only ones about a comment.
+    assert api.post(f"/notifications/{note['id']}/reply", "owner", {"body": "x"}).status_code == 404
+
+
+def test_seen_returns_the_previous_look(api, org):
+    tid = org["task"]["id"]
+    assert ok(api.put(f"/tasks/{tid}/seen", "member", {}))["previous"] is None
+    first = ok(api.put(f"/tasks/{tid}/seen", "member", {}))["previous"]
+    assert first is not None
+    assert ok(api.put(f"/tasks/{tid}/seen", "member", {}))["previous"] >= first
+    assert api.put(f"/tasks/{tid}/seen", "outsider", {}).status_code in (403, 404)
+
+
+def test_mention_tokens_notify_and_read_as_plain_text(api, org):
+    tid = org["task"]["id"]
+    ok(api.post(f"/tasks/{tid}/comments", "owner", {"body": "Can @[Member2](user:member2) check?"}), 201)
+    note = next(i for i in inbox(api, org, "member2") if i["kind"] == "mentioned")
+    assert note["comment"]["body"] == "Can @Member2 check?" and note["data"]["excerpt"] == "Can @Member2 check?"
+    stored = ok(api.get(f"/tasks/{tid}/comments", "owner"))[0]
+    assert [m["id"] for m in stored["mentions"]] == ["member2"]
+    # A token for someone outside the workspace mentions nobody.
+    assert ok(api.post(f"/tasks/{tid}/comments", "owner", {"body": "@[X](user:outsider) hi"}), 201)["mentions"] == []
+
+
+def test_a_mention_added_by_an_edit_is_notified_once(api, org):
+    tid = org["task"]["id"]
+    c = ok(api.post(f"/tasks/{tid}/comments", "owner", {"body": "Draft"}), 201)
+    assert "mentioned" not in kinds(inbox(api, org, "member2"))
+    ok(api.patch(f"/comments/{c['id']}", "owner", {"body": "Draft for @[Member2](user:member2)"}))
+    assert kinds(inbox(api, org, "member2")).count("mentioned") == 1
+    ok(api.patch(f"/comments/{c['id']}", "owner", {"body": "Final for @[Member2](user:member2)"}))
+    assert kinds(inbox(api, org, "member2")).count("mentioned") == 1  # already mentioned: not told again
+    assert [m["id"] for m in ok(api.get(f"/tasks/{tid}/comments", "owner"))[0]["mentions"]] == ["member2"]
+
+
+def test_reactions_tell_the_author_in_one_folded_item(api, org):
+    tid = org["task"]["id"]
+    c = ok(api.post(f"/tasks/{tid}/comments", "owner", {"body": "Filed"}), 201)
+    ok(api.post(f"/comments/{c['id']}/reactions", "member", {"emoji": "👍"}))
+    ok(api.post(f"/comments/{c['id']}/reactions", "member2", {"emoji": "🎉"}))
+    ok(api.post(f"/comments/{c['id']}/reactions", "owner", {"emoji": "👍"}))  # your own: nothing
+    items = [i for i in inbox(api, org, "owner", "other") if i["kind"] == "reaction"]
+    assert len(items) == 1 and items[0]["data"]["count"] == 2 and items[0]["actor"]["id"] == "member2"
+    ok(api.patch(f"/notifications/{items[0]['id']}", "owner", {"read": True}), 204)
+    ok(api.post(f"/comments/{c['id']}/reactions", "member", {"emoji": "✅"}))
+    assert len([i for i in inbox(api, org, "owner", "other") if i["kind"] == "reaction"]) == 2  # read ones are not reused
+
+
+def test_files_on_a_comment_need_only_comment_access_and_go_with_it(api, org):
+    tid = org["task"]["id"]
+    c = ok(api.post(f"/tasks/{tid}/comments", "member2", {"body": "Screenshot attached"}), 201)
+    send = lambda who, cid: api.client.post(f"/api/v2/comments/{cid}/attachments", headers={"X-Test-User": who},
+                                            files={"file": ("shot.png", b"\x89PNG fake", "image/png")})
+    up = ok(send("member2", c["id"]), 201)
+    assert up["filename"] == "shot.png"
+    assert send("owner", c["id"]).status_code == 403  # only the author adds files to a comment
+    listed = ok(api.get(f"/tasks/{tid}/comments", "member"))[0]["attachments"]
+    assert [a["id"] for a in listed] == [up["id"]]
+    assert api.get(f"/attachments/{up['id']}/download", "member").status_code == 200
+    assert api.delete(f"/comments/{c['id']}", "member2").status_code == 204
+    assert api.get(f"/attachments/{up['id']}/download", "member").status_code == 404
+
+
+def test_a_busy_thread_is_one_unread_item_for_each_watcher(api, org):
+    tid = org["task"]["id"]  # member is assigned, so watches
+    for body in ("One", "Two", "Three"):
+        ok(api.post(f"/tasks/{tid}/comments", "owner", {"body": body}), 201)
+    items = [i for i in inbox(api, org, "member", "other") if i["kind"] == "comment"]
+    assert len(items) == 1 and items[0]["data"]["count"] == 3 and items[0]["comment"]["body"] == "Three"
+    ok(api.patch(f"/notifications/{items[0]['id']}", "member", {"read": True}), 204)
+    ok(api.post(f"/tasks/{tid}/comments", "owner", {"body": "Four"}), 201)
+    items = [i for i in inbox(api, org, "member", "other") if i["kind"] == "comment"]
+    assert len(items) == 2 and items[0]["data"]["count"] == 1  # read ones are left alone
 
 
 def test_sharing_something_tells_the_person_it_was_shared_with(api, org):

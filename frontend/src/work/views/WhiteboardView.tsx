@@ -5,6 +5,7 @@ import { ArrowUpRight, Circle, CheckSquare, MousePointer2, PenLine, Square, Stic
 import { workApi } from '../api';
 import { spacesApi } from '../spacesApi';
 import { notify } from '../../components/notify';
+import { LinesSkeleton } from '../Skeleton';
 
 type Kind = 'sticky' | 'rect' | 'ellipse' | 'text' | 'path' | 'arrow';
 interface Item {
@@ -155,7 +156,7 @@ export const WhiteboardView: React.FC<{ viewId: string; canEdit: boolean; listId
     } catch (e) { notify.error(e); }
   };
 
-  if (items === null) return <p className="p-10 text-center text-sm text-gray-400">{status || 'Loading…'}</p>;
+  if (items === null) return <p className="p-10 text-center text-sm text-gray-400">{status || <LinesSkeleton />}</p>;
   const sel = items.find((it) => it.id === selected) ?? null;
 
   return (

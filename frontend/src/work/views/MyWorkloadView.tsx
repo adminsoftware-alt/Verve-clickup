@@ -201,23 +201,23 @@ export const MyWorkloadView: React.FC<{
       {/* --- what the window holds, before any of the detail ---------------------------------- */}
       <div className="grid gap-3 py-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
-          tone="slate" Icon={Gauge} label="Capacity"
+          tone="plain" Icon={Gauge} label="Capacity"
           value={hours(sums.capacity)}
           note={`${sums.workingDays} working day${sums.workingDays === 1 ? '' : 's'} in view`}
         />
         <Stat
-          tone={over ? 'red' : 'teal'} Icon={Droplets} label="Planned"
+          tone={over ? 'red' : 'plain'} Icon={Droplets} label="Planned"
           value={hours(sums.planned)}
           note={sums.capacity ? `${Math.round((sums.planned / sums.capacity) * 100)}% of capacity` : 'no capacity in view'}
           share={sums.capacity ? sums.planned / sums.capacity : 0}
         />
         <Stat
-          tone={over ? 'red' : 'sky'} Icon={Layers} label={over ? 'Over by' : 'Still free'}
+          tone={over ? 'red' : 'plain'} Icon={Layers} label={over ? 'Over by' : 'Still free'}
           value={over ? hours(sums.planned - sums.capacity) : hours(sums.free)}
           note={over ? 'more planned than you have' : 'room left in these days'}
         />
         <Stat
-          tone={sums.overDays ? 'orange' : 'slate'} Icon={TriangleAlert} label="Days over"
+          tone={sums.overDays ? 'orange' : 'plain'} Icon={TriangleAlert} label="Days over"
           value={String(sums.overDays)}
           note={sums.overDays ? 'these days have spilled over' : 'no day is overloaded'}
         />
@@ -464,11 +464,9 @@ const Glass: React.FC<{ planned: number; capacity: number }> = ({ planned, capac
   );
 };
 
+// One look for the figures -- white, a blue icon -- with red and orange kept for a warning.
 const STAT_TONES = {
-  slate: { card: 'border-slate-200 bg-slate-50', badge: 'bg-slate-500 text-white', bar: 'bg-slate-400', value: 'text-slate-900' },
-  teal: { card: 'border-teal-200 bg-teal-50', badge: 'bg-teal-600 text-white', bar: 'bg-teal-500', value: 'text-teal-900' },
-  sky: { card: 'border-sky-200 bg-sky-50', badge: 'bg-sky-600 text-white', bar: 'bg-sky-500', value: 'text-sky-900' },
-  amber: { card: 'border-amber-200 bg-amber-50', badge: 'bg-amber-500 text-white', bar: 'bg-amber-500', value: 'text-amber-900' },
+  plain: { card: 'border-gray-200 bg-white', badge: 'bg-blue-600 text-white', bar: 'bg-blue-500', value: 'text-gray-900' },
   orange: { card: 'border-orange-200 bg-orange-50', badge: 'bg-orange-500 text-white', bar: 'bg-orange-500', value: 'text-orange-900' },
   red: { card: 'border-red-200 bg-red-50', badge: 'bg-red-600 text-white', bar: 'bg-red-500', value: 'text-red-900' },
 } as const;

@@ -12,6 +12,7 @@ import { useWork } from '../WorkContext';
 import { Avatar, Portal } from '../ui';
 import { dashApi, type Dashboard, type PersonBoard } from './api';
 import { DashboardPage } from './DashboardPage';
+import { WordSkeleton } from '../Skeleton';
 
 const nameOf = (p: PersonBoard) => p.user.display_name || p.user.email;
 
@@ -200,7 +201,7 @@ export const PeopleBoards: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => navigate(`/dashboards/people/${encodeURIComponent(p.user.id)}`)}
-                  className="group flex h-full w-full flex-col rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/15"
+                  className="group flex h-full w-full flex-col rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-[border-color,box-shadow] duration-150 hover:border-brand-200 hover:shadow-md focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/15"
                 >
                   <div className="flex items-start gap-3">
                     <span className="rounded-full ring-2 ring-white shadow-sm"><Avatar user={p.user} size={40} /></span>
@@ -225,7 +226,7 @@ export const PeopleBoards: React.FC = () => {
                     {p.teams.length > 2 && <span className="text-[11px] text-gray-400">+{p.teams.length - 2}</span>}
                     {p.pending && <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">Not signed in yet</span>}
                     <span className="ml-auto flex items-center gap-0.5 text-xs font-medium text-gray-400 transition-colors group-hover:text-brand-700">
-                      View <ArrowUpRight size={13} className="transition-transform group-hover:-translate-y-px group-hover:translate-x-px" />
+                      View <ArrowUpRight size={13} />
                     </span>
                   </div>
                 </button>
@@ -340,7 +341,7 @@ export const PersonDashboardPage: React.FC = () => {
         {shown ? <Avatar user={shown} size={34} /> : <span className="skeleton h-[34px] w-[34px] rounded-full" />}
         <div className="min-w-0">
           <p className="truncate text-[15px] font-semibold text-gray-900">
-            {shown ? `${shown.display_name || shown.email}'s dashboard` : 'Loading…'}
+            {shown ? `${shown.display_name || shown.email}'s dashboard` : <WordSkeleton className="w-40" />}
           </p>
           <p className="truncate text-xs text-gray-500">
             {[person?.designation, person?.teams.join(', ')].filter(Boolean).join(' · ') || 'Their own view of their work'}

@@ -44,6 +44,7 @@ KIND_LABELS = {
     "reply": "Replies to my comments",
     "comment": "Comments on tasks I watch",
     "assigned_comment": "Comments assigned to me",
+    "reaction": "Reactions to my comments",
     "status": "Status changes",
     "due_date": "Due date changes",
     "assignees": "Assignee changes",

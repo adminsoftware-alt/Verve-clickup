@@ -55,6 +55,19 @@ def access_problem(db: Session, member: WorkspaceMember) -> Optional[str]:
     return sign_in_problem(workspace, member.role, user)
 
 
+def _membership(db: Session, workspace_id: uuid.UUID, user_id: str) -> Optional[WorkspaceMember]:
+    """The membership, with its workspace fetched in the same round trip (access_problem needs both)."""
+    known = db.identity_map.get(Session.identity_key(WorkspaceMember, (workspace_id, user_id)))
+    if known is not None:
+        return known
+    row = db.execute(
+        select(WorkspaceMember, Workspace)
+        .join(Workspace, Workspace.id == WorkspaceMember.workspace_id)
+        .where(WorkspaceMember.workspace_id == workspace_id, WorkspaceMember.user_id == user_id)
+    ).first()
+    return row[0] if row else None
+
+
 class Access:
     """The caller's standing inside one workspace: role plus explicit shares."""
 
@@ -70,7 +83,7 @@ class Access:
 
     @classmethod
     def for_workspace(cls, db: Session, user_id: str, workspace_id: uuid.UUID) -> "Access":
-        member = db.get(WorkspaceMember, (workspace_id, user_id))
+        member = _membership(db, workspace_id, user_id)
         if member is None:
             raise NotFound("Workspace not found")
         problem = access_problem(db, member)
@@ -92,16 +105,9 @@ class Access:
         """Per item, the highest level granted to any of the caller's Teams in this workspace."""
         if self._team_shares is None:
             self._team_shares = {}
-            my_teams = (
-                select(TeamMember.team_id)
-                .join(Team, Team.id == TeamMember.team_id)
-                .where(TeamMember.user_id == self.user_id, Team.workspace_id == self.workspace_id)
-            )
-            from app.services.work import team_tree
-
-            # Being in a sub-team counts as being in every Team above it.
-            teams = team_tree.ancestors(self.db, list(self.db.scalars(my_teams)))
-            for share in self.db.scalars(select(Share).where(Share.team_id.in_(teams))):
+            # Being in a sub-team counts as being in every Team above it (my_teams includes those).
+            teams = self.my_teams
+            for share in self.db.scalars(select(Share).where(Share.team_id.in_(teams))) if teams else []:
                 key = share_key(share)
                 current = self._team_shares.get(key)
                 if current is None or share.level.rank > current.rank:

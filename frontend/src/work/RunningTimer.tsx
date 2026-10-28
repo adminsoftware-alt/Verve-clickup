@@ -73,13 +73,13 @@ export const RunningTimerChip: React.FC = () => {
   if (!timer) return null;
   const elapsed = (now - new Date(timer.entry.started_at).getTime()) / 1000;
   return (
-    <div className="flex items-center gap-2 rounded-full border border-red-200 bg-red-50 py-1 pl-3 pr-1 text-sm">
-      <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+    <div className="fresh-label flex items-center gap-2 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 py-1 pl-3 pr-1 text-sm">
+      <span className="h-2 w-2 rounded-full bg-amber-500" />
       <Link to={`/l/${timer.list_id}`} className="max-w-48 truncate text-gray-700 no-underline hover:underline" title={timer.task_name}>
         {timer.task_name}
       </Link>
-      <span className="font-mono text-red-700 tabular-nums">{formatClock(elapsed)}</span>
-      <button aria-label="Stop timer" type="button" title="Stop timer" onClick={() => stop().catch((e) => notify.error(e))} className="rounded-full bg-red-500 p-1 text-white hover:bg-red-600">
+      <span className="font-semibold text-amber-800 tabular-nums">{formatClock(elapsed)}</span>
+      <button aria-label="Stop timer" type="button" title="Stop timer" onClick={() => stop().catch((e) => notify.error(e))} className="rounded-full bg-amber-600 p-1 text-white hover:bg-amber-700">
         <Square size={10} fill="currentColor" />
       </button>
     </div>

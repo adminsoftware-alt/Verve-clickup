@@ -2,7 +2,7 @@
 
 import re
 import uuid
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -92,6 +92,25 @@ def members_of(db: Session, team_ids: Sequence[uuid.UUID]) -> Dict[uuid.UUID, Li
     return result
 
 
+def members_and_leads(
+    db: Session, team_ids: Sequence[uuid.UUID]
+) -> Tuple[Dict[uuid.UUID, List[User]], Dict[uuid.UUID, List[str]]]:
+    """members_of and leads_of together, in one query."""
+    members: Dict[uuid.UUID, List[User]] = {tid: [] for tid in team_ids}
+    leads: Dict[uuid.UUID, List[str]] = {tid: [] for tid in team_ids}
+    if team_ids:
+        for team_id, is_lead, user in db.execute(
+            select(TeamMember.team_id, TeamMember.is_lead, User)
+            .join(User, User.id == TeamMember.user_id)
+            .where(TeamMember.team_id.in_(team_ids))
+            .order_by(User.email)
+        ):
+            members[team_id].append(user)
+            if is_lead:
+                leads[team_id].append(user.id)
+    return members, leads
+
+
 def team_out(team: Team, members: List[User], lead_ids: Sequence[str] = (), all_member_ids: Sequence[str] = ()) -> s.TeamOut:
     return s.TeamOut(
         parent_team_id=team.parent_team_id,
@@ -113,7 +132,7 @@ def list_teams(db: Session, access: Access) -> List[s.TeamOut]:
         db.scalars(select(Team).where(Team.workspace_id == access.workspace_id).order_by(func.lower(Team.name)))
     )
     ids = [t.id for t in teams]
-    members, leads = members_of(db, ids), leads_of(db, ids)
+    members, leads = members_and_leads(db, ids)
     children: Dict[uuid.UUID, List[uuid.UUID]] = {}
     for t in teams:
         if t.parent_team_id:

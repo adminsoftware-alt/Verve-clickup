@@ -144,7 +144,9 @@ def _link(n: Notification) -> str:
         return f"{base}/people/teams/{n.data['team_id']}"
     if n.task_id:
         # Straight to the task, open and editable, rather than to a list to find it in.
-        return f"{base}/inbox?task={n.task_id}&n={n.id}"
+        # A comment's notification lands on that comment, not at the top of the task.
+        comment = f"&comment={n.comment_id}" if n.comment_id else ""
+        return f"{base}/inbox?task={n.task_id}&n={n.id}{comment}"
     return f"{base}/inbox"
 
 

@@ -7,26 +7,53 @@
 // It is built the way ClickUp's is, and for the same reason: one flat panel listing every value of
 // every filter is unreadable once a workspace has twenty people and thirty tags. So the panel asks
 // two questions instead. First *what* you want to filter by -- a short, searchable list of fields.
-// Then the values of that one field, and nothing else. What is already set stays visible as chips
-// above, so the panel says what the card is showing without being read top to bottom.
+// Then the values of that one field, and nothing else.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ArrowLeft, CalendarCheck, CalendarClock, CalendarDays, CalendarRange, Check, ChevronDown, ChevronRight, Circle,
-  Flag, Hourglass, Search, SlidersHorizontal, Tag as TagIcon, User, X,
+  ArrowLeft, CalendarCheck, CalendarDays, CalendarRange, Check, ChevronDown, ChevronRight, Circle,
+  CircleCheckBig, CircleDashed, CirclePlay, Filter, Flag, FlagOff, Hourglass, Search, Tag as TagIcon, User, Users,
 } from 'lucide-react';
 
-import { useWork } from '../WorkContext';
+import { useMe, useWork } from '../WorkContext';
+import { Avatar, InitialsAvatar } from '../ui';
 import { workApi, type TagUsage } from '../api';
 import type { Filters } from './api';
+import { LinesSkeleton } from '../Skeleton';
 
-const PANEL_WIDTH = 280;
+const PANEL_WIDTH = 172;
+
+/** Each field's colour, worn by its icon tile so the list is found by colour as much as by word. */
+const TONE: Record<string, string> = {
+  time: '#234788',
+  status_groups: '#3B82F6',
+  priorities: '#EF4444',
+  assignees: '#8B5CF6',
+  due: '#F59E0B',
+  done: '#16A34A',
+  tags: '#EC4899',
+  estimate: '#0EA5E9',
+};
+
+/** The field's icon in a small raised tile of its colour, as on the Dashboard cards. */
+const FieldTile: React.FC<{ field: { key: string; Icon: React.ElementType }; size?: number }> = ({ field, size = 18 }) => (
+  <span className="tile-3d rounded-md" style={{ width: size, height: size, '--tile': TONE[field.key] ?? '#64748B' } as React.CSSProperties}>
+    <field.Icon size={Math.round(size * 0.55)} strokeWidth={2.25} />
+  </span>
+);
 /** Roughly what the panel grows to with a search box and a list; enough to decide which way to open. */
-const PANEL_MAX_HEIGHT = 360;
+const PANEL_MAX_HEIGHT = 400;
 /** Above this many choices the value list gets its own search box. */
 const SEARCHABLE = 8;
 
-type Option = { value: string; label: string; dot?: string };
+/** A value to filter to. Status and priority carry a colour and an icon of their own. */
+type Option = {
+  value: string; label: string; tone?: string; Icon?: React.ElementType;
+  /** A Team: the people it stands for. Picking it ticks every one of them. */
+  members?: string[];
+  /** A person's photo or initials ("HK"), or a Team's, shown before the name. */
+  avatar?: React.ReactNode;
+};
 
 /** One thing a card can be filtered by: which key it writes, and what it offers. */
 type Field = {
@@ -54,9 +81,9 @@ export const ANY_TIME = 'any';
  * Completed matches both.
  */
 const STATUS_OPTIONS: Option[] = [
-  { value: 'not_started', label: 'To do', dot: 'bg-slate-400' },
-  { value: 'active', label: 'In progress', dot: 'bg-sky-500' },
-  { value: 'completed', label: 'Completed', dot: 'bg-emerald-500' },
+  { value: 'not_started', label: 'To do', tone: '#64748B', Icon: CircleDashed },
+  { value: 'active', label: 'In progress', tone: '#3B82F6', Icon: CirclePlay },
+  { value: 'completed', label: 'Completed', tone: '#16A34A', Icon: CircleCheckBig },
 ];
 
 /** The status groups an option stands for. */
@@ -65,11 +92,11 @@ const STATUS_GROUPS: Record<string, string[]> = {
 };
 
 const PRIORITY_OPTIONS: Option[] = [
-  { value: '1', label: 'Urgent', dot: 'bg-red-500' },
-  { value: '2', label: 'High', dot: 'bg-amber-500' },
-  { value: '3', label: 'Normal', dot: 'bg-sky-500' },
-  { value: '4', label: 'Low', dot: 'bg-gray-400' },
-  { value: '0', label: 'No priority', dot: 'bg-gray-200' },
+  { value: '1', label: 'Urgent', tone: '#EF4444', Icon: Flag },
+  { value: '2', label: 'High', tone: '#F59E0B', Icon: Flag },
+  { value: '3', label: 'Normal', tone: '#3B82F6', Icon: Flag },
+  { value: '4', label: 'Low', tone: '#94A3B8', Icon: Flag },
+  { value: '0', label: 'No priority', tone: '#9CA3AF', Icon: FlagOff },
 ];
 
 const DUE_OPTIONS: Option[] = [
@@ -97,11 +124,6 @@ const ESTIMATE_OPTIONS: Option[] = [
   { value: 'missing', label: 'No estimate' },
 ];
 
-const SCHEDULED_OPTIONS: Option[] = [
-  { value: 'yes', label: 'Has a start or due date' },
-  { value: 'no', label: 'Unscheduled' },
-];
-
 /** What a filter reads as on its chip: "Priority: Urgent, High". */
 function chipText(field: Field, f: Filters, name: (token: string) => string): string | null {
   if (field.time) return null;  // the window has its own label, below
@@ -123,20 +145,6 @@ function chipText(field: Field, f: Filters, name: (token: string) => string): st
   // "period" belongs to the card's own period control, not to anything set here.
   if (raw === 'period') return null;
   return field.options.find((o) => o.value === raw)?.label ?? String(raw);
-}
-
-/** Everything this control can set, cleared. What the card itself owns is left alone. */
-function cleared(f: Filters, fields: Field[]): Filters {
-  const out: Filters = { ...f };
-  for (const field of fields) {
-    if (field.time) continue;  // clearing filters must not silently widen the card to all time
-    const raw = f[field.key as keyof Filters];
-    // A date filter reading "period" is the card's period control; clearing it would silently
-    // widen the card to all time.
-    if (raw === 'period') continue;
-    (out as Record<string, unknown>)[field.key] = null;
-  }
-  return out;
 }
 
 const toggle = <T,>(list: T[] | null | undefined, item: T): T[] | null => {
@@ -171,17 +179,25 @@ export const CardFilterMenu: React.FC<{
   /** What the card was built to filter by. Those are part of what the card is, not filters
    *  someone added -- "Clear all filters" keeps them -- so they are not counted on the badge. */
   base?: Filters | null;
-}> = ({ value, disabled, triggerLabel = 'Filter', title = 'Filter this card', compact, hideDue, peopleOnly, time, onApply, base }) => {
+  /** The viewer sees only their own time, so there is nobody to pick under "Whose time". */
+  noPeople?: boolean;
+}> = ({ value, disabled, triggerLabel = 'Filter', title = 'Filter this card', compact, hideDue, peopleOnly, time, onApply, base, noPeople }) => {
   const { members, teams, hierarchy } = useWork();
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const meId = useMe();
+  // Below the button (top), or above it with its bottom edge on the button (bottom); maxHeight keeps it on screen.
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number } | null>(null);
   const [draft, setDraft] = useState<Filters>(value);
   const [openField, setOpenField] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  /** Assignee shows People or Teams, not both in one list. */
+  const [whoTab, setWhoTab] = useState<'people' | 'teams'>('people');
   const [tags, setTags] = useState<TagUsage[] | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const timer = useRef<number | undefined>(undefined);
+  /** A change waiting for its save; sent at once if the panel closes first. */
+  const pending = useRef<Filters | null>(null);
   const open = pos !== null;
 
   const personName = (token: string) => {
@@ -193,11 +209,18 @@ export const CardFilterMenu: React.FC<{
   };
 
   const people: Option[] = useMemo(() => [
-    { value: 'me', label: 'Me' },
-    ...(peopleOnly ? [] : [{ value: 'none', label: 'Nobody' }]),
-    ...teams.map((t) => ({ value: `team:${t.id}`, label: t.name })),
-    ...members.map((m) => ({ value: m.user.id, label: m.user.display_name || m.user.email })),
-  ], [members, teams, peopleOnly]);
+    { value: 'me', label: 'Me', avatar: (() => { const m = members.find((x) => x.user.id === meId); return m ? <Avatar user={m.user} size={20} /> : undefined; })() },
+    // Everyone ticks every person at once, the way a Team ticks its own people.
+    {
+      value: 'everyone', label: 'Everyone', members: members.map((m) => m.user.id),
+      avatar: <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#EEF2F8] text-[#234788]"><Users size={12} strokeWidth={2.25} /></span>,
+    },
+    ...teams.map((t) => ({
+      value: `team:${t.id}`, label: t.name, members: t.members.map((u) => u.id),
+      avatar: <InitialsAvatar id={t.id} name={t.name} size={20} />,
+    })),
+    ...members.map((m) => ({ value: m.user.id, label: m.user.display_name || m.user.email, avatar: <Avatar user={m.user} size={20} /> })),
+  ], [members, teams, meId]);
 
   // The order is the order they get asked about: what state is it in, how urgent, whose it is,
   // then the dates, then the two questions about sizing.
@@ -209,7 +232,7 @@ export const CardFilterMenu: React.FC<{
     const when: Field[] = time
       ? [{ key: 'time', label: 'Time', Icon: CalendarRange, many: false, time: true, options: time.options }]
       : [];
-    if (peopleOnly) return [...when, assignee];
+    if (peopleOnly) return noPeople ? when : [...when, assignee];
     return [
       ...when,
       { key: 'status_groups', label: 'Status', Icon: Circle, many: true, options: STATUS_OPTIONS },
@@ -220,16 +243,9 @@ export const CardFilterMenu: React.FC<{
       { key: 'tags', label: 'Tags', Icon: TagIcon, many: true, lazy: true,
         options: (tags ?? []).map((t) => ({ value: t.name, label: t.name })) },
       { key: 'estimate', label: 'Time estimate', Icon: Hourglass, many: false, options: ESTIMATE_OPTIONS },
-      { key: 'scheduled', label: 'Scheduled', Icon: CalendarClock, many: false, options: SCHEDULED_OPTIONS },
     ];
-  }, [people, peopleOnly, hideDue, tags, time]);
+  }, [people, peopleOnly, hideDue, tags, time, noPeople]);
 
-  const chips = useMemo(
-    () => fields.map((f) => ({ field: f, text: chipText(f, draft, personName) })).filter((c) => c.text !== null),
-    // personName only reads members/teams, which `fields` already depends on.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fields, draft],
-  );
   const activeCount = useMemo(
     () => fields.filter((f) => {
       const now = chipText(f, value, personName);
@@ -242,18 +258,41 @@ export const CardFilterMenu: React.FC<{
   // A run of ticks is one save rather than one per click, so the card is re-read once.
   const change = (next: Filters) => {
     setDraft(next);
+    pending.current = next;
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => onApply(next), 400);
+    timer.current = window.setTimeout(() => { pending.current = null; onApply(next); }, 400);
   };
+  // Closing the panel inside those 400ms used to drop the last tick or untick; now it is sent.
   const flush = (next?: Filters) => {
     window.clearTimeout(timer.current);
-    if (next) onApply(next);
+    const send = next ?? pending.current;
+    pending.current = null;
+    if (send) onApply(send);
+  };
+
+  /** Filters set in the panel right now, past what the card was built with. */
+  const draftCount = fields.filter((f) => {
+    const now = chipText(f, draft, personName);
+    return now !== null && (!base || now !== chipText(f, base, personName));
+  }).length;
+  /** Every filter off at once: what the card was built with stays, and so does its time window. */
+  const clearAll = () => {
+    const next: Filters = { ...draft };
+    for (const f of fields) {
+      if (f.time) continue;
+      const raw = draft[f.key as keyof Filters];
+      if (raw === 'period') continue; // the card's own period control, not a filter someone added
+      (next as Record<string, unknown>)[f.key] = base?.[f.key as keyof Filters] ?? null;
+    }
+    setDraft(next);
+    flush(next);
   };
 
   const show = () => {
     if (open || !triggerRef.current) { setPos(null); return; }
     setDraft(value);
-    setOpenField(null);
+    // One filter only (an Employee's own time card has just Time): open straight on its choices.
+    setOpenField(fields.length === 1 ? fields[0].label : null);
     setSearch('');
     const rect = triggerRef.current.getBoundingClientRect();
     // Hang it from the left of its trigger, the way a dropdown is expected to open, and only
@@ -263,11 +302,13 @@ export const CardFilterMenu: React.FC<{
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 8));
     // Below the trigger, unless there is more room above it -- a filter button low on a long
     // Dashboard would otherwise open a panel that runs off the bottom of the window.
-    const room = window.innerHeight - rect.bottom;
-    const top = room < PANEL_MAX_HEIGHT && rect.top > room
-      ? Math.max(8, rect.top - Math.min(PANEL_MAX_HEIGHT, rect.top - 8) - 4)
-      : rect.bottom + 4;
-    setPos({ top, left });
+    // Opening upwards, the panel's bottom edge sits on the button whatever its height, so it never
+    // floats off towards the top of the window with a gap under it.
+    const below = window.innerHeight - rect.bottom - 12;
+    const above = rect.top - 12;
+    setPos(below < PANEL_MAX_HEIGHT && above > below
+      ? { bottom: window.innerHeight - rect.top + 4, left, maxHeight: above }
+      : { top: rect.bottom + 4, left, maxHeight: below });
   };
 
   useEffect(() => {
@@ -310,12 +351,9 @@ export const CardFilterMenu: React.FC<{
   }, [openField, tags, hierarchy]);
 
   const field = fields.find((f) => f.label === openField || f.key === openField);
-
-  /** The current value of a field, for the grey note beside it in the list. */
-  const valueOf = (f: Field): string | null => {
-    if (f.time) return f.options.find((o) => o.value === time?.value)?.label ?? 'Custom range';
-    return chipText(f, draft, personName);
-  };
+  const splitWho = field?.key === 'assignees' && teams.length > 0;
+  /** The open field's choices, on the People or Teams side for Assignee. */
+  const listed = (field?.options ?? []).filter((o) => !splitWho || (whoTab === 'teams') === o.value.startsWith('team:'));
 
   const pick = (f: Field, option: Option) => {
     if (f.time && time) {
@@ -332,6 +370,14 @@ export const CardFilterMenu: React.FC<{
       change({ ...draft, status_groups: (next.length ? next : null) as Filters['status_groups'] });
       return;
     }
+    if (option.members) {
+      // A Team is shorthand for its people: all on if any is missing, all off if all are on.
+      const on = ((draft.assignees ?? []) as string[]).filter((v) => v !== option.value);
+      const all = option.members.length > 0 && option.members.every((id) => on.includes(id));
+      const next = all ? on.filter((id) => !option.members!.includes(id)) : [...new Set([...on, ...option.members])];
+      change({ ...draft, assignees: next.length ? next : null });
+      return;
+    }
     if (f.many) {
       const list = (draft[f.key as keyof Filters] as (string | number)[] | null | undefined) ?? null;
       const item = f.key === 'priorities' ? Number(option.value) : option.value;
@@ -342,8 +388,15 @@ export const CardFilterMenu: React.FC<{
     change({ ...draft, [f.key]: on ? null : option.value } as Filters);
   };
 
+  /** A Team (or Everyone) is on when each of its people is; an older filter saved the Team itself. */
+  const allOf = (option: Option) => {
+    const on = (draft.assignees ?? []) as string[];
+    return on.includes(option.value) || (!!option.members?.length && option.members.every((id) => on.includes(id)));
+  };
+
   const isOn = (f: Field, option: Option) => {
     if (f.time) return time?.value === option.value;
+    if (option.members) return allOf(option);
     if (f.key === 'status_groups') {
       const on = (draft.status_groups ?? []) as string[];
       return (STATUS_GROUPS[option.value] ?? [option.value]).every((g) => on.includes(g));
@@ -355,6 +408,16 @@ export const CardFilterMenu: React.FC<{
     return raw === option.value;
   };
 
+  /** How many choices are on in a field: a Team counts as its people, a single-choice field as one. */
+  const pickedCount = (f: Field): number => {
+    if (f.time) return time && time.value !== ANY_TIME ? 1 : 0;
+    const raw = draft[f.key as keyof Filters];
+    if (raw === null || raw === undefined || raw === 'period') return 0;
+    if (f.key === 'status_groups') return f.options.filter((o) => isOn(f, o)).length;
+    if (Array.isArray(raw)) return new Set((raw as (string | number)[]).map(String)).size;
+    return 1;
+  };
+
   const clearField = (f: Field) => change({ ...draft, [f.key]: null } as Filters);
 
   if (disabled) {
@@ -362,7 +425,7 @@ export const CardFilterMenu: React.FC<{
     if (compact) {
       return (
         <span title={`${activeCount} filter${activeCount === 1 ? '' : 's'}`} className="flex items-center gap-1 rounded-lg border border-gray-200 p-1.5 text-[10px] font-semibold text-gray-500">
-          <SlidersHorizontal size={12} /> {activeCount}
+          <Filter size={12} /> {activeCount}
         </span>
       );
     }
@@ -383,18 +446,17 @@ export const CardFilterMenu: React.FC<{
         onClick={show}
         aria-expanded={open}
         aria-label={activeCount ? `${title} (${activeCount} set)` : title}
-        title={title}
-        className={`no-print relative flex items-center gap-1.5 rounded-lg border font-medium shadow-sm ${
-          compact ? 'p-1.5' : 'px-2.5 py-1.5 text-xs'} ${
-          activeCount
-            ? 'border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'}`}
+        data-active={activeCount > 0 ? '' : undefined}
+        className={compact
+          ? `no-print cf-trigger relative flex items-center gap-1.5 rounded-lg border p-1.5 font-medium shadow-sm ${activeCount ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-gray-200 bg-white text-gray-700'}`
+          : 'no-print cf-pill relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium'}
       >
         {compact ? (
           <>
-            <SlidersHorizontal size={13} className={activeCount ? 'text-teal-600' : 'text-gray-500'} />
+            {/* A funnel in a small tile of the card's own colour (--tile), filled once filters are set. */}
+            <Filter size={13} className="cf-i-funnel" />
             {activeCount > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-teal-600 px-1 text-[9px] font-semibold leading-none text-white">
+              <span className="cf-badge absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-teal-600 px-1 text-[9px] font-semibold leading-none text-white">
                 {activeCount}
               </span>
             )}
@@ -403,11 +465,11 @@ export const CardFilterMenu: React.FC<{
           <>
             {triggerLabel}
             {activeCount > 0 && (
-              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-semibold leading-none text-white">
+              <span className="cf-pill-count flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none">
                 {activeCount}
               </span>
             )}
-            <ChevronDown size={13} className={activeCount ? 'text-teal-500' : 'text-gray-400'} />
+            <ChevronDown size={13} className={`cf-pill-caret transition-transform ${open ? 'rotate-180' : ''}`} />
           </>
         )}
       </button>
@@ -418,57 +480,56 @@ export const CardFilterMenu: React.FC<{
           role="dialog"
           aria-label={title}
           className="fixed z-50 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl"
-          style={{ top: pos.top, left: pos.left, width: PANEL_WIDTH }}
+          style={{ top: pos.top, bottom: pos.bottom, left: pos.left, width: PANEL_WIDTH, maxHeight: pos.maxHeight, overflowY: 'auto' }}
         >
-          {/* What the card is filtered by right now, whichever view is open. */}
-          {chips.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1 border-b border-gray-100 bg-gray-50/70 px-2 py-1.5">
-              {chips.map(({ field: f, text }) => (
-                <span key={String(f.key)} className="flex max-w-full items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-700 ring-1 ring-gray-200">
-                  <span className="truncate"><span className="text-gray-400">{f.label}:</span> {text}</span>
-                  <button type="button" aria-label={`Clear ${f.label}`} onClick={() => clearField(f)} className="text-gray-400 hover:text-gray-700">
-                    <X size={11} />
-                  </button>
-                </span>
-              ))}
-              <button
-                type="button"
-                onClick={() => { const next = cleared(draft, fields); flush(next); setDraft(next); }}
-                className="ml-auto text-[11px] text-gray-500 hover:text-gray-800"
-              >
-                Clear all
-              </button>
-            </div>
-          )}
-
           {!field ? (
             // --- step one: what to filter by -----------------------------------------------
             <>
-              <label className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1.5">
-                <Search size={13} className="shrink-0 text-gray-400" />
-                <input
-                  ref={searchRef}
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search…"
-                  aria-label="Search filters"
-                  className="w-full bg-transparent text-[13px] text-gray-800 outline-none placeholder:text-gray-400"
-                />
-              </label>
-              <div className="max-h-72 overflow-y-auto py-1">
+              {/* What is set, and the one click that takes it all off. */}
+              <div className="flex items-center gap-2 border-b border-gray-100 px-2.5 py-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Filters</span>
+                {draftCount > 0 && (
+                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-[#234788] px-1 text-[10px] font-bold leading-none text-white">{draftCount}</span>
+                )}
+                {/* Only when there is something to take off, and then in rose, so it is found at a glance. */}
+                {draftCount > 0 && (
+                  <button type="button" onClick={clearAll} className="filter-clear ml-auto">Clear all</button>
+                )}
+              </div>
+              {/* A search only earns its row when there are enough filters to look through. */}
+              {fields.length > 4 && (
+                <label className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1">
+                  <Search size={13} className="shrink-0 text-gray-400" />
+                  <input
+                    ref={searchRef}
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search…"
+                    aria-label="Search filters"
+                    className="w-full bg-transparent text-[13px] text-gray-800 outline-none placeholder:text-gray-400"
+                  />
+                </label>
+              )}
+              <div className="max-h-[23rem] overflow-y-auto py-1">
                 {fields.filter((f) => matches(f.label)).map((f) => {
-                  const text = valueOf(f);
+                  const count = pickedCount(f);
                   return (
                     <button
                       key={String(f.key)}
                       type="button"
-                      onClick={() => { setOpenField(f.label); setSearch(''); }}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50"
+                      onClick={() => { setOpenField(f.label); setSearch(''); setWhoTab('people'); }}
+                      className="group/row mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12.5px] font-medium text-gray-700 transition-colors hover:bg-gray-100/80 hover:text-gray-900"
                     >
-                      <f.Icon size={14} className="shrink-0 text-gray-400" />
-                      <span className="flex-1 truncate">{f.label}</span>
-                      {text && <span className="max-w-24 truncate text-[11px] text-teal-700">{text}</span>}
-                      <ChevronRight size={13} className="shrink-0 text-gray-300" />
+                      <FieldTile field={{ key: String(f.key), Icon: f.Icon }} />
+                      {/* Only how many are picked, as a small number: the picks themselves are one
+                          click away, and spelling them out made the panel wide and tall. */}
+                      <span className="min-w-0 flex-1 whitespace-nowrap">{f.label}</span>
+                      {count > 0 && (
+                        <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-[#234788] px-1 text-[10px] font-semibold tabular-nums text-white" aria-label={`${count} picked`}>
+                          {count}
+                        </span>
+                      )}
+                      <ChevronRight size={13} className="shrink-0 text-gray-300 transition-transform group-hover/row:translate-x-0.5 group-hover/row:text-gray-500" />
                     </button>
                   );
                 })}
@@ -481,59 +542,86 @@ export const CardFilterMenu: React.FC<{
             // --- step two: the values of that one field -------------------------------------
             <>
               <div className="flex items-center gap-1.5 border-b border-gray-100 px-2 py-1.5">
-                <button
-                  type="button"
-                  onClick={() => { setOpenField(null); setSearch(''); }}
-                  aria-label="Back to all filters"
-                  className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-                >
-                  <ArrowLeft size={14} />
-                </button>
-                <field.Icon size={14} className="shrink-0 text-gray-400" />
-                <span className="flex-1 truncate text-[13px] font-medium text-gray-800">{field.label}</span>
+                {fields.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => { setOpenField(null); setSearch(''); }}
+                    aria-label="Back to all filters"
+                    className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                  >
+                    <ArrowLeft size={14} />
+                  </button>
+                )}
+                <FieldTile field={{ key: String(field.key), Icon: field.Icon }} size={18} />
+                <span className="flex-1 truncate text-[13px] font-semibold text-gray-800">{field.label}</span>
                 {!field.time && chipText(field, draft, personName) && (
-                  <button type="button" onClick={() => clearField(field)} className="text-[11px] text-gray-500 hover:text-gray-800">Clear</button>
+                  <button type="button" onClick={() => clearField(field)} className="filter-clear">Clear</button>
                 )}
               </div>
 
-              {field.options.length > SEARCHABLE && (
-                <label className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1.5">
+              {splitWho && (
+                <div className="border-b border-gray-100 px-2.5 py-2">
+                  <div className="grid grid-cols-2 rounded-lg bg-gray-100 p-0.5 text-xs font-semibold" role="tablist" aria-label="People or Teams">
+                    {(['people', 'teams'] as const).map((t) => (
+                      <button key={t} type="button" role="tab" aria-selected={whoTab === t} onClick={() => { setWhoTab(t); setSearch(''); }}
+                        className={`flex items-center justify-center gap-1.5 rounded-md py-1 transition-colors ${whoTab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}>
+                        {t === 'people' ? <User size={12} /> : <Users size={12} />} {t === 'people' ? 'People' : 'Teams'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {listed.length > SEARCHABLE && (
+                <label className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1">
                   <Search size={13} className="shrink-0 text-gray-400" />
                   <input
                     ref={searchRef}
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder={`Search ${field.label.toLowerCase()}…`}
+                    placeholder={splitWho ? `Search ${whoTab}…` : `Search ${field.label.toLowerCase()}…`}
                     aria-label={`Search ${field.label}`}
                     className="w-full bg-transparent text-[13px] text-gray-800 outline-none placeholder:text-gray-400"
                   />
                 </label>
               )}
 
-              <div className="max-h-72 overflow-y-auto py-1">
+              <div className="max-h-72 space-y-0.5 overflow-y-auto py-1.5">
                 {field.lazy && tags === null ? (
-                  <p className="px-3 py-3 text-center text-xs text-gray-400">Loading…</p>
-                ) : field.options.filter((o) => matches(o.label)).length === 0 ? (
+                  <p className="px-3 py-3 text-center text-xs text-gray-400"><LinesSkeleton /></p>
+                ) : listed.filter((o) => matches(o.label)).length === 0 ? (
                   <p className="px-3 py-3 text-center text-xs text-gray-400">
                     {field.lazy ? 'No tags in the Spaces you can see.' : `Nothing called “${search}”.`}
                   </p>
                 ) : (
-                  field.options.filter((o) => matches(o.label)).map((o) => {
+                  listed.filter((o) => matches(o.label)).map((o) => {
                     const on = isOn(field, o);
+                    const tone = o.tone ?? '#234788';
+                    // Picked rows take a light wash of their own colour, so "In progress" picked
+                    // looks blue and "Urgent" red; the tick sits at the end, where it is scanned.
                     return (
                       <button
                         key={o.value}
                         type="button"
+                        role={field.many ? 'checkbox' : 'radio'}
+                        aria-checked={on}
                         onClick={() => pick(field, o)}
-                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] ${
-                          on ? 'bg-teal-50/70 font-medium text-teal-900' : 'text-gray-700 hover:bg-gray-50'}`}
+                        style={{ '--opt': tone } as React.CSSProperties}
+                        className={`filter-opt mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12.5px] transition-colors ${
+                          on ? 'is-on font-semibold text-gray-900' : 'font-medium text-gray-700 hover:bg-gray-100/80'}`}
                       >
-                        <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
-                          field.many ? 'rounded' : 'rounded-full'} ${on ? 'border-teal-500 bg-teal-500 text-white' : 'border-gray-300'}`}>
-                          {on && <Check size={10} strokeWidth={3} />}
-                        </span>
-                        {o.dot && <span className={`h-2 w-2 shrink-0 rounded-full ${o.dot}`} />}
+                        {o.avatar}
+                        {o.Icon && (
+                          <span className="filter-opt-icon flex h-5 w-5 shrink-0 items-center justify-center rounded-md">
+                            <o.Icon size={12} strokeWidth={2.25} fill={o.Icon === Flag ? 'currentColor' : 'none'} />
+                          </span>
+                        )}
                         <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                        {o.members && o.value.startsWith('team:') && (
+                          <span className="shrink-0 rounded-full bg-gray-100 px-1.5 text-[11px] font-medium text-gray-500" title={`${o.members.length} in this Team`}>{o.members.length}</span>
+                        )}
+                        <span className={`filter-opt-check flex h-4 w-4 shrink-0 items-center justify-center ${field.many ? 'rounded-[5px]' : 'rounded-full'} ${on ? 'text-white' : 'border border-gray-300'}`}>
+                          {on && <Check size={10} strokeWidth={3.5} />}
+                        </span>
                       </button>
                     );
                   })

@@ -3,6 +3,7 @@ import { Folder, List as ListIcon, Trash2, X } from 'lucide-react';
 import { workApi, type LocationKind, type TaskGroup } from './api';
 import { Portal } from './ui';
 import { ask } from '../components/ask';
+import { LinesSkeleton } from './Skeleton';
 
 const COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#ec4899', '#64748b'];
 const WHERE: Record<LocationKind, string> = { space: 'Space', folder: 'Folder', list: 'List' };
@@ -47,7 +48,7 @@ export const GroupsDialog: React.FC<{
               </form>
             )}
             {error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-            {!groups ? <p className="text-sm text-gray-400">Loading…</p> : groups.length === 0 ? <p className="text-sm text-gray-400">No groups yet.</p> : (
+            {!groups ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : groups.length === 0 ? <p className="text-sm text-gray-400">No groups yet.</p> : (
               <ul className="divide-y divide-gray-100">
                 {groups.map((g) => {
                   const own = g.location === kind && g.location_id === id;

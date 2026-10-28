@@ -21,8 +21,25 @@ class CommentIn(BaseModel):
 
 class CommentUpdate(BaseModel):
     body: Optional[Body] = None
+    # Mentions picked while editing; the tokens in the new body count either way.
+    mention_user_ids: Optional[List[str]] = Field(default=None, max_length=50)
+    mention_team_ids: Optional[List[uuid.UUID]] = Field(default=None, max_length=20)
     assignee_id: Optional[str] = None
     resolved: Optional[bool] = None
+
+
+class ReplyIn(BaseModel):
+    """A reply typed into the Inbox: it lands in the thread the notification is about."""
+
+    body: Body
+    mention_user_ids: List[str] = Field(default_factory=list, max_length=50)
+    mention_team_ids: List[uuid.UUID] = Field(default_factory=list, max_length=20)
+
+
+class SeenOut(BaseModel):
+    """When you had last looked, before this look: comments after it are new to you."""
+
+    previous: Optional[datetime]
 
 
 class ReactionIn(BaseModel):
@@ -34,6 +51,13 @@ class ReactionOut(BaseModel):
     count: int
     mine: bool
     users: List[str]
+
+
+class CommentFileOut(BaseModel):
+    id: uuid.UUID
+    filename: str
+    content_type: str
+    size: int
 
 
 class CommentOut(BaseModel):
@@ -51,6 +75,7 @@ class CommentOut(BaseModel):
     edited_at: Optional[datetime]
     reactions: List[ReactionOut]
     can_edit: bool
+    attachments: List[CommentFileOut] = Field(default_factory=list)
 
 
 class TaskRefOut(BaseModel):
@@ -61,10 +86,6 @@ class TaskRefOut(BaseModel):
     # Shown on the row, and what the Inbox's priority and due filters sort on.
     priority: Optional[int] = None
     due_date: Optional[datetime] = None
-
-
-class CommentWithTask(CommentOut):
-    task: TaskRefOut
 
 
 class ActivityOut(BaseModel):

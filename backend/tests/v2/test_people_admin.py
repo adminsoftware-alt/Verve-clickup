@@ -390,6 +390,27 @@ def test_profile_photos(api, ws, tmp_path, monkeypatch):
     assert api.client.get(f"/api/v2/{path}").status_code == 404
 
 
+def test_space_pictures(api, ws, tmp_path, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+    space = ok(api.post(f"/workspaces/{ws}/spaces", "owner", {"name": "Clients", "icon": "🚀"}), 201)
+    url = f"/workspaces/{ws}/spaces/{space['id']}/icon"
+    r = api._call("PUT", url, "owner", files={"file": ("logo.png", PNG, "image/png")})
+    assert r.status_code == 200
+    icon = r.json()["icon"]
+    assert icon.startswith("img:")
+    assert api.client.get(f"/api/v2/space-icons/{icon[4:]}").content == PNG  # no sign-in needed
+    shown = next(s for s in ok(api.get(f"/workspaces/{ws}/hierarchy", "owner"))["spaces"] if s["id"] == space["id"])
+    assert shown["icon"] == icon
+    assert api._call("PUT", url, "owner", files={"file": ("x.png", b"not an image", "image/png")}).status_code == 400
+    assert api._call("PUT", url, "member", files={"file": ("logo.png", PNG, "image/png")}).status_code == 403
+    assert api.delete(url, "owner").status_code == 204
+    assert api.client.get(f"/api/v2/space-icons/{icon[4:]}").status_code == 404
+    shown = next(s for s in ok(api.get(f"/workspaces/{ws}/hierarchy", "owner"))["spaces"] if s["id"] == space["id"])
+    assert shown["icon"] is None
+
+
 def test_email_status_and_test(api, ws):
     assert ok(api.get(f"/workspaces/{ws}/email-status", "owner"))["configured"] is False
     r = api.post(f"/workspaces/{ws}/email-test", "owner")

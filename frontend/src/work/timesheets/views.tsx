@@ -218,7 +218,7 @@ export const FilterBar: React.FC<{
             />
             <p className="mt-1 text-[11px] text-gray-400">Hours and minutes, e.g. 2h, 45m, 1h 30m.</p>
             <div className="mt-2.5 flex items-center justify-between border-t border-gray-100 pt-2">
-              <button type="button" onClick={() => { setAmount(''); set({ trackedOp: null, trackedSeconds: null }); close(); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
+              <button type="button" onClick={() => { setAmount(''); set({ trackedOp: null, trackedSeconds: null }); close(); }} className="filter-clear">Clear</button>
               <button type="submit" className="rounded-md bg-brand-600 px-3 py-1 text-xs font-medium text-white hover:bg-brand-700">Apply</button>
             </div>
           </form>

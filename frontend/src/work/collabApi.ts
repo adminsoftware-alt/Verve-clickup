@@ -9,9 +9,11 @@ export interface Comment {
   id: string; task_id: string; parent_id: string | null; user: UserRef | null; body: string;
   mentions: UserRef[]; mention_teams: TeamRef[]; assignee: UserRef | null; resolved_at: string | null;
   resolved_by: string | null; created_at: string; edited_at: string | null; reactions: Reaction[]; can_edit: boolean;
+  attachments: CommentFile[];
 }
+/** A file sent with a comment. */
+export interface CommentFile { id: string; filename: string; content_type: string; size: number }
 export interface TaskRef { id: string; name: string; list_id: string; status: Status | null; priority?: number | null; due_date?: string | null }
-export interface CommentWithTask extends Comment { task: TaskRef }
 export interface Activity { id: string; user: UserRef | null; kind: string; data: Record<string, unknown>; created_at: string }
 export interface ChecklistItem { id: string; name: string; resolved: boolean; orderindex: number; assignee: UserRef | null }
 export interface Checklist { id: string; name: string; orderindex: number; items: ChecklistItem[] }
@@ -32,7 +34,7 @@ export const inboxFilterCount = (f: InboxFilters) =>
   f.groups.length + f.priority.length + (f.due ? 1 : 0);
 export interface InboxItem {
   id: string; kind: string; category: 'primary' | 'other'; actor: UserRef | null; task: TaskRef | null;
-  comment: { id: string; body: string } | null; reminder: { id: string; title: string; remind_at: string } | null;
+  comment: { id: string; body: string; parent_id: string | null; assignee_id: string | null; resolved: boolean } | null; reminder: { id: string; title: string; remind_at: string } | null;
   data: Record<string, unknown>; read: boolean; cleared: boolean; saved: boolean; snoozed_until: string | null; created_at: string;
 }
 export interface InboxCounts { primary: number; other: number; later: number }
@@ -53,13 +55,18 @@ async function upload<T>(path: string, file: File): Promise<T> {
   return sendForm<T>('POST', path, form);
 }
 
-/** Download an attachment with the user's token, then open or save it. */
-export async function openAttachment(a: Attachment, save = false): Promise<void> {
+/** An attachment's bytes, fetched with the user's token. */
+export async function attachmentBlob(id: string): Promise<Blob> {
   const user = auth.currentUser;
   if (!user) throw new ApiError(401, 'Not signed in');
-  const res = await fetch(`${API_V2}/attachments/${a.id}/download`, { headers: { Authorization: `Bearer ${await user.getIdToken()}` } });
+  const res = await fetch(`${API_V2}/attachments/${id}/download`, { headers: { Authorization: `Bearer ${await user.getIdToken()}` } });
   if (!res.ok) throw new ApiError(res.status, 'Could not download the file');
-  const url = URL.createObjectURL(await res.blob());
+  return res.blob();
+}
+
+/** Download an attachment with the user's token, then open or save it. */
+export async function openAttachment(a: Pick<Attachment, 'id' | 'filename'>, save = false): Promise<void> {
+  const url = URL.createObjectURL(await attachmentBlob(a.id));
   if (save) {
     const link = document.createElement('a');
     link.href = url;
@@ -76,12 +83,14 @@ export const collabApi = {
   comments: (taskId: string) => request<Comment[]>('GET', `/tasks/${taskId}/comments`),
   addComment: (taskId: string, body: { body: string; parent_id?: string | null; mention_user_ids?: string[]; mention_team_ids?: string[]; assignee_id?: string | null }) =>
     request<Comment>('POST', `/tasks/${taskId}/comments`, body),
-  updateComment: (id: string, body: Partial<{ body: string; assignee_id: string | null; resolved: boolean }>) => request<Comment>('PATCH', `/comments/${id}`, body),
+  updateComment: (id: string, body: Partial<{ body: string; assignee_id: string | null; resolved: boolean; mention_user_ids: string[]; mention_team_ids: string[] }>) =>
+    request<Comment>('PATCH', `/comments/${id}`, body),
+  /** A file sent with your own comment; comment access is enough. */
+  addCommentFile: (commentId: string, file: File) => upload<CommentFile>(`/comments/${commentId}/attachments`, file),
   deleteComment: (id: string) => request('DELETE', `/comments/${id}`),
   react: (id: string, emoji: string) => request<Comment>('POST', `/comments/${id}/reactions`, { emoji }),
-  assignedComments: (ws: string, includeResolved = false) =>
-    request<CommentWithTask[]>('GET', `/workspaces/${ws}/assigned-comments`, undefined, { include_resolved: includeResolved }),
-  replies: (ws: string) => request<CommentWithTask[]>('GET', `/workspaces/${ws}/replies`),
+  /** Mark the task's comments seen; `previous` is when you had last looked, before now. */
+  seen: (taskId: string) => request<{ previous: string | null }>('PUT', `/tasks/${taskId}/seen`, {}),
 
   // history and watchers
   activity: (taskId: string) => request<Activity[]>('GET', `/tasks/${taskId}/activity`),
@@ -121,6 +130,9 @@ export const collabApi = {
   counts: (ws: string) => request<InboxCounts>('GET', `/workspaces/${ws}/inbox/counts`),
   updateNotification: (id: string, body: Partial<{ read: boolean; cleared: boolean; saved: boolean; snoozed_until: string; unsnooze: boolean }>) =>
     request('PATCH', `/notifications/${id}`, body),
+  /** Reply in the thread a notification is about; the item counts as read. */
+  replyFromInbox: (id: string, body: { body: string; mention_user_ids: string[]; mention_team_ids: string[] }) =>
+    request<Comment>('POST', `/notifications/${id}/reply`, body),
   readAll: (ws: string, tab: InboxTab) => request('POST', `/workspaces/${ws}/inbox/read-all`, { tab }),
   clearAll: (ws: string, tab: InboxTab) => request('POST', `/workspaces/${ws}/inbox/clear-all`, { tab }),
   settings: (ws: string) => request<NotificationSetting[]>('GET', `/workspaces/${ws}/notification-settings`),

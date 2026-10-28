@@ -70,3 +70,9 @@ verve-demo-data.xlsx
 *.xlsx
 # Except the blank onboarding template the app offers for download (fictional example only).
 !frontend/public/templates/*.xlsx
+
+# Local screenshots and loose files, not part of the app
+changes_screenshots/
+docs/ui-*/
+frontend/image.png
+frontend/public/*.docx

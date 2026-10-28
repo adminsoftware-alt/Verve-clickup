@@ -251,6 +251,11 @@ class Engine:
             self._time_people_loaded = True
         return self._time_people
 
+    def sees_only_self(self) -> bool:
+        """The viewer may see no one's time but their own (an Employee)."""
+        people = self.time_people()
+        return people is not None and people <= {self.access.user_id}
+
     def weekly_hours(self, user_ids: Iterable[str]) -> Dict[str, Any]:
         """working_time.weekly_hours, remembered: on first use, for everyone in the workspace."""
         from app.services.work.working_time import weekly_hours
@@ -703,10 +708,17 @@ class Engine:
             ]
             return {"segments": segments, "format": fmt, "total": sum(totals.values()), "over_time": True}
         agg: Dict[str, Dict[str, Any]] = {}
+        # Priority bars also say how many are new this week, and urgent with nobody on it.
+        by_priority = config.group_by == "priority"
+        week_ago = self.now - timedelta(days=7)
         for f in matched:
             for key, label, color in self.keys(f, config.group_by, loaded):
                 seg = agg.setdefault(key, {"key": key, "label": label, "color": color, "value": 0})
-                seg["value"] += self.measure(f, config.measure, loaded)
+                amount = self.measure(f, config.measure, loaded)
+                seg["value"] += amount
+                if by_priority:
+                    seg["new"] = seg.get("new", 0) + (1 if f.task.created_at and f.task.created_at >= week_ago else 0)
+                    seg["unowned"] = seg.get("unowned", 0) + (1 if f.group not in FINISHED and not f.assignees else 0)
         segments = [seg for seg in agg.values() if seg["value"] > 0 or config.measure == "tasks"]
         if config.group_by == "status_group":
             order = [g.value for g in StatusGroup]
@@ -954,6 +966,8 @@ class Engine:
             "no_estimate_tasks": sum(1 for f in matched if not f.task.time_estimate_seconds),
             "period": {"start": first.isoformat(), "end": last.isoformat()},
             "sees_everyone": seen is None,
+            # Nobody but the viewer: their own card has no one to pick under "Whose time".
+            "sees_only_self": self.sees_only_self(),
         }
 
     def _card_plan(self, config: d.CardConfig, loaded: Loaded) -> Dict[str, Any]:
@@ -1098,6 +1112,8 @@ class Engine:
             "logged_seconds": sum(r["logged_seconds"] for r in out),
             "period": {"start": first.isoformat(), "end": last.isoformat()},
             "sees_everyone": seen is None,
+            # Nobody but the viewer: their own card has no one to pick under "Whose time".
+            "sees_only_self": self.sees_only_self(),
         }
 
     def _card_worked_on(self, config: d.CardConfig, loaded: Loaded) -> Dict[str, Any]:
@@ -1273,6 +1289,7 @@ class Engine:
             "total_seconds": sum(r["seconds"] for r in out),
             "period": {"start": first.isoformat(), "end": last.isoformat()},
             "sees_everyone": self.time_people() is None,
+            "sees_only_self": self.sees_only_self(),
         }
 
     def _card_timesheet(self, config: d.CardConfig, loaded: Loaded) -> Dict[str, Any]:
@@ -1355,6 +1372,8 @@ class Engine:
             # How many of them have not recorded anything at all, so the card can say it plainly.
             "nobody_logged": sum(1 for r in rows if r["total"] == 0),
             "sees_everyone": seen is None,
+            # Nobody but the viewer: their own card has no one to pick under "Whose time".
+            "sees_only_self": self.sees_only_self(),
         }
 
     # --- drill-down --------------------------------------------------------------------

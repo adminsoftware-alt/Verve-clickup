@@ -13,6 +13,7 @@ import { workApi, type Task } from '../api';
 import { Avatar, Portal, StatusDot, formatDue } from '../ui';
 import { peopleApi, personName, type OffboardPreview, type Person, type TeamFull } from './peopleApi';
 import { accessOf } from './PersonDialogs';
+import { LinesSkeleton } from '../Skeleton';
 
 // Offboarding, and nothing else.
 //
@@ -498,7 +499,7 @@ export const RemovePersonSection: React.FC<{
               old control asked for one name and applied it to everything, so the real sorting out
               happened afterwards, by hand, from memory. */}
           {theirTasks === null ? (
-            <p className="mt-4 text-sm text-gray-400">Loading their open tasks…</p>
+            <p className="mt-4 text-sm text-gray-400"><LinesSkeleton /></p>
           ) : theirTasks.length > 0 ? (
             <TaskDecisions
               key={chosen.user.id} tasks={theirTasks} perTask={perTask} setPerTask={setPerTask}

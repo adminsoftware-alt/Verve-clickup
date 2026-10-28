@@ -6,6 +6,7 @@ import { Avatar, Portal } from '../ui';
 import { STATUS_CLASS, STATUS_LABEL, sheetApi, type ApproverRow, type SheetSettings, type Submission } from './api';
 import { hours, rangeLabel } from './pieces';
 import { useLeadership } from '../dashboards/dialogs';
+import { LinesSkeleton } from '../Skeleton';
 
 type Scope = 'to_review' | 'changes_requested' | 'approved' | 'all' | 'mine';
 const SCOPES: { key: Scope; label: string }[] = [
@@ -72,7 +73,7 @@ export const Approvals: React.FC<{ settings: SheetSettings | null }> = ({ settin
           </thead>
           <tbody>
             {!items ? (
-              <tr><td colSpan={9} className="px-4 py-6 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={9} className="px-4 py-6 text-center text-gray-400"><LinesSkeleton /></td></tr>
             ) : items.length === 0 ? (
               <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">Nothing here.</td></tr>
             ) : items.map((sub) => {
@@ -123,7 +124,7 @@ const ApproversDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           <p className="px-5 pt-3 text-xs text-gray-500">By default a person's Team leads approve their timesheet. Pick approvers here to override that. Owners and admins can always approve.</p>
           {error && <p className="mx-5 mt-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           <div className="overflow-y-auto px-5 py-3">
-            {!rows ? <p className="text-sm text-gray-400">Loading…</p> : (
+            {!rows ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : (
               <table className="w-full text-sm">
                 <thead className="text-left text-xs text-gray-500"><tr><th className="py-1 font-medium">Submitter</th><th className="py-1 font-medium">Approvers</th></tr></thead>
                 <tbody>

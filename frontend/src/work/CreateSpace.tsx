@@ -10,6 +10,7 @@ import { Blocks, Check, ChevronDown, ChevronRight, CircleDot, Info, Layers, Plus
 import { workApi, type StatusGroup, type ViewType } from './api';
 import { spacesApi, type ClickAppInfo } from './spacesApi';
 import { Portal } from './ui';
+import { useIsAdmin } from './WorkContext';
 
 type Level = 'full' | 'edit' | 'comment' | 'view';
 interface StatusRow { key: string; name: string; color: string; group: StatusGroup }
@@ -83,6 +84,11 @@ export const CreateSpaceDialog: React.FC<{
   const [description, setDescription] = useState('');
   const [color, setColor] = useState(COLORS[0]);
   const [icon, setIcon] = useState('');
+  // An admin's own picture for the Space: kept here and uploaded once the Space exists.
+  const isAdmin = useIsAdmin();
+  const [picture, setPicture] = useState<File | null>(null);
+  const pictureUrl = useMemo(() => (picture ? URL.createObjectURL(picture) : null), [picture]);
+  useEffect(() => () => { if (pictureUrl) URL.revokeObjectURL(pictureUrl); }, [pictureUrl]);
   const [picking, setPicking] = useState(false);
   const [level, setLevel] = useState<Level>('full');
   const [levelOpen, setLevelOpen] = useState(false);
@@ -129,6 +135,10 @@ export const CreateSpaceDialog: React.FC<{
         statuses: statuses.map(({ name: n, color: c, group }) => ({ name: n.trim(), color: c, group })),
         views, clickapps: apps,
       });
+      if (picture) {
+        // The Space is made either way; a picture that fails can be added again from its settings.
+        try { await workApi.setSpaceIcon(workspaceId, made.id, picture); } catch { /* keeps its letter */ }
+      }
       onCreated(made.id);
     } catch (e) {
       setError((e as Error).message);
@@ -137,8 +147,10 @@ export const CreateSpaceDialog: React.FC<{
   };
 
   const badge = (
-    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-base font-bold text-white" style={{ backgroundColor: color }}>
-      {icon.trim() || name.trim()[0]?.toUpperCase() || 'S'}
+    <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg text-base font-bold text-white" style={{ backgroundColor: color }}>
+      {pictureUrl
+        ? <img src={pictureUrl} alt="" className="h-full w-full object-cover" />
+        : icon.trim() || name.trim()[0]?.toUpperCase() || 'S'}
     </span>
   );
 
@@ -174,6 +186,29 @@ export const CreateSpaceDialog: React.FC<{
                       <input value={icon} maxLength={2} onChange={(e) => setIcon(e.target.value)} placeholder={name.trim()[0]?.toUpperCase() || 'S'}
                         className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none" />
                     </label>
+                    {isAdmin && (
+                      <div className="mt-3">
+                        <p className="text-xs font-medium text-gray-500">Or your own picture</p>
+                        <div className="mt-1 flex items-center gap-2">
+                          <label className="cursor-pointer rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                            {picture ? 'Change picture' : 'Upload picture'}
+                            <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                e.target.value = '';
+                                if (!file) return;
+                                if (file.size > 1024 * 1024) { setError('The picture must be 1 MB or smaller.'); return; }
+                                setError(null);
+                                setPicture(file);
+                              }} />
+                          </label>
+                          {picture && (
+                            <button type="button" onClick={() => setPicture(null)} className="rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-100">Remove</button>
+                          )}
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-400">PNG, JPG or WebP, up to 1 MB</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

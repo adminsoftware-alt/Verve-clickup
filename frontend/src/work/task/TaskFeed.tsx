@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AtSign, Check, CornerDownRight, MessageSquare, MoreHorizontal, Pencil, SmilePlus, Trash2, UserCheck, Users } from 'lucide-react';
+import { AtSign, Check, CornerDownRight, MessageSquare, MoreHorizontal, Paperclip, Pencil, SmilePlus, Trash2, UserCheck, Users, X } from 'lucide-react';
 import { useWork, useMe } from '../WorkContext';
 import { collabApi, type Activity, type Comment } from '../collabApi';
-import { Avatar, Menu, formatDuration, useClickAway } from '../ui';
+import { Avatar, Menu, SearchSelect, formatDuration, useClickAway } from '../ui';
 import { notify } from '../../components/notify';
 import { ask } from '../../components/ask';
+import { CommentBody, CommentFiles, toTokens, useEditable, type MentionPick } from './commentText';
 
 const EMOJIS = ['👍', '✅', '🎉', '❤️', '😄', '👀'];
 
@@ -51,27 +52,26 @@ export function describeActivity(a: Activity, name: (id: string) => string): str
   }
 }
 
-/** Show @Name mentions highlighted. */
-const Body: React.FC<{ comment: Comment }> = ({ comment }) => {
-  const names = [...comment.mentions.map((m) => m.display_name || m.email), ...comment.mention_teams.map((t) => t.name)].filter(Boolean) as string[];
-  if (!names.length) return <p className="whitespace-pre-wrap break-words text-sm text-gray-800">{comment.body}</p>;
-  const pattern = new RegExp(`(@(?:${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}))`, 'g');
-  return (
-    <p className="whitespace-pre-wrap break-words text-sm text-gray-800">
-      {comment.body.split(pattern).map((part, i) => (names.some((n) => part === `@${n}`)
-        ? <span key={i} className="rounded bg-brand-50 px-0.5 font-medium text-brand-700">{part}</span>
-        : <React.Fragment key={i}>{part}</React.Fragment>))}
-    </p>
-  );
-};
+/** Send a new comment's files after it, one at a time; a file that fails is said, the rest still go. */
+export async function sendCommentFiles(commentId: string, files: File[]): Promise<void> {
+  for (const f of files) {
+    try {
+      await collabApi.addCommentFile(commentId, f);
+    } catch (e) {
+      notify.error(e);
+    }
+  }
+}
+
+export interface ComposerOutput { body: string; mention_user_ids: string[]; mention_team_ids: string[]; assignee_id: string | null; files: File[] }
 
 /**
- * The composer: plain text with @mentions picked from a list (people and Teams), and an
- * optional assignee that turns the comment into a to-do.
+ * The composer: text with light formatting, @mentions picked from a list (people and Teams),
+ * files attached, pasted or dropped, and an optional assignee that turns the comment into a to-do.
  */
-const Composer: React.FC<{
+export const Composer: React.FC<{
   placeholder: string; autoFocus?: boolean; allowAssign?: boolean; onCancel?: () => void;
-  onSend: (body: { body: string; mention_user_ids: string[]; mention_team_ids: string[]; assignee_id: string | null }) => Promise<void>;
+  onSend: (body: ComposerOutput) => Promise<void>;
 }> = ({ placeholder, autoFocus, allowAssign, onCancel, onSend }) => {
   const { members, teams } = useWork();
   const [text, setText] = useState('');
@@ -79,6 +79,10 @@ const Composer: React.FC<{
   const [query, setQuery] = useState<string | null>(null);
   const [assignee, setAssignee] = useState('');
   const [busy, setBusy] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+  const addFiles = (list: FileList | File[] | null) => { if (list && list.length) setFiles((f) => [...f, ...Array.from(list)].slice(0, 10)); };
   const box = useRef<HTMLTextAreaElement>(null);
   const list = useRef<HTMLUListElement>(null);
   useClickAway(list, () => setQuery(null), query !== null, box);
@@ -107,24 +111,37 @@ const Composer: React.FC<{
     if (!text.trim() || busy) return;
     setBusy(true);
     try {
-      // Keep only mentions still present in the text.
-      const users = [...mentions.users].filter((id) => { const m = members.find((x) => x.user.id === id); return m && text.includes(`@${m.user.display_name || m.user.email}`); });
-      const tms = [...mentions.teams].filter((id) => { const t = teams.find((x) => x.id === id); return t && text.includes(`@${t.name}`); });
-      await onSend({ body: text.trim(), mention_user_ids: users, mention_team_ids: tms, assignee_id: assignee || null });
-      setText(''); setMentions({ users: new Set(), teams: new Set() }); setAssignee('');
+      // Keep only mentions still present in the text, and store them as tokens.
+      const picks: MentionPick[] = [
+        ...[...mentions.users].flatMap((id) => { const m = members.find((x) => x.user.id === id); return m ? [{ kind: 'user' as const, id, label: m.user.display_name || m.user.email }] : []; }),
+        ...[...mentions.teams].flatMap((id) => { const t = teams.find((x) => x.id === id); return t ? [{ kind: 'team' as const, id, label: t.name }] : []; }),
+      ].filter((p) => text.includes(`@${p.label}`));
+      await onSend({
+        body: toTokens(text.trim(), picks),
+        mention_user_ids: picks.filter((p) => p.kind === 'user').map((p) => p.id),
+        mention_team_ids: picks.filter((p) => p.kind === 'team').map((p) => p.id),
+        assignee_id: assignee || null, files,
+      });
+      setText(''); setMentions({ users: new Set(), teams: new Set() }); setAssignee(''); setFiles([]);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="relative rounded-lg border border-gray-200 bg-white focus-within:border-brand-400">
+    <div
+      className={`relative rounded-lg border bg-white focus-within:border-brand-400 ${dragging ? 'border-brand-400 ring-2 ring-brand-100' : 'border-gray-200'}`}
+      onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragging(true); } }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); addFiles(e.dataTransfer.files); } setDragging(false); }}
+    >
       <textarea
         ref={box}
         autoFocus={autoFocus}
         aria-label={placeholder}
         value={text}
         onChange={(e) => onChange(e.target.value)}
+        onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
         onKeyDown={(e) => {
           if (options.length && e.key === 'Enter') { e.preventDefault(); pick(options[0]); return; }
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
@@ -145,15 +162,30 @@ const Composer: React.FC<{
           ))}
         </ul>
       )}
+      {files.length > 0 && (
+        <ul className="flex flex-wrap gap-1.5 px-2 pb-1.5" aria-label="Files to send">
+          {files.map((f, i) => (
+            <li key={`${f.name}-${i}`} className="flex max-w-[12rem] items-center gap-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-xs text-gray-700">
+              <Paperclip size={11} className="shrink-0 text-gray-400" /><span className="truncate">{f.name}</span>
+              <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))} className="text-gray-400 hover:text-gray-700"><X size={11} /></button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="flex items-center gap-2 border-t border-gray-100 px-2 py-1.5">
-        <span className="text-[11px] text-gray-400">@ to mention · Ctrl+Enter to send</span>
+        <input ref={picker} type="file" multiple hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+        <button type="button" title="Attach files" aria-label="Attach files" onClick={() => picker.current?.click()} className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Paperclip size={14} /></button>
+        <span className="hidden text-[11px] text-gray-400 sm:inline">@ to mention · **bold** · - list · Ctrl+Enter to send</span>
         {allowAssign && (
           <label className="ml-auto flex items-center gap-1 text-xs text-gray-500">
             <UserCheck size={13} />
-            <select aria-label="Assign comment" value={assignee} onChange={(e) => setAssignee(e.target.value)} className="rounded border border-gray-200 px-1 py-0.5 text-xs">
-              <option value="">Assign to…</option>
-              {members.map((m) => <option key={m.user.id} value={m.user.id}>{m.user.display_name || m.user.email}</option>)}
-            </select>
+            <SearchSelect label="Assign comment" value={assignee} onChange={setAssignee} placeholder="Assign to…" width={240}
+              size="sm" className="max-w-40"
+              options={[
+                // Taking it back is only offered once someone has been picked.
+                ...(assignee ? [{ value: '', label: "Don't assign" }] : []),
+                ...members.map((m) => ({ value: m.user.id, label: m.user.display_name || m.user.email, hint: m.user.email })),
+              ]} />
           </label>
         )}
         {onCancel && <button type="button" onClick={onCancel} className={`${allowAssign ? '' : 'ml-auto '}rounded px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-100`}>Cancel</button>}
@@ -167,21 +199,38 @@ const Composer: React.FC<{
 
 const CommentCard: React.FC<{
   comment: Comment; replies: Comment[]; me: string | undefined; canComment: boolean; onChanged: () => void;
-}> = ({ comment, replies, me, canComment, onChanged }) => {
+  /** Comments after this moment, by someone else, are marked New. */
+  lastSeen: string | null; highlight: string | null;
+}> = ({ comment, replies, me, canComment, onChanged, lastSeen, highlight }) => {
   const [replying, setReplying] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(comment.body);
+  const [draft, setDraft] = useState('');
+  const editable = useEditable();
+  const { allMembers, teams } = useWork();
   const run = (action: Promise<unknown>) => action.then(onChanged).catch((e) => notify.error(e));
+  // Saving an edit: mentions that were there stay tokens, and typing @Full Name mentions them anew.
+  const saveEdit = (c: Comment) => {
+    const everyone: MentionPick[] = [
+      ...allMembers.map((m) => ({ kind: 'user' as const, id: m.user.id, label: m.user.display_name || m.user.email })),
+      ...teams.map((t) => ({ kind: 'team' as const, id: t.id, label: t.name })),
+    ];
+    run(collabApi.updateComment(c.id, { body: toTokens(draft, [...editable(c.body).picks, ...everyone]) }));
+    setEditing(false);
+  };
   const one = (c: Comment, isReply: boolean) => (
-    <div key={c.id} className={`group ${isReply ? 'ml-7 mt-2' : ''}`} aria-label={isReply ? 'Reply' : 'Comment'}>
+    <div key={c.id} id={`comment-${c.id}`} aria-label={isReply ? 'Reply' : 'Comment'}
+      className={`group rounded-md transition-colors duration-700 ${isReply ? 'ml-7 mt-2' : ''} ${highlight === c.id ? 'bg-amber-50 ring-2 ring-amber-300 ring-offset-2' : ''}`}>
       <div className="flex items-center gap-2">
         {c.user ? <Avatar user={c.user} size={22} /> : <span className="h-[22px] w-[22px] rounded-full bg-gray-200" />}
         <span className="text-sm font-medium text-gray-900">{c.user?.display_name || c.user?.email || 'Someone'}</span>
         <span className="text-xs text-gray-400">{when(c.created_at)}{c.edited_at ? ' · edited' : ''}</span>
+        {lastSeen && c.user?.id !== me && Date.parse(c.created_at) > Date.parse(lastSeen) && (
+          <span className="rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold uppercase text-white">New</span>
+        )}
         {(c.user?.id === me || c.can_edit) && (
           <span className="ml-auto hidden group-hover:inline">
             <Menu align="right" label="Comment actions" items={[
-              ...(c.user?.id === me ? [{ label: 'Edit', icon: <Pencil size={14} />, onClick: () => { setDraft(c.body); setEditing(true); } }] : []),
+              ...(c.user?.id === me ? [{ label: 'Edit', icon: <Pencil size={14} />, onClick: () => { setDraft(editable(c.body).text); setEditing(true); } }] : []),
               { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: async () => await ask.confirm({ danger: true, title: 'Delete this comment?' }) && run(collabApi.deleteComment(c.id)) },
             ]} trigger={<span className="rounded p-0.5 text-gray-400 hover:bg-gray-100"><MoreHorizontal size={14} /></span>} />
           </span>
@@ -191,11 +240,12 @@ const CommentCard: React.FC<{
         <div className="mt-1 pl-7">
           <textarea aria-label="Edit comment" value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} className="w-full rounded border border-brand-300 px-2 py-1 text-sm" />
           <div className="mt-1 flex gap-2">
-            <button type="button" onClick={() => { run(collabApi.updateComment(c.id, { body: draft })); setEditing(false); }} className="rounded bg-brand-600 px-2 py-0.5 text-xs text-white">Save</button>
+            <button type="button" disabled={!draft.trim()} onClick={() => saveEdit(c)} className="rounded bg-brand-600 px-2 py-0.5 text-xs text-white disabled:opacity-40">Save</button>
             <button type="button" onClick={() => setEditing(false)} className="text-xs text-gray-500">Cancel</button>
           </div>
         </div>
-      ) : <div className="mt-0.5 pl-7"><Body comment={c} /></div>}
+      ) : <div className="mt-0.5 pl-7"><CommentBody comment={c} /></div>}
+      {c.attachments.length > 0 && <div className="pl-7"><CommentFiles files={c.attachments} /></div>}
       {c.assignee && (
         <div className={`mt-1 ml-7 flex items-center gap-2 rounded-md px-2 py-1 text-xs ${c.resolved_at ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
           <UserCheck size={13} /> Assigned to {c.assignee.display_name || c.assignee.email}
@@ -228,7 +278,11 @@ const CommentCard: React.FC<{
       {replying && (
         <div className="ml-7 mt-2">
           <Composer autoFocus placeholder="Reply…" onCancel={() => setReplying(false)}
-            onSend={async (body) => { await collabApi.addComment(comment.task_id, { ...body, parent_id: comment.id }); setReplying(false); onChanged(); }} />
+            onSend={async ({ files, ...body }) => {
+              const sent = await collabApi.addComment(comment.task_id, { ...body, parent_id: comment.id });
+              await sendCommentFiles(sent.id, files);
+              setReplying(false); onChanged();
+            }} />
         </div>
       )}
       {replies.length > 0 && !replying && canComment && (
@@ -265,7 +319,11 @@ function windowFor(period: Period, from: string, to: string): [Date, Date] | nul
 }
 
 /** The right-hand column of a task: comments and history, oldest first, as in ClickUp. */
-export const TaskFeed: React.FC<{ taskId: string; canComment: boolean; refreshKey: number; onChanged: () => void }> = ({ taskId, canComment, refreshKey, onChanged }) => {
+export const TaskFeed: React.FC<{
+  taskId: string; canComment: boolean; refreshKey: number; onChanged: () => void;
+  /** Scroll to this comment and light it up -- where an Inbox item about it leads. */
+  focusCommentId?: string | null;
+}> = ({ taskId, canComment, refreshKey, onChanged, focusCommentId }) => {
   const { allMembers: members } = useWork();
   const [comments, setComments] = useState<Comment[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
@@ -281,6 +339,30 @@ export const TaskFeed: React.FC<{ taskId: string; canComment: boolean; refreshKe
     setActivity(a);
   }, [taskId]);
   useEffect(() => { load().catch(() => undefined); }, [load, refreshKey]);
+  // While the task is open and on screen, someone else's comment shows up within 10 s.
+  useEffect(() => {
+    const t = setInterval(() => { if (document.visibilityState === 'visible') load().catch(() => undefined); }, 10_000);
+    return () => clearInterval(t);
+  }, [load]);
+  // When you last looked is fetched once per opening: the New marks stay put while you read,
+  // and the next opening starts from now.
+  const [lastSeen, setLastSeen] = useState<string | null>(null);
+  useEffect(() => {
+    setLastSeen(null);
+    collabApi.seen(taskId).then((r) => setLastSeen(r.previous)).catch(() => undefined);
+  }, [taskId]);
+  const [highlight, setHighlight] = useState<string | null>(null);
+  const focused = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusCommentId || focused.current === focusCommentId) return;
+    const el = document.getElementById(`comment-${focusCommentId}`);
+    if (!el) return; // not loaded yet; this runs again when the comments arrive
+    focused.current = focusCommentId;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setHighlight(focusCommentId);
+    const t = setTimeout(() => setHighlight(null), 2500);
+    return () => clearTimeout(t);
+  }, [focusCommentId, comments]);
   const name = (id: string) => { const m = members.find((x) => x.user.id === id); return m ? m.user.display_name || m.user.email : 'someone'; };
 
   const threads = comments.filter((c) => !c.parent_id);
@@ -334,7 +416,7 @@ export const TaskFeed: React.FC<{ taskId: string; canComment: boolean; refreshKe
         )}
         {feed.map((item) => ('comment' in item && item.comment ? (
           <CommentCard key={item.key} comment={item.comment} replies={replies(item.comment.id)} me={viewer} canComment={canComment}
-            onChanged={() => { load(); onChanged(); }} />
+            lastSeen={lastSeen} highlight={highlight} onChanged={() => { load(); onChanged(); }} />
         ) : 'activity' in item && item.activity ? (
           <p key={item.key} className="px-1 text-xs text-gray-500">
             <span className="font-medium text-gray-700">{item.activity.user?.display_name || item.activity.user?.email || ((item.activity.data as Record<string, unknown>)?.automation ? 'Automation' : 'Someone')}</span>{' '}
@@ -345,8 +427,9 @@ export const TaskFeed: React.FC<{ taskId: string; canComment: boolean; refreshKe
       </div>
       {canComment ? (
         <div className="border-t border-gray-200 p-3">
-          <Composer allowAssign placeholder="Write a comment…" onSend={async (body) => {
-            await collabApi.addComment(taskId, body);
+          <Composer allowAssign placeholder="Write a comment…" onSend={async ({ files, ...body }) => {
+            const sent = await collabApi.addComment(taskId, body);
+            await sendCommentFiles(sent.id, files);
             await load();
             onChanged();
             setTimeout(() => bottom.current?.scrollIntoView({ block: 'end' }), 50);

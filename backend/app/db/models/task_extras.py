@@ -65,6 +65,8 @@ class Attachment(Base):
     content_type: Mapped[str] = mapped_column(String(127), nullable=False)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     storage_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # A file sent with a comment belongs to that comment and goes when it does.
+    comment_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("task_comments.id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

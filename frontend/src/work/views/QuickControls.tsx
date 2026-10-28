@@ -1,7 +1,8 @@
 // The controls kept on the toolbar itself rather than inside the Filter dropdown: what is shown
 // (main tasks, subtasks, closed tasks) and which fields. Whose tasks is asked in Filter → Assignee.
-import React from 'react';
+import React, { useState } from 'react';
 import { CheckCircle2, Columns3 } from 'lucide-react';
+import { NoMatch, SearchBox, matchesSearch } from '../ui';
 import { Popover } from './ViewControls';
 import { COLUMNS } from './viewSettings';
 
@@ -46,18 +47,29 @@ export const ShowButton: React.FC<{
 /** Fields: which columns each row shows, as switches in a panel. */
 export const FieldsButton: React.FC<{
   hidden: string[]; onChange: (hidden: string[]) => void; fields?: { id: string; name: string }[];
-}> = ({ hidden, onChange, fields = [] }) => {
+}> = ({ hidden, onChange, fields = [] }) => (
+  <Popover label="Fields" icon={<Columns3 size={15} />} text="" width={260}>
+    {() => <FieldSwitches hidden={hidden} onChange={onChange} fields={fields} />}
+  </Popover>
+);
+
+/** The panel's contents, its own component so the search starts empty each time it opens. */
+const FieldSwitches: React.FC<{
+  hidden: string[]; onChange: (hidden: string[]) => void; fields: { id: string; name: string }[];
+}> = ({ hidden, onChange, fields }) => {
+  const [q, setQ] = useState('');
   const toggle = (key: string) => onChange(hidden.includes(key) ? hidden.filter((x) => x !== key) : [...hidden, key]);
+  const columns = COLUMNS.filter((c) => matchesSearch(q, c.label));
+  const custom = fields.filter((f) => matchesSearch(q, f.name));
   return (
-    <Popover label="Fields" icon={<Columns3 size={15} />} text="" width={260}>
-      {() => (
-        <>
-          <p className="mb-1 px-1.5 text-xs font-medium text-gray-400">Fields</p>
-          {COLUMNS.map((c) => <Switch key={c.key} label={c.label} on={!hidden.includes(c.key)} onChange={() => toggle(c.key)} />)}
-          {fields.length > 0 && <p className="mb-1 mt-2 px-1.5 text-xs font-medium text-gray-400">Custom fields</p>}
-          {fields.map((f) => <Switch key={f.id} label={f.name} on={!hidden.includes(`cf:${f.id}`)} onChange={() => toggle(`cf:${f.id}`)} />)}
-        </>
-      )}
-    </Popover>
+    <>
+      <SearchBox value={q} onChange={setQ} label="Search fields" placeholder="Search fields…" inset="lg"
+        onEnter={() => { const first = columns[0]?.key ?? (custom[0] && `cf:${custom[0].id}`); if (first) toggle(first); }} />
+      {columns.length > 0 && <p className="mb-1 px-1.5 text-xs font-medium text-gray-400">Fields</p>}
+      {columns.map((c) => <Switch key={c.key} label={c.label} on={!hidden.includes(c.key)} onChange={() => toggle(c.key)} />)}
+      {custom.length > 0 && <p className="mb-1 mt-2 px-1.5 text-xs font-medium text-gray-400">Custom fields</p>}
+      {custom.map((f) => <Switch key={f.id} label={f.name} on={!hidden.includes(`cf:${f.id}`)} onChange={() => toggle(`cf:${f.id}`)} />)}
+      {columns.length === 0 && custom.length === 0 && <NoMatch query={q} />}
+    </>
   );
 };

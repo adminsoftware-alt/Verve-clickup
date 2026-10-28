@@ -1,8 +1,10 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import React, { startTransition, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Search } from 'lucide-react';
 import { useWork } from '../WorkContext';
-import { Menu, Portal, StatusDot, formatDuration, type MenuItem } from '../ui';
+import { Portal, StatusDot, formatDuration } from '../ui';
 import { isoDay, parseDay, sheetApi, type PickTask } from './api';
+import { LinesSkeleton } from '../Skeleton';
+import { WeekPicker } from './WeekPicker';
 
 /** "0h", "54m", "2h 5m": ClickUp's timesheet style (zero shows as 0h). */
 export const hours = (seconds: number) => formatDuration(seconds) || '0h';
@@ -15,6 +17,20 @@ export function rangeLabel(start: string, end: string): string {
   return a.getMonth() === b.getMonth()
     ? `${month(a)} ${a.getDate()} - ${b.getDate()}`
     : `${month(a)} ${a.getDate()} - ${month(b)} ${b.getDate()}`;
+}
+
+/**
+ * Ask for the weeks either side of the one on screen, so stepping to them draws at once from what
+ * is kept (see `peek`) instead of waiting on the server. Quietly: a failure here is nobody's news.
+ */
+export function prefetchWeeks(periodStart: string, fetchWeek: (start: string) => Promise<unknown>) {
+  const timer = setTimeout(() => {
+    for (const by of [7, -7]) {
+      const d = parseDay(periodStart); d.setDate(d.getDate() + by);
+      fetchWeek(isoDay(d)).catch(() => undefined);
+    }
+  }, 300);
+  return () => clearTimeout(timer);
 }
 
 /** Saturday or Sunday, read from the date itself so a weekend looks like one whoever's sheet it is. */
@@ -85,66 +101,79 @@ export const Popover: React.FC<{
 
 // --- week navigation ------------------------------------------------------------------------
 
+/** How far a week is from this one, in weeks: 0 this week, -1 last week. */
+const weeksAway = (start: string) => {
+  const first = parseDay(start);
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  now.setDate(now.getDate() - ((now.getDay() - first.getDay() + 7) % 7));
+  return Math.round((first.getTime() - now.getTime()) / (7 * 864e5));
+};
+
 export const WeekNav: React.FC<{ start: string | null; end: string | null; onGo: (day: string) => void }> = ({ start, end, onGo }) => {
-  const picker = useRef<HTMLInputElement>(null);
+  const title = useRef<HTMLButtonElement>(null);
+  const [picking, setPicking] = useState(false);
+  // Steps count from the week last asked for, so pressing → twice before the first week has
+  // loaded lands two weeks on, not one; and the title moves the moment a week is chosen, not
+  // when its hours arrive.
+  const aim = useRef(start);
+  const [target, setTarget] = useState<string | null>(null);
+  useEffect(() => { aim.current = start; setTarget(null); }, [start]);
+  const jump = (day: string) => {
+    // Any day stands for its week: the one starting on the same weekday as the week on screen.
+    if (start) {
+      const d = parseDay(day);
+      d.setDate(d.getDate() - ((d.getDay() - parseDay(start).getDay() + 7) % 7));
+      aim.current = isoDay(d);
+      setTarget(aim.current === start ? null : aim.current);
+    }
+    // The title is drawn first; the page under it follows when it can.
+    startTransition(() => onGo(day));
+  };
   const shift = (days: number) => {
-    if (!start) return;
-    const d = parseDay(start);
+    if (!aim.current) return;
+    const d = parseDay(aim.current);
     d.setDate(d.getDate() + days);
-    onGo(isoDay(d));
+    jump(isoDay(d));
   };
   const today = isoDay(new Date());
-  const thisWeek = !!start && !!end && today >= start && today <= end;
-  const away = (weeks: number) => {
-    const d = new Date();
-    d.setDate(d.getDate() + weeks * 7);
-    return isoDay(d);
-  };
-  const weeks: MenuItem[] = [
-    { label: 'Last week', onClick: () => onGo(away(-1)) },
-    { label: 'This week', onClick: () => onGo(today) },
-    { label: 'Next week', onClick: () => onGo(away(1)) },
-    { label: 'Pick a date…', onClick: () => picker.current?.showPicker?.() },
-  ];
+  const shownStart = target ?? start;
+  const shownEnd = target ? (() => { const d = parseDay(target); d.setDate(d.getDate() + 6); return isoDay(d); })() : end;
+  const away = shownStart ? weeksAway(shownStart) : 0;
+  const range = shownStart && shownEnd ? rangeLabel(shownStart, shownEnd) : '…';
+
+  // ← and → step a week, as in a calendar, unless the keys belong to something being typed in.
+  const step = useRef(shift); step.current = shift;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]')) return;
+      if (document.querySelector('[role="dialog"], [role="menu"]')) return;
+      e.preventDefault();
+      step.current(e.key === 'ArrowLeft' ? -7 : 7);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const prev = (cls: string) => <button aria-label="Previous week" type="button" title="Previous week (←)" onClick={() => shift(-7)} className={cls}><ChevronLeft size={17} /></button>;
+  const next = (cls: string) => <button aria-label="Next week" type="button" title="Next week (→)" onClick={() => shift(7)} className={cls}><ChevronRight size={17} /></button>;
+  const pickerFor = picking && start && <WeekPicker anchor={title} start={shownStart ?? start} onPick={jump} onClose={() => setPicking(false)} />;
+  const chevron = <ChevronDown size={15} className={`wk-caret ${picking ? 'rotate-180' : ''}`} />;
+  const titleProps = { ref: title, type: 'button' as const, 'aria-label': 'Pick a week', 'aria-expanded': picking, onClick: () => setPicking((x) => !x) };
+
   return (
-    <div className="flex items-center gap-1 sm:gap-2">
-      <button aria-label="Previous week" type="button" title="Previous week" onClick={() => shift(-7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronLeft size={18} /></button>
-      <button aria-label="Next week" type="button" title="Next week" onClick={() => shift(7)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><ChevronRight size={18} /></button>
-      <button
-        type="button"
-        onClick={() => picker.current?.showPicker?.()}
-        className="relative flex items-center gap-1.5 whitespace-nowrap rounded px-1 text-lg font-medium text-gray-900 hover:bg-gray-50 sm:text-2xl"
-        aria-label="Pick a week"
-      >
-        {start && end ? rangeLabel(start, end) : '…'}
-        <ChevronDown size={16} className="text-gray-500" />
-        <input
-          ref={picker}
-          type="date"
-          tabIndex={-1}
-          aria-hidden
-          value={start ?? ''}
-          onChange={(e) => e.target.value && onGo(e.target.value)}
-          className="pointer-events-none absolute left-0 top-full h-0 w-0 opacity-0"
-        />
+    <div className="wk" data-busy={target ? '' : undefined}>
+      {/* One joined control: back, the week (opens the picker), forward; Today beside it. */}
+      <div className="wk-seg">
+        {prev('wk-seg-btn')}
+        <button {...titleProps} className="wk-seg-range"><CalendarDays size={15} className="wk-cal" />{range}{chevron}</button>
+        {next('wk-seg-btn')}
+      </div>
+      <button type="button" onClick={() => jump(today)} disabled={away === 0} className="wk-today" title={away === 0 ? 'You are on this week' : 'Go to this week'}>
+        {away === 0 ? <><span className="wk-dot" /> This week</> : <><RotateCcw size={13} /> Today</>}
       </button>
-      {/* "This week" was a button that only ever did one thing, sitting next to two arrows that
-          did the other two. Last week and next week are a click away now instead of a click and a
-          count, and "Pick a date" opens the same picker the title does -- a timesheet is a week at
-          a time, so a date is really a choice of which week. */}
-      <Menu
-        align="right"
-        triggerClassName="ml-auto shrink-0 sm:ml-2"
-        trigger={
-          <span className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-            {/* Until the week has loaded there are no dates to name, and parsing nothing printed
-                "Invalid Date NaN". */}
-            {thisWeek ? 'This week' : start && end ? rangeLabel(start, end) : '…'}
-            <ChevronDown size={14} className="text-gray-500" />
-          </span>
-        }
-        items={weeks}
-      />
+      {pickerFor}
     </div>
   );
 };
@@ -168,7 +197,7 @@ export const TaskPicker: React.FC<{ onPick: (task: PickTask) => void; exclude?: 
         <input autoFocus aria-label={placeholder} value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} className="w-full text-sm focus:outline-none" />
       </div>
       <ul className="max-h-64 overflow-y-auto" role="listbox" aria-label="Tasks">
-        {items === null ? <li className="px-2 py-2 text-xs text-gray-400">Loading…</li> : shown.length === 0 ? <li className="px-2 py-2 text-xs text-gray-400">No tasks found</li> : shown.map((task) => (
+        {items === null ? <li className="px-2 py-2 text-xs text-gray-400"><LinesSkeleton /></li> : shown.length === 0 ? <li className="px-2 py-2 text-xs text-gray-400">No tasks found</li> : shown.map((task) => (
           <li key={task.id}>
             <button type="button" role="option" aria-selected={false} onClick={() => onPick(task)} className="flex w-full items-start gap-2 rounded px-2 py-1.5 text-left hover:bg-gray-50">
               <span className="mt-0.5"><StatusDot status={task.status} size={11} /></span>

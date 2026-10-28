@@ -10,6 +10,7 @@ from app.db.models.collab import (
     Reminder,
     TaskActivity,
     TaskComment,
+    TaskRead,
     TaskWatcher,
 )
 from app.db.models.custom_field import CustomField, FieldType, TaskFieldValue
@@ -99,6 +100,7 @@ __all__ = [
     "Reminder",
     "TaskActivity",
     "TaskComment",
+    "TaskRead",
     "TaskWatcher",
     "Dashboard",
     "DashboardCard",

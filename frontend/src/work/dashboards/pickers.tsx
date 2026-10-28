@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Folder, List as ListIcon, X } from 'lucide-r
 import { useWork, useMe } from '../WorkContext';
 import type { FolderNode, ListNode, SpaceNode, StatusGroup } from '../api';
 import type { Filters, Source } from './api';
+import { SearchSelect } from '../ui';
 
 // --- where a card's data comes from -------------------------------------------------
 
@@ -91,13 +92,14 @@ const PeoplePicker: React.FC<{ value: string[] | null | undefined; onChange: (v:
             <button type="button" aria-label={`Remove ${name(token)}`} onClick={() => remove(token)}><X size={11} /></button>
           </span>
         ))}
-        <select aria-label={label} value="" onChange={(e) => add(e.target.value)} className="rounded-md border border-gray-200 px-1.5 py-0.5 text-xs text-gray-600">
-          <option value="">{chosen.length ? 'Add…' : 'Anyone'}</option>
-          <option value="me">Me (whoever is viewing)</option>
-          {allowNone && <option value="none">Unassigned</option>}
-          {teams.length > 0 && <optgroup label="Teams">{teams.map((t) => <option key={t.id} value={`team:${t.id}`}>{t.name}</option>)}</optgroup>}
-          <optgroup label="People">{members.map((m) => <option key={m.user.id} value={m.user.id}>{m.user.display_name || m.user.email}</option>)}</optgroup>
-        </select>
+        {/* Always empty: picking adds a chip beside it, the way the select used to. */}
+        <SearchSelect label={label} value="" onChange={add} placeholder={chosen.length ? 'Add…' : 'Anyone'} size="sm"
+          options={[
+            { value: 'me', label: 'Me (whoever is viewing)' },
+            ...(allowNone ? [{ value: 'none', label: 'Unassigned' }] : []),
+            ...teams.map((t) => ({ value: `team:${t.id}`, label: t.name, group: 'Teams' })),
+            ...members.map((m) => ({ value: m.user.id, label: m.user.display_name || m.user.email, hint: m.user.email, group: 'People' })),
+          ].filter((o) => !chosen.includes(o.value))} />
       </div>
     </div>
   );
@@ -185,21 +187,3 @@ export const FiltersEditor: React.FC<{ value: Filters; onChange: (f: Filters) =>
 };
 
 /** A one-line description of the filters that are set. */
-export function useFilterSummary() {
-  const name = usePeopleLabel();
-  return (f: Filters): string[] => {
-    const out: string[] = [];
-    // "Me" is left out: filtering a Dashboard to your own work is the ordinary case, and a chip
-    // saying so on every board is noise. Anyone else named still shows.
-    const who = (f.assignees ?? []).filter((a) => a !== 'me');
-    if (who.length) out.push(who.map(name).join(', '));
-    if (f.status_groups?.length) out.push(`Status: ${f.status_groups.map((g) => GROUPS.find((x) => x.value === g)?.label).join(', ')}`);
-    if (f.priorities?.length) out.push(`Priority: ${f.priorities.map((p) => PRIORITY_OPTIONS.find((x) => x.v === p)?.l).join(', ')}`);
-    if (f.due) out.push(`Due: ${f.due.replace(/_/g, ' ')}`);
-    if (f.done) out.push(`Completed ${f.done.replace(/_/g, ' ')}`);
-    if (f.estimate) out.push(f.estimate === 'set' ? 'Has estimate' : 'No estimate');
-    if (f.scheduled) out.push(f.scheduled === 'yes' ? 'Scheduled' : 'Unscheduled');
-    if (f.tags?.length) out.push(`Tags: ${f.tags.join(', ')}`);
-    return out;
-  };
-}

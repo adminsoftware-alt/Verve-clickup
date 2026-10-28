@@ -3,11 +3,11 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Lock, Search, Users } from 'lucide-react';
 import { useWork } from '../WorkContext';
 import { FEATURES } from '../../config/features';
-import { ApiError } from '../api';
+import { ApiError, peek } from '../api';
 import { Avatar } from '../ui';
 import { Select } from '../Select';
 import { STATUS_CLASS, STATUS_LABEL, isoDay, sheetApi, type AllTimesheets as Data, type SubmissionStatus } from './api';
-import { WeekNav, dayLabel, hours, isWeekend, WEEKEND } from './pieces';
+import { WeekNav, dayLabel, hours, isWeekend, prefetchWeeks, WEEKEND } from './pieces';
 
 type Person = Data['people'][number];
 
@@ -52,16 +52,28 @@ export const AllTimesheets: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [refused, setRefused] = useState(false);
 
+  const [busy, setBusy] = useState(false);
   const load = useCallback(() => {
     if (!workspace) return;
-    sheetApi.all(workspace.id, day, teamId || undefined)
+    // A week seen before (or fetched ahead, below) draws at once; the fresh copy replaces it.
+    const fetchWeek = () => sheetApi.all(workspace.id, day, teamId || undefined);
+    const last = peek(fetchWeek);
+    if (last) setData(last);
+    setBusy(!last);
+    fetchWeek()
       .then((d) => { setData(d); setError(null); setRefused(false); })
+      .finally(() => setBusy(false))
       .catch((e) => {
         if (e instanceof ApiError && e.status === 403) setRefused(true);
         else setError(e.message);
       });
   }, [workspace, day, teamId]);
   useEffect(() => { load(); }, [load]);
+  const shownStart = data?.period_start;
+  useEffect(() => {
+    if (!workspace || !shownStart) return undefined;
+    return prefetchWeeks(shownStart, (start) => sheetApi.all(workspace.id, start, teamId || undefined));
+  }, [workspace, shownStart, teamId]);
 
   const people = useMemo(() => {
     const rows = data?.people ?? [];
@@ -75,6 +87,10 @@ export const AllTimesheets: React.FC = () => {
     ));
     return by ? [...out].sort(by) : out;
   }, [data, query, shape, status, sort]);
+
+  const openPerson = useCallback((userId: string) => {
+    navigate(`/timesheets/people/${encodeURIComponent(userId)}?week=${shownStart}`);
+  }, [navigate, shownStart]);
 
   const narrowed = (data?.people.length ?? 0) - people.length;
   // Somebody who may only see their own hours gets told so, not an empty week with no dates.
@@ -157,7 +173,7 @@ export const AllTimesheets: React.FC = () => {
               </button>
             </p>
           )}
-          <div className="ui-card mt-4 overflow-x-auto">
+          <div className={`ui-card mt-4 overflow-x-auto ts-week ${busy ? 'is-busy' : ''}`}>
             <div className="min-w-[980px]" role="table" aria-label="All timesheets">
               <div className="grid border-b border-gray-200 text-xs text-gray-500" style={{ gridTemplateColumns: cols }} role="row">
                 <div className="px-4 py-3 text-sm text-gray-700">Person</div>
@@ -172,34 +188,7 @@ export const AllTimesheets: React.FC = () => {
                 </div>
               )}
               {people.map((p) => (
-                <div key={p.user.id} className="grid cursor-pointer border-b border-gray-100 transition-colors last:border-b-0 hover:bg-gray-50/70" style={{ gridTemplateColumns: cols }} role="row"
-                  onClick={() => navigate(`/timesheets/people/${encodeURIComponent(p.user.id)}?week=${data.period_start}`)}>
-                  <div className="flex min-w-0 items-center gap-2.5 px-4 py-2.5">
-                    <Avatar user={p.user} size={28} />
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-gray-900">{p.user.display_name || p.user.email}</div>
-                      <div className="text-xs text-gray-400">Capacity {hours(p.capacity_seconds)}</div>
-                    </div>
-                    {data.approvals_enabled && p.submission_status && (
-                      <span className={`ml-auto shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATUS_CLASS[p.submission_status]}`}>{STATUS_LABEL[p.submission_status]}</span>
-                    )}
-                  </div>
-                  {p.tracked_per_day.map((sec, i) => {
-                    const cap = p.capacity_per_day[i];
-                    const over = sec > cap;
-                    return (
-                      <div key={i} className={`border-l border-gray-100 px-2.5 py-2.5 ${isWeekend(data.days[i]) ? WEEKEND : cap === 0 ? 'bg-gray-50' : ''}`}
-                        title={`Capacity ${hours(cap)} · Tracked ${hours(sec)} · Billable ${hours(p.billable_per_day[i])} · ${over ? `Over by ${hours(sec - cap)}` : `Remaining ${hours(cap - sec)}`}`}>
-                        <div className={`text-sm ${sec ? 'text-gray-900' : 'text-gray-300'}`}>{sec ? hours(sec) : '—'}</div>
-                        <div className="mt-1 h-1 overflow-hidden rounded-full bg-gray-200"><div className={`h-full ${over ? 'bg-red-500' : 'bg-brand-500'}`} style={{ width: `${cap ? Math.min(100, (100 * sec) / cap) : sec ? 100 : 0}%` }} /></div>
-                      </div>
-                    );
-                  })}
-                  <div className="border-l border-gray-100 px-2.5 py-2.5">
-                    <div className="text-sm font-medium text-gray-900">{hours(p.total_seconds)}</div>
-                    <div className="text-xs text-gray-400">of {hours(p.capacity_seconds)}</div>
-                  </div>
-                </div>
+                <PersonRow key={p.user.id} p={p} days={data.days} cols={cols} approvals={data.approvals_enabled} onOpen={openPerson} />
               ))}
             </div>
           </div>
@@ -208,3 +197,40 @@ export const AllTimesheets: React.FC = () => {
     </div>
   );
 };
+
+/**
+ * One person's week. Drawn again only when their figures change, not on every click on the page:
+ * with seventy-odd people, redrawing them all to move the week's title is what made it lag.
+ */
+const PersonRow = React.memo<{ p: Person; days: string[]; cols: string; approvals: boolean; onOpen: (userId: string) => void }>(({ p, days, cols, approvals, onOpen }) => (
+  <div className="grid cursor-pointer border-b border-gray-100 transition-colors last:border-b-0 hover:bg-gray-50/70" style={{ gridTemplateColumns: cols }} role="row"
+    onClick={() => onOpen(p.user.id)}>
+    <div className="flex min-w-0 items-center gap-2.5 px-4 py-2.5">
+      <Avatar user={p.user} size={28} />
+      <div className="min-w-0">
+        <div className="truncate text-sm font-medium text-gray-900">{p.user.display_name || p.user.email}</div>
+        <div className="text-xs text-gray-400">Capacity {hours(p.capacity_seconds)}</div>
+      </div>
+      {approvals && p.submission_status && (
+        <span className={`ml-auto shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATUS_CLASS[p.submission_status]}`}>{STATUS_LABEL[p.submission_status]}</span>
+      )}
+    </div>
+    {p.tracked_per_day.map((sec, i) => {
+      const cap = p.capacity_per_day[i];
+      const over = sec > cap;
+      return (
+        <div key={i} className={`border-l border-gray-100 px-2.5 py-2.5 ${isWeekend(days[i]) ? WEEKEND : cap === 0 ? 'bg-gray-50' : ''}`}
+          title={`Capacity ${hours(cap)} · Tracked ${hours(sec)} · Billable ${hours(p.billable_per_day[i])} · ${over ? `Over by ${hours(sec - cap)}` : `Remaining ${hours(cap - sec)}`}`}>
+          <div className={`text-sm ${sec ? 'text-gray-900' : 'text-gray-300'}`}>{sec ? hours(sec) : '—'}</div>
+          <div className="mt-1 h-1 overflow-hidden rounded-full bg-gray-200"><div className={`h-full ${over ? 'bg-red-500' : 'bg-brand-500'}`} style={{ width: `${cap ? Math.min(100, (100 * sec) / cap) : sec ? 100 : 0}%` }} /></div>
+        </div>
+      );
+    })}
+    <div className="border-l border-gray-100 px-2.5 py-2.5">
+      <div className="text-sm font-medium text-gray-900">{hours(p.total_seconds)}</div>
+      <div className="text-xs text-gray-400">of {hours(p.capacity_seconds)}</div>
+    </div>
+  </div>
+), (a, b) => a.cols === b.cols && a.approvals === b.approvals && a.onOpen === b.onOpen
+  && a.days.join() === b.days.join() && JSON.stringify(a.p) === JSON.stringify(b.p));
+PersonRow.displayName = 'PersonRow';

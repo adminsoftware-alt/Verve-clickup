@@ -4,6 +4,7 @@ import { AlertTriangle, CalendarRange, CheckCircle2, Clock, Users } from 'lucide
 import { useWork } from './WorkContext';
 import { Avatar } from './ui';
 import { outboundApi, type TeamDigest } from './outboundApi';
+import { LinesSkeleton } from './Skeleton';
 
 const h = (s: number) => `${Math.round((s / 3600) * 10) / 10}h`;
 const day = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
@@ -22,7 +23,7 @@ export const TeamWeekPage: React.FC = () => {
       </header>
       <main className="min-h-0 flex-1 overflow-auto bg-gray-50/60 p-6">
         {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-        {!digest ? <p className="text-sm text-gray-400">Loading…</p> : digest.people.length === 0 ? (
+        {!digest ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : digest.people.length === 0 ? (
           <p className="mx-auto max-w-md rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">Nobody reports to you and you don't lead a Team yet.</p>
         ) : (
           <ul className="mx-auto grid max-w-6xl grid-cols-1 gap-3 lg:grid-cols-2" aria-label="Team members">

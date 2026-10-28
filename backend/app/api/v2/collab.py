@@ -62,16 +62,26 @@ def react(comment_id: uuid.UUID, data: c.ReactionIn, user: User = Depends(curren
     return comments.serialise(db, [row], user.id)[0]
 
 
-@router.get("/workspaces/{workspace_id}/assigned-comments", response_model=List[c.CommentWithTask])
-def assigned_comments(
-    workspace_id: uuid.UUID, include_resolved: bool = Query(False), user: User = Depends(current_user), db: Session = Depends(get_db)
-):
-    return comments.assigned_to_me(db, _ws(db, user, workspace_id), include_resolved)
+@router.post("/comments/{comment_id}/attachments", response_model=c.CommentFileOut, status_code=status.HTTP_201_CREATED)
+async def upload_comment_file(comment_id: uuid.UUID, file: UploadFile = File(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    data = await file.read()
+    a = comments.add_file(db, user.id, comment_id, file.filename or "file", file.content_type or "application/octet-stream", data)
+    db.commit()
+    return c.CommentFileOut(id=a.id, filename=a.filename, content_type=a.content_type, size=a.size)
 
 
-@router.get("/workspaces/{workspace_id}/replies", response_model=List[c.CommentWithTask])
-def replies(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return comments.replies_for_me(db, _ws(db, user, workspace_id))
+@router.put("/tasks/{task_id}/seen", response_model=c.SeenOut)
+def mark_seen(task_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    previous = comments.seen(db, open_task(db, user.id, task_id, VIEW))
+    db.commit()
+    return c.SeenOut(previous=previous)
+
+
+@router.post("/notifications/{notification_id}/reply", response_model=c.CommentOut, status_code=status.HTTP_201_CREATED)
+def reply_from_inbox(notification_id: uuid.UUID, data: c.ReplyIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    row, opened = comments.reply_to_notification(db, user.id, notification_id, data)
+    db.commit()
+    return comments.serialise(db, [row], user.id, {opened.obj.id: opened.level})[0]
 
 
 # --- activity and watchers ------------------------------------------------------------------

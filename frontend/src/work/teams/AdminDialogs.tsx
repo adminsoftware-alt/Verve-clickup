@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, ClipboardCheck, Download, FileSpreadsheet,
 import { Portal, useEscapeToClose } from '../ui';
 import { parseLevel } from './levels';
 import { peopleApi, personName, type ImportResult, type ImportRow, type ImportTeam, type JoinerStep, type OffboardPreview, type Person } from './peopleApi';
+import { LinesSkeleton } from '../Skeleton';
 
 const Dialog: React.FC<{ title: string; onClose: () => void; width?: string; children: React.ReactNode }> = ({ title, onClose, width = 'w-[36rem]', children }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -127,7 +128,7 @@ export const OffboardDialog: React.FC<{ ws: string; person: Person; people: Pers
           <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800" role="status">{done}</p>
           <div className="mt-4 flex justify-end"><button type="button" onClick={onClose} className={primary}>Close</button></div>
         </>
-      ) : preview === null ? <p className="text-sm text-gray-400">{error ?? 'Loading…'}</p> : (
+      ) : preview === null ? <p className="text-sm text-gray-400">{error ?? <LinesSkeleton />}</p> : (
         <>
           <ul className="mb-4 space-y-1.5 text-sm text-gray-700">
             <li className="flex gap-2"><span className="w-40 shrink-0 text-gray-500">Open tasks</span>{preview.open_tasks}</li>

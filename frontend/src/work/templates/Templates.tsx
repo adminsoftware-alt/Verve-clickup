@@ -6,6 +6,7 @@ import { Portal } from '../ui';
 import { useWork } from '../WorkContext';
 import { useWritableLists } from '../task/TaskActions';
 import { ask } from '../../components/ask';
+import { LinesSkeleton } from '../Skeleton';
 
 const KIND_LABEL: Record<TemplateKind, string> = { task: 'Task', list: 'List', folder: 'Folder', space: 'Space' };
 const KIND_ICON: Record<TemplateKind, React.ReactNode> = {
@@ -202,7 +203,7 @@ export const TemplateCenter: React.FC<{ kind?: TemplateKind; target?: string; on
           </div>
           {error && <p className="mb-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           <ul className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-auto sm:grid-cols-2" aria-label="Templates">
-            {items === null ? <li className="text-sm text-gray-400">Loading…</li>
+            {items === null ? <li className="text-sm text-gray-400"><LinesSkeleton /></li>
               : shown.length === 0 ? (
                 <li className="col-span-full py-8 text-center text-sm text-gray-400">
                   No templates yet. Save a task, List, Folder or Space as a template from its “…” menu.

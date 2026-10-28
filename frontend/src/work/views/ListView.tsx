@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Ban, CheckSquare, OctagonAlert, ChevronDown, ChevronRight, GitBranch, Hourglass, Layers3, MessageSquare, Paperclip, Play, Plus, Repeat, Square } from 'lucide-react';
-import type { CustomField, Status, Task, UserRef } from '../api';
-import { AvatarStack, PriorityFlag, StatusDot, StatusPill, formatDue, formatDuration } from '../ui';
+import { workApi, type CustomField, type Status, type Task, type TaskInput, type UserRef } from '../api';
+import { AvatarStack, Menu, PRIORITIES, PriorityFlag, StatusDot, StatusPill, formatDue, formatDuration, parseDuration } from '../ui';
+import { DateField } from '../DateField';
+import { ASSIGNEES, PickCell } from './TableView';
 import { formatClock, useNow, useRunningTimer } from '../RunningTimer';
 import { NO_GROUP, type GroupBy, type StatusGroupOfTasks } from './grouping';
 import { COLUMNS, type ColumnKey } from './viewSettings';
@@ -40,6 +42,9 @@ export const ListView: React.FC<{
   /** Whether "+ Add Task" is offered in a group; onCreate gets that group's key. */
   canAddIn: (groupKey: string) => boolean;
   /** Why there is nothing to show, so the empty state can say something true. */
+  /** Given, a row's fields edit in place -- status, assignees, dates, priority, estimate -- and
+   *  this is called once a change is saved. Clicking the name still opens the whole task. */
+  onChanged?: () => void;
   emptyBecause?: 'filters' | 'none-assigned' | 'nothing-here';
   onCreate: (name: string, key: string) => Promise<void>;
   onOpenTask: (id: string) => void;
@@ -51,7 +56,31 @@ export const ListView: React.FC<{
   onSelect: (ids: string[], on: boolean) => void;
   /** The "+" at the end of the column headers: add a column (a custom field). */
   onAddColumn?: () => void;
-}> = ({ tasks, statuses, listName, groupBy, makeGroups, canAddIn, onCreate, onManageGroups, onOpenTask, columns, fields, people, onSetField, selected, onSelect, onAddColumn, emptyBecause }) => {
+}> = ({ tasks: incoming, statuses, listName, groupBy, makeGroups, canAddIn, onCreate, onManageGroups, onOpenTask, columns, fields, people, onSetField, selected, onSelect, onAddColumn, onChanged, emptyBecause }) => {
+  // An edit shows at once -- the list can take a while to come back -- and fresh data from the
+  // server replaces it. A failed save puts the old value back and says why.
+  const [local, setLocal] = useState<Record<string, Partial<Task>>>({});
+  const tasks = useMemo(() => incoming.map((t) => ({ ...t, ...(local[t.id] ?? {}) })), [incoming, local]);
+  useEffect(() => setLocal({}), [incoming]);
+  const [listStatuses, setListStatuses] = useState<Record<string, Status[]>>({});
+  const editable = (t: Task) => !!onChanged && (t.permission_level === 'edit' || t.permission_level === 'full');
+  const save = async (t: Task, input: TaskInput, optimistic: Partial<Task>) => {
+    setLocal((l) => ({ ...l, [t.id]: { ...(l[t.id] ?? {}), ...optimistic } }));
+    try {
+      await workApi.updateTask(t.id, input);
+      onChanged?.();
+    } catch (e) {
+      setLocal((l) => { const next = { ...l }; delete next[t.id]; return next; });
+      notify.error(e);
+    }
+  };
+  const statusesFor = (t: Task) => statuses ?? listStatuses[t.list_id] ?? [t.status];
+  const loadStatuses = (t: Task) => {
+    if (statuses || listStatuses[t.list_id]) return;
+    workApi.statuses('list', t.list_id).then((set) => setListStatuses((m) => ({ ...m, [t.list_id]: set.statuses }))).catch(() => undefined);
+  };
+  /** A cell that edits in place: a click inside it does not open the task. */
+  const stay = (e: React.SyntheticEvent) => e.stopPropagation();
   const { locate, taskTypes } = useWork();
   const taskTypeOf = (t: Task) => (t.type_id ? taskTypes.find((x) => x.id === t.type_id) : undefined);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -116,6 +145,63 @@ export const ListView: React.FC<{
         <Plus size={11} /> Add
       </span>
     );
+    if (editable(task)) {
+      const flag = (p: number | null) => <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: p ? PRIORITIES[p].color : '#D1D5DB' }} />;
+      switch (key) {
+        case 'assignee': return (
+          <div key={key} className="min-w-0 pr-2" onClick={stay}>
+            <FieldEditor compact field={{ ...ASSIGNEES, name: `Assignees of ${task.name}` }} value={task.assignees.map((u) => u.id)} people={people}
+              onChange={(v) => {
+                const ids = (v as string[] | null) ?? [];
+                save(task, { assignees: ids }, { assignees: people.filter((u) => ids.includes(u.id)) });
+              }} />
+          </div>
+        );
+        case 'start_date':
+        case 'due_date': return (
+          <div key={key} className="min-w-0 pr-2" onClick={stay}>
+            <DateField
+              value={key === 'start_date' ? task.start_date : task.due_date}
+              label={`${key === 'start_date' ? 'Start' : 'Due'} date of ${task.name}`}
+              overdue={key === 'due_date' && task.is_overdue}
+              format="compact"
+              placeholder="—"
+              onChange={(iso) => save(task, { [key]: iso }, { [key]: iso })}
+            />
+          </div>
+        );
+        case 'priority': return (
+          <div key={key} className="min-w-0 pr-2" onClick={stay}>
+            <PickCell
+              label={`Priority of ${task.name}`}
+              current={<>{flag(task.priority)}<span className="truncate text-[13px]" style={{ color: task.priority ? PRIORITIES[task.priority].color : '#9CA3AF' }}>{task.priority ? PRIORITIES[task.priority].label : 'None'}</span></>}
+              items={[1, 2, 3, 4, null].map((p) => ({
+                key: String(p ?? 'none'), label: p ? PRIORITIES[p].label : 'No priority', icon: flag(p),
+                on: (task.priority ?? null) === p, onPick: () => save(task, { priority: p }, { priority: p }),
+              }))}
+            />
+          </div>
+        );
+        case 'time_estimate': return (
+          <div key={key} className="min-w-0 pr-2" onClick={stay}>
+            <input
+              aria-label={`Time estimate of ${task.name}`}
+              key={task.time_estimate_seconds ?? ''}
+              defaultValue={formatDuration(task.time_estimate_seconds)}
+              placeholder="—"
+              onBlur={(e) => {
+                const text = e.target.value.trim();
+                const secs = text ? parseDuration(text) : null;
+                if (text && secs === null) { notify.error(new Error('Write estimates like 1h 30m')); e.target.value = formatDuration(task.time_estimate_seconds); return; }
+                if (secs !== (task.time_estimate_seconds ?? null)) save(task, { time_estimate_seconds: secs }, { time_estimate_seconds: secs });
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+              className="w-full min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-gray-600 placeholder:text-gray-300 hover:border-gray-200 focus:border-brand-400 focus:bg-white focus:outline-none"
+            />
+          </div>
+        );
+      }
+    }
     switch (key) {
       case 'custom_id': return <div key={key} className="font-mono text-xs text-gray-500">{task.custom_id ?? ''}</div>;
       case 'assignee': return <div key={key}>{needed ? <Wanted /> : <AvatarStack users={task.assignees} />}</div>;
@@ -243,7 +329,23 @@ export const ListView: React.FC<{
                 </button>
               )}
             </span>
-            <StatusDot status={task.status} />
+            {editable(task) ? (
+              // Statuses of another List are fetched as the pointer arrives, so they are there by the click.
+              <span onClick={stay} onMouseEnter={() => loadStatuses(task)} className="flex">
+                <Menu
+                  align="left"
+                  label={`Status of ${task.name}`}
+                  width={220}
+                  onOpenChange={(o) => o && loadStatuses(task)}
+                  items={statusesFor(task).map((st) => ({
+                    label: st.name,
+                    icon: <StatusDot status={st} size={11} />,
+                    onClick: () => { if (st.id !== task.status.id) save(task, { status_id: st.id }, { status: st }); },
+                  }))}
+                  trigger={<span title={`Status: ${task.status.name} -- click to change`} className="flex rounded-full p-0.5 hover:bg-gray-200"><StatusDot status={task.status} /></span>}
+                />
+              </span>
+            ) : <StatusDot status={task.status} />}
             {taskTypeOf(task) && <TypeIcon type={taskTypeOf(task)!} />}
             <div className="min-w-0">
               {location && <div className="truncate text-[11px] leading-tight text-gray-400">{location}</div>}

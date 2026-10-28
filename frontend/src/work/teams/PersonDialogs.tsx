@@ -18,6 +18,7 @@ export { LEVELS };
 
 export { ROLE_LABEL, accessOf, type Access } from './access';
 import { ROLE_LABEL, accessOf } from './access';
+import { LinesSkeleton } from '../Skeleton';
 
 const Modal: React.FC<{ title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }> = ({ title, onClose, wide, children }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -431,7 +432,7 @@ export const PersonPanel: React.FC<{
                   </>
                 )}
                 <h3 className="mb-1 mt-6 text-xs font-semibold uppercase tracking-wide text-gray-400">Assigned work {tasks ? tasks.length : ''}</h3>
-                {tasks === null ? <p className="text-sm text-gray-400">Loading…</p> : tasks.length === 0 ? <p className="text-sm text-gray-400">No open tasks you can see.</p> : (
+                {tasks === null ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : tasks.length === 0 ? <p className="text-sm text-gray-400">No open tasks you can see.</p> : (
                   <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
                     {tasks.slice(0, 30).map((t) => (
                       <li key={t.id}>

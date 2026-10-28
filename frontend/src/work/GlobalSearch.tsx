@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  BarChart3, Bell, Clock, CornerDownLeft, Folder, Inbox, LayoutGrid, List as ListIcon, MessageSquare, Search, UserCheck, Users,
+  BarChart3, Bell, Clock, CornerDownLeft, Folder, Inbox, LayoutGrid, List as ListIcon, Search, UserCheck, Users,
 } from 'lucide-react';
 import { workApi, type FolderNode, type SpaceNode, type Task, type UserRef } from './api';
 import { Avatar, Portal, StatusDot } from './ui';
@@ -24,7 +24,6 @@ interface Hit {
 const PAGES: { label: string; path: string; icon: React.ReactNode; words: string; managers?: boolean }[] = [
   { label: 'Inbox', path: '/inbox', icon: <Inbox size={15} />, words: 'inbox notifications' },
   { label: 'My Tasks', path: '/my-tasks', icon: <UserCheck size={15} />, words: 'my tasks home assigned' },
-  { label: 'Replies', path: '/replies', icon: <MessageSquare size={15} />, words: 'replies comments threads' },
   { label: 'Reminders', path: '/reminders', icon: <Bell size={15} />, words: 'reminders' },
   { label: 'Dashboards', path: '/dashboards', icon: <BarChart3 size={15} />, words: 'dashboards reports charts' },
   { label: 'Timesheet', path: '/timesheets', icon: <Clock size={15} />, words: 'timesheets time tracking hours' },
@@ -231,7 +230,7 @@ export const SearchButton: React.FC = () => (
   <button type="button" onClick={openSearch} aria-label="Search (Ctrl+K)"
     className="group flex h-10 w-10 items-center justify-center gap-2.5 rounded-xl border border-gray-200 bg-white/90 text-sm text-gray-400 shadow-sm ring-blue-500/10 transition-all hover:border-blue-300 hover:text-gray-600 hover:shadow-md hover:ring-4 focus:outline-none focus-visible:border-blue-400 focus-visible:ring-4 sm:w-full sm:justify-start sm:px-3.5">
     <Search size={16} className="shrink-0 text-gray-400 group-hover:text-blue-600" />
-    <span className="hidden flex-1 truncate text-left sm:inline">Search tasks, Lists, people…</span>
+    <span className="hidden flex-1 truncate text-left sm:inline">Search…</span>
     <kbd className="hidden shrink-0 rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-gray-500 md:inline">Ctrl K</kbd>
   </button>
 );

@@ -7,11 +7,16 @@
 // The same quote for everyone, all day: it is picked from the date, not at random, so two people
 // looking at their Dashboards at the same time are reading the same line. That is what makes it
 // something to mention to each other rather than a private fortune cookie.
-import React, { useMemo } from 'react';
+//
+// Beside the greeting, this week as a row of days, Monday to Sunday, with today filled in navy.
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Compass, Eye, Feather, Flame, Footprints, Gem, Hammer, Hourglass, Layers, Leaf, Lightbulb, Mountain, Ruler,
+  Compass, Eye, Feather, Flame, Footprints, Gem, Hammer, Hourglass, Layers, Leaf, Lightbulb, Mountain, Quote, Ruler,
   Scale, ScanSearch, Sparkles, Sprout, Target, Timer, Waves, Wrench,
 } from 'lucide-react';
+
+import { useWork } from '../WorkContext';
+import { isoDay, sheetApi, type Timesheet } from '../timesheets/api';
 
 interface Thought {
   words: string;
@@ -21,19 +26,6 @@ interface Thought {
   Icon: React.ElementType;
 }
 
-/**
- * Seven colours, kept light. The quote carries the colour because it is the thing being read --
- * but softly: something opened every morning should not shout at anyone.
- */
-const TONES = [
-  { band: 'from-rose-50/80 to-white', ring: 'ring-rose-100', chip: 'bg-rose-100/70 text-rose-500', words: 'text-rose-600' },
-  { band: 'from-orange-50/80 to-white', ring: 'ring-orange-100', chip: 'bg-orange-100/70 text-orange-500', words: 'text-orange-600' },
-  { band: 'from-amber-50/80 to-white', ring: 'ring-amber-100', chip: 'bg-amber-100/70 text-amber-600', words: 'text-amber-700' },
-  { band: 'from-fuchsia-50/80 to-white', ring: 'ring-fuchsia-100', chip: 'bg-fuchsia-100/70 text-fuchsia-500', words: 'text-fuchsia-600' },
-  { band: 'from-purple-50/80 to-white', ring: 'ring-purple-100', chip: 'bg-purple-100/70 text-purple-500', words: 'text-purple-600' },
-  { band: 'from-sky-50/80 to-white', ring: 'ring-sky-100', chip: 'bg-sky-100/70 text-sky-500', words: 'text-sky-600' },
-  { band: 'from-red-50/70 to-white', ring: 'ring-red-100', chip: 'bg-red-100/60 text-red-400', words: 'text-red-500' },
-] as const;
 
 /**
  * Chosen for people who do careful work for clients: about craft, attention, honesty and
@@ -81,6 +73,17 @@ const THOUGHTS: Thought[] = [
 const dayNumber = (d: Date) =>
   Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86_400_000);
 
+/** "Good evening," quietly, then the name in bold navy: the name is the warm part. */
+const Hello: React.FC<{ greeting: string }> = ({ greeting }) => {
+  const cut = greeting.indexOf(', ');
+  if (cut < 0) return <p className="text-xl font-bold text-[#234788]">{greeting}</p>;
+  return (
+    <p className="text-[15px] text-gray-500">
+      {greeting.slice(0, cut)}, <span className="text-xl font-bold text-[#234788]">{greeting.slice(cut + 2)}</span>
+    </p>
+  );
+};
+
 export const DailyThought: React.FC<{
   /** "Good morning, Harish" — kept, because being greeted by name is the warm part. */
   greeting: string;
@@ -88,38 +91,62 @@ export const DailyThought: React.FC<{
   const today = new Date();
   const key = today.toDateString();
 
-  // The quote and the colour are counted off the day separately. There are 31 quotes and 7
-  // colours, and 7 does not divide 31, so the pairing shifts every cycle: the same line comes
-  // back in a different colour, and no two days running are ever the same shade.
-  const { thought, skin } = useMemo(() => {
+  // The quote is counted off the day, so everyone sees the same line and it changes at midnight.
+  const thought = useMemo(() => {
     const n = dayNumber(new Date(key));
-    const wrap = (value: number, size: number) => ((value % size) + size) % size;
-    return { thought: THOUGHTS[wrap(n, THOUGHTS.length)], skin: TONES[wrap(n, TONES.length)] };
+    return THOUGHTS[((n % THOUGHTS.length) + THOUGHTS.length) % THOUGHTS.length];
   }, [key]);
 
-  const date = today.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  // This week's timesheet, for the row of days.
+  const { workspace } = useWork();
+  const [week, setWeek] = useState<Timesheet | null>(null);
+  useEffect(() => {
+    if (!workspace) return;
+    sheetApi.get(workspace.id, isoDay(new Date())).then(setWeek).catch(() => undefined);
+  }, [workspace]);
+
+  const todayIso = isoDay(today);
+  // Monday to Sunday, whatever day the timesheet week starts on.
+  const mondayFirst = (d: string) => (new Date(d + 'T00:00').getDay() + 6) % 7;
+  const days = week
+    ? week.days.map((d, i) => ({ d, works: (week.capacity_per_day[i] ?? 0) > 0 })).sort((a, b) => mondayFirst(a.d) - mondayFirst(b.d))
+    : [];
 
   return (
     <section
       aria-label="Thought of the day"
-      className={`mb-4 overflow-hidden rounded-2xl bg-gradient-to-r ${skin.band} px-6 py-5 shadow-sm ring-1 ${skin.ring}`}
+      className="relative mb-4 overflow-hidden rounded-2xl bg-gradient-to-r from-white via-white to-[#EEF2F8] px-6 py-5 pl-7 ring-1 ring-[#DCE3EE]"
     >
-      <p className="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold text-gray-800">
-        {greeting}
-        <span className="text-xs font-normal text-gray-500">{date}</span>
-      </p>
-      <div className="mt-3 flex items-start gap-4">
-        {/* A symbol for what this line is about, rather than a quote mark that says only
-            "this is a quote" -- which the quotation marks already say. */}
-        <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${skin.chip}`} aria-hidden>
-          <thought.Icon size={22} strokeWidth={1.75} />
-        </span>
-        <figure className="min-w-0 flex-1">
-          <blockquote className={`text-lg font-semibold leading-snug tracking-tight sm:text-xl ${skin.words}`}>
-            “{thought.words}”
-          </blockquote>
-        </figure>
+      <span className="absolute inset-y-0 left-0 w-1 bg-[#234788]" aria-hidden />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Hello greeting={greeting} />
+        <div className="flex gap-1.5" aria-label="This week">
+          {days.map(({ d, works }) => (
+            <span
+              key={d}
+              aria-label={`${d}${d === todayIso ? ', today' : ''}`}
+              aria-current={d === todayIso ? 'date' : undefined}
+              className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold ${
+                d === todayIso ? 'bg-[#234788] text-white'
+                  : works ? 'bg-[#EEF2F8] text-[#6B7FA8]' : 'text-gray-300'}`}
+            >
+              {new Date(d + 'T00:00').toLocaleDateString(undefined, { weekday: 'narrow' })}
+            </span>
+          ))}
+        </div>
       </div>
+      <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#EEF2F8] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[#234788]">
+        Thought of the day
+      </span>
+      <figure className="relative mt-3 max-w-4xl pr-16">
+        <blockquote className="text-xl font-semibold leading-snug tracking-tight text-[#142B57] sm:text-[26px]">
+          “{thought.words}”
+        </blockquote>
+        <figcaption className="mt-2 flex items-center gap-2 text-sm font-medium text-gray-500">
+          <span className="h-px w-6 bg-gray-300" aria-hidden /> {thought.who}
+        </figcaption>
+      </figure>
+      <Quote size={64} strokeWidth={1.25} className="pointer-events-none absolute bottom-3 right-5 text-[#234788]/10" aria-hidden />
     </section>
   );
 };

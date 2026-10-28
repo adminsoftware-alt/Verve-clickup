@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, CalendarDays, CalendarRange, Clock, List as ListIcon, MessageSquare, Settings, Table2 } from 'lucide-react';
+import { peek } from '../api';
 import { useWork, useMe } from '../WorkContext';
 import { TaskPanel } from '../TaskPanel';
 import { ListSkeleton } from '../Skeleton';
@@ -21,7 +22,7 @@ const stateOf = (task: { status: { group: string } | null }) =>
   (task.status ? progressOf({ status: task.status } as never) : 'todo');
 import { MyWorkloadView } from '../views/MyWorkloadView';
 import { EntriesView, FilterBar } from './views';
-import { WeekNav, hours } from './pieces';
+import { WeekNav, hours, prefetchWeeks } from './pieces';
 import { AllTimesheets } from './AllTimesheets';
 import { Approvals } from './Approvals';
 import { SettingsDialog } from './SettingsDialog';
@@ -33,7 +34,7 @@ type Tab = 'mine' | 'person' | 'all' | 'approvals';
 export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
   const { workspace } = useWork();
   const { isAdmin, led } = useLeadership();
-  const [settings, setSettings] = useState<SheetSettings | null>(null);
+  const [settings, setSettings] = useState<SheetSettings | null>(() => (workspace ? peek(() => sheetApi.settings(workspace.id)) ?? null : null));
   const [showSettings, setShowSettings] = useState(false);
   const loadSettings = useCallback(() => { if (workspace) sheetApi.settings(workspace.id).then(setSettings).catch(() => undefined); }, [workspace]);
   useEffect(() => { loadSettings(); }, [loadSettings]);
@@ -57,12 +58,20 @@ export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
   const active = tab === 'person' ? 'all' : tab;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-gray-50/70">
+    <div className="ui-clean timesheet-ui flex h-full min-h-0 flex-col bg-gray-50/70">
       {/* Wraps, and with less air between things on a phone. As one unwrapped row with 24px gaps
           it was 58px wider than a 390px screen, which put Settings off the right edge where
           nothing could reach it. */}
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-gray-200 bg-white px-4 sm:gap-x-6 sm:px-6">
-        <span className="flex items-center gap-2 py-3 text-[15px] text-gray-800"><Clock size={17} /> Timesheet</span>
+      {/* The page's title sits on the page itself, not in a bar: a navy tile, the name and what
+          the page is for, with today's date and Settings on the right. */}
+      <header className="ts-head flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-gray-200 bg-white px-4 sm:gap-x-6 sm:px-6">
+        <span className="ts-head-title flex items-center gap-2 py-3 text-[15px] text-gray-800">
+          <span className="ts-head-icon"><Clock size={17} /></span>
+          <span className="flex min-w-0 flex-col">
+            <span className="ts-head-name">Timesheet</span>
+            <span className="ts-head-sub">{isAdmin ? 'Everyone’s hours, week by week' : 'Your hours, task by day'}</span>
+          </span>
+        </span>
         {/* One tab is not a choice, and next to the heading it reads as the same word twice. */}
         {shown.length > 1 && (
           <>
@@ -76,16 +85,22 @@ export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
             </nav>
           </>
         )}
-        {/* Hours, the week's shape and approvals are company policy, not a personal
-            preference, so the whole dialog belongs to owners and admins -- Team leads included. */}
-        {isAdmin && (
-          <button
-            type="button" onClick={() => setShowSettings(true)} aria-label="Timesheet settings"
-            className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <Settings size={14} /> <span className="hidden sm:inline">Settings</span>
-          </button>
-        )}
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          <span className="ts-head-today" title="Today">
+            <CalendarDays size={14} />
+            {new Date().toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+          </span>
+          {/* Hours, the week's shape and approvals are company policy, not a personal
+              preference, so the whole dialog belongs to owners and admins -- Team leads included. */}
+          {isAdmin && (
+            <button
+              type="button" onClick={() => setShowSettings(true)} aria-label="Timesheet settings"
+              className="ts-head-settings flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <Settings size={14} /> <span className="hidden sm:inline">Settings</span>
+            </button>
+          )}
+        </span>
       </header>
       <main className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
         {/* An admin keeps no week of their own, so "My timesheet" is everyone's for them; one
@@ -138,24 +153,44 @@ const SheetPage: React.FC = () => {
 
   const [sheet, setSheet] = useState<Timesheet | null>(null);
   const [query, setQuery] = useState<SheetQuery>({ billable: 'all', sort: 'name' });
-  const [tags, setTags] = useState<TimeTag[]>([]);
+  const [tags, setTags] = useState<TimeTag[]>(() => (workspace ? peek(() => sheetApi.tags(workspace.id)) ?? [] : []));
   const [error, setError] = useState<string | null>(null);
   const [openTask, setOpenTask] = useState<string | null>(null);
   const [review, setReview] = useState<'approve' | 'request-changes' | 'reopen' | 'submit' | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const seq = useRef(0);
+  const shown = useRef('');
 
   const load = useCallback(async () => {
     if (!workspace) return;
     const mine = ++seq.current;
+    const fetchSheet = () => sheetApi.get(workspace.id, day, { ...query, userId: whose });
+    // Arriving at a week, draw it as it was last seen while the fresh copy loads. Not when
+    // reloading the week on screen after an edit: that would flash the old numbers back.
+    const showing = JSON.stringify([workspace.id, day, query, whose]);
+    if (shown.current !== showing) {
+      shown.current = showing;
+      const last = peek(fetchSheet);
+      if (last) setSheet(last);
+      setBusy(!last);
+    }
     try {
-      const data = await sheetApi.get(workspace.id, day, { ...query, userId: whose });
+      const data = await fetchSheet();
       if (mine === seq.current) { setSheet(data); setError(null); }
     } catch (e) {
       if (mine === seq.current) setError((e as Error).message);
+    } finally {
+      if (mine === seq.current) setBusy(false);
     }
   }, [workspace, day, query, whose]);
   useEffect(() => { load(); }, [load, version]);
+  // The weeks either side, fetched ahead so stepping to them is instant.
+  const periodStart = sheet?.period_start;
+  useEffect(() => {
+    if (!workspace || !periodStart) return undefined;
+    return prefetchWeeks(periodStart, (start) => sheetApi.get(workspace.id, start, { ...query, userId: whose }));
+  }, [workspace, periodStart, query, whose]);
   useEffect(() => { if (workspace) sheetApi.tags(workspace.id).then(setTags).catch(() => undefined); }, [workspace]);
 
   const go = (d: string) => setParams((p) => { const n = new URLSearchParams(p); n.set('week', d); return n; });
@@ -285,7 +320,7 @@ const SheetPage: React.FC = () => {
       {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {note && <p className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800" role="status">{note}</p>}
 
-      <div className="mt-4">
+      <div className={`ts-week mt-4 ${busy ? 'is-busy' : ''}`}>
         {view === 'calendar' ? (
           <SheetCalendar sheet={shownSheet} onOpenTask={setOpenTask} />
         ) : view === 'workload' ? (
@@ -386,3 +421,4 @@ const SubmissionThread: React.FC<{ submissionId: string }> = ({ submissionId }) 
     </section>
   );
 };
+

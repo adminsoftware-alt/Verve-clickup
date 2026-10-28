@@ -1,18 +1,22 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Archive, Bell, BellOff, Check, CheckCheck, Clock, Flag, Inbox as InboxIcon, MessageSquare, MoreHorizontal, Plus, Settings, SlidersHorizontal, Trash2, UserCheck, X } from 'lucide-react';
-import { useWork } from './WorkContext';
+import { Archive, Bell, BellOff, BellRing, Check, CheckCheck, Clock, CornerDownRight, Flag, Inbox as InboxIcon, MoreHorizontal, Plus, Settings, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { useMe, useWork } from './WorkContext';
 import { disablePush, enablePush, outboundApi, type Delivery } from './outboundApi';
 import {
   collabApi, inboxFilterCount, NO_INBOX_FILTERS,
-  type CommentWithTask, type InboxDue, type InboxFilters, type InboxItem, type InboxTab, type NotificationSetting, type Reminder,
+  type InboxDue, type InboxFilters, type InboxItem, type InboxTab, type NotificationSetting, type Reminder,
 } from './collabApi';
 import { Avatar, formatDue, Menu, Portal, PriorityFlag, PRIORITIES, StatusDot } from './ui';
 import { usePhone } from './useBreakpoint';
 import { TaskPanel } from './TaskPanel';
 import { ReminderDialog } from './task/TaskActions';
+import { Composer, sendCommentFiles, type ComposerOutput } from './task/TaskFeed';
+import { notify } from '../components/notify';
+import { useBellStyle } from '../components/bellStyle';
 import { TwoStepFilter, type FilterField } from './views/TwoStepFilter';
 import { FEATURES } from '../config/features';
+import { LinesSkeleton } from './Skeleton';
 
 export const INBOX_CHANGED = 'timetriq:inbox';
 export const inboxChanged = () => window.dispatchEvent(new Event(INBOX_CHANGED));
@@ -37,8 +41,12 @@ function describe(item: InboxItem): string {
     case 'assigned': return 'assigned you to this task';
     case 'mentioned': return 'mentioned you';
     case 'reply': return 'replied in a thread';
-    case 'comment': return 'commented';
+    case 'comment': return Number(d.count ?? 1) > 1 ? `commented (${d.count} new comments)` : 'commented';
     case 'assigned_comment': return 'assigned you a comment';
+    case 'reaction': {
+      const others = Number(d.count ?? 1) - 1;
+      return `reacted ${d.emoji ?? ''} to your comment${others > 0 ? ` (and ${others} ${others === 1 ? 'other' : 'others'})` : ''}`;
+    }
     case 'status': return `changed the status from ${d.from ?? '—'} to ${d.to ?? '—'}`;
     case 'due_date': return d.to ? `changed the due date to ${new Date(String(d.to)).toLocaleDateString()}` : 'removed the due date';
     case 'assignees': return 'changed the assignees';
@@ -98,6 +106,7 @@ const GROUPS: { key: string; label: string }[] = [
   { key: 'assigned', label: 'Assigned to me' },
   { key: 'mentions', label: 'Mentions' },
   { key: 'comments', label: 'Comments & replies' },
+  { key: 'comment_todos', label: 'Comments assigned to me' },
   { key: 'status', label: 'Status changes' },
   { key: 'dates', label: 'Date changes' },
   { key: 'shared', label: 'Shared with me' },
@@ -183,6 +192,9 @@ export const InboxPage: React.FC = () => {
   const [items, setItems] = useState<InboxItem[] | null>(null);
   const [counts, setCounts] = useState({ primary: 0, other: 0, later: 0 });
   const [openTask, setOpenTask] = useState<string | null>(null);
+  const [focusComment, setFocusComment] = useState<string | null>(null);
+  const [replying, setReplying] = useState<string | null>(null);
+  const me = useMe();
   const [snoozing, setSnoozing] = useState<string | null>(null);
   const [settings, setSettings] = useState(false);
   const phone = usePhone();
@@ -194,8 +206,10 @@ export const InboxPage: React.FC = () => {
   }, [workspace, tab, filters]);
   useEffect(() => { setItems(null); load().catch(() => undefined); }, [load]);
   useEffect(() => {
-    const t = setInterval(() => load().catch(() => undefined), 30_000);
-    return () => clearInterval(t);
+    const again = () => { if (document.visibilityState === 'visible') load().catch(() => undefined); };
+    const t = setInterval(again, 30_000);
+    document.addEventListener('visibilitychange', again);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', again); };
   }, [load]);
   const act = async (id: string, body: Parameters<typeof collabApi.updateNotification>[1]) => {
     await collabApi.updateNotification(id, body);
@@ -210,6 +224,7 @@ export const InboxPage: React.FC = () => {
     const task = params.get('task');
     if (!task) return;
     setOpenTask(task);
+    setFocusComment(params.get('comment'));
     const n = params.get('n');
     if (n) collabApi.updateNotification(n, { read: true }).then(inboxChanged).catch(() => undefined);
     setParams({}, { replace: true });
@@ -218,7 +233,7 @@ export const InboxPage: React.FC = () => {
     if (!item.read) act(item.id, { read: true });
     if (item.kind === 'time_changed') navigate('/timesheets');
     else if (item.kind === 'team_change' && item.data.team_id) navigate(`/people/teams/${item.data.team_id}`);
-    else if (item.task) setOpenTask(item.task.id);
+    else if (item.task) { setFocusComment(item.comment?.id ?? null); setOpenTask(item.task.id); }
     else if (item.kind === 'timesheet_reminder') navigate('/timesheets');
     else if (item.kind === 'space_join_request') navigate('/all-spaces');
     else if (item.kind === 'space_join_decision' && item.data.space_id) navigate(`/s/${item.data.space_id}`);
@@ -232,6 +247,24 @@ export const InboxPage: React.FC = () => {
       navigate(`/${seg}/${item.data.location_id}?v=${item.data.view_id}`);
     }
   };
+
+  // Answering without opening the task: a reply in the item's thread, or ticking off a comment
+  // that was assigned to you.
+  const canReply = (item: InboxItem) => !!item.comment && !!item.task && tab !== 'cleared';
+  const reply = async (item: InboxItem, body: ComposerOutput) => {
+    try {
+      const sent = await collabApi.replyFromInbox(item.id, { body: body.body, mention_user_ids: body.mention_user_ids, mention_team_ids: body.mention_team_ids });
+      await sendCommentFiles(sent.id, body.files);
+      setReplying(null);
+      notify.ok('Reply sent');
+      await load();
+      inboxChanged();
+    } catch (e) {
+      notify.error(e);
+    }
+  };
+  const resolve = (item: InboxItem) => item.comment && collabApi.updateComment(item.comment.id, { resolved: true })
+    .then(() => (item.read ? load() : act(item.id, { read: true }))).catch((e) => notify.error(e));
 
   return (
     <Page icon={<InboxIcon size={18} />} title="Inbox" actions={<>
@@ -259,7 +292,7 @@ export const InboxPage: React.FC = () => {
           : tab === 'other' ? 'Activity on tasks you watch.' : tab === 'later' ? 'Snoozed and saved items.' : 'Cleared items are kept for 30 days.'}
       </p>
       <ul className="mx-3 my-3 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white sm:mx-6" aria-label="Notifications">
-        {items === null ? <li className="px-4 py-6 text-center text-sm text-gray-400">Loading…</li>
+        {items === null ? <li className="px-4 py-6 text-center text-sm text-gray-400"><LinesSkeleton rows={5} label="Loading inbox" /></li>
           : items.length === 0 ? (
             <li className="px-4 py-10 text-center text-sm text-gray-400">
               {inboxFilterCount(filters) > 0 ? (
@@ -268,10 +301,11 @@ export const InboxPage: React.FC = () => {
             </li>
           )
           : items.map((item) => (
-            <li key={item.id} className={`group relative flex items-start gap-3 px-4 py-3 ${item.read ? '' : 'bg-brand-50/40'}`}>
+            <li key={item.id} className={`group relative flex flex-wrap items-start gap-3 px-4 py-3 sm:flex-nowrap ${item.read ? '' : 'bg-brand-50/40'}`}>
               <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${item.read ? 'bg-transparent' : 'bg-brand-600'}`} />
               {item.actor ? <Avatar user={item.actor} size={28} /> : <span className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-700"><Bell size={14} /></span>}
-              <button type="button" onClick={() => open(item)} className="min-w-0 flex-1 text-left">
+              <div className="min-w-0 flex-1">
+              <button type="button" onClick={() => open(item)} className="w-full text-left">
                 {item.task && (
                   // On a phone the name wraps rather than truncating: "Up..." is not a task.
                   <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-medium text-gray-900">
@@ -294,6 +328,30 @@ export const InboxPage: React.FC = () => {
                 {item.comment && <span className="mt-1 block truncate rounded bg-gray-50 px-2 py-1 text-sm text-gray-700">{item.comment.body}</span>}
                 {phone && <span className="mt-0.5 block text-[11px] text-gray-400">{ago(item.created_at)}</span>}
               </button>
+              {(canReply(item) || (item.kind === 'assigned_comment' && item.comment?.assignee_id === me)) && replying !== item.id && (
+                <span className="mt-1.5 flex items-center gap-2">
+                  {canReply(item) && (
+                    <button type="button" onClick={() => setReplying(item.id)} className="flex items-center gap-1 rounded-md border border-gray-200 px-2 py-0.5 text-xs text-gray-600 hover:border-brand-300 hover:text-brand-700">
+                      <CornerDownRight size={12} /> Reply
+                    </button>
+                  )}
+                  {item.kind === 'assigned_comment' && item.comment?.assignee_id === me && (
+                    item.comment.resolved
+                      ? <span className="flex items-center gap-1 text-xs font-medium text-emerald-700"><Check size={12} /> Resolved</span>
+                      : (
+                        <button type="button" onClick={() => resolve(item)} className="flex items-center gap-1 rounded-md border border-emerald-300 px-2 py-0.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
+                          <Check size={12} /> Resolve
+                        </button>
+                      )
+                  )}
+                </span>
+              )}
+              {replying === item.id && (
+                <div className="mt-2">
+                  <Composer autoFocus placeholder="Reply in the thread…" onCancel={() => setReplying(null)} onSend={(body) => reply(item, body)} />
+                </div>
+              )}
+              </div>
               {/* On a desktop the date sits in its own column; on a phone it rides with the text. */}
               {!phone && <span className="shrink-0 text-xs text-gray-400">{ago(item.created_at)}</span>}
               {phone ? (
@@ -328,12 +386,31 @@ export const InboxPage: React.FC = () => {
           ))}
       </ul>
       {settings && <NotificationSettings onClose={() => setSettings(false)} />}
-      {openTask && <TaskPanel taskId={openTask} onClose={() => setOpenTask(null)} onChanged={() => { load(); inboxChanged(); }} onOpen={setOpenTask} />}
+      {openTask && (
+        <TaskPanel taskId={openTask} focusCommentId={focusComment} onClose={() => { setOpenTask(null); setFocusComment(null); }}
+          onChanged={() => { load(); inboxChanged(); }} onOpen={(id) => { setFocusComment(null); setOpenTask(id); }} />
+      )}
     </Page>
   );
 };
 
-const NotificationSettings: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+const NotificationSettings: React.FC<{ onClose: () => void }> = ({ onClose }) => (
+  <Portal>
+    <div className="fixed inset-0 z-[115] flex items-center justify-center bg-black/30" onMouseDown={onClose}>
+      <div role="dialog" aria-label="Notification settings" onMouseDown={(e) => e.stopPropagation()} className="max-h-[90vh] w-[30rem] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl bg-white p-5 shadow-xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-semibold text-gray-900">Notification settings</h3>
+          <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+        </div>
+        <NotificationSettingsPanel />
+      </div>
+    </div>
+  </Portal>
+);
+
+/** How updates reach you and which ones reach your Inbox. In the Inbox's settings dialog and on
+ *  the Notifications tab of Settings. */
+export const NotificationSettingsPanel: React.FC = () => {
   const { workspace } = useWork();
   const [rows, setRows] = useState<NotificationSetting[] | null>(null);
   useEffect(() => { if (workspace) collabApi.settings(workspace.id).then(setRows); }, [workspace]);
@@ -343,17 +420,11 @@ const NotificationSettings: React.FC<{ onClose: () => void }> = ({ onClose }) =>
     collabApi.saveSettings(workspace.id, { [kind]: enabled }).then(setRows).catch(() => collabApi.settings(workspace.id).then(setRows));
   };
   return (
-    <Portal>
-      <div className="fixed inset-0 z-[115] flex items-center justify-center bg-black/30" onMouseDown={onClose}>
-        <div role="dialog" aria-label="Notification settings" onMouseDown={(e) => e.stopPropagation()} className="max-h-[90vh] w-[30rem] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl bg-white p-5 shadow-xl">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900">Notification settings</h3>
-            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
-          </div>
+        <div>
           <DeliverySettings />
           <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-gray-400">What reaches your Inbox</p>
           <div className="max-h-64 overflow-y-auto">
-          {!rows ? <p className="text-sm text-gray-400">Loading…</p> : rows.map((r) => (
+          {!rows ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : rows.map((r) => (
             <label key={r.kind} className="flex items-center justify-between border-t border-gray-100 py-2 text-sm text-gray-800">
               {r.label}
               <input type="checkbox" checked={r.enabled} onChange={(e) => toggle(r.kind, e.target.checked)} aria-label={r.label} />
@@ -362,8 +433,6 @@ const NotificationSettings: React.FC<{ onClose: () => void }> = ({ onClose }) =>
           </div>
           <p className="mt-2 text-xs text-gray-400">You're never notified about your own changes.</p>
         </div>
-      </div>
-    </Portal>
   );
 };
 
@@ -437,53 +506,6 @@ const DeliverySettings: React.FC = () => {
   );
 };
 
-// --- Replies and Assigned comments ----------------------------------------------------------------
-
-const CommentList: React.FC<{ load: () => Promise<CommentWithTask[]>; empty: string; resolvable?: boolean }> = ({ load, empty, resolvable }) => {
-  const [items, setItems] = useState<CommentWithTask[] | null>(null);
-  const [openTask, setOpenTask] = useState<string | null>(null);
-  const refresh = useCallback(() => load().then(setItems).catch(() => setItems([])), [load]);
-  useEffect(() => { refresh(); }, [refresh]);
-  return (
-    <>
-      <ul className="mx-6 my-4 space-y-2" aria-label="Comments">
-        {items === null ? <li className="text-sm text-gray-400">Loading…</li> : items.length === 0 ? <li className="py-10 text-center text-sm text-gray-400">{empty}</li> : items.map((c) => (
-          <li key={c.id} className="rounded-xl border border-gray-200 bg-white p-3">
-            <button type="button" onClick={() => setOpenTask(c.task.id)} className="flex items-center gap-1.5 text-sm font-medium text-gray-900 hover:underline">
-              {c.task.status && <StatusDot status={c.task.status} size={11} />} {c.task.name}
-            </button>
-            <div className="mt-1.5 flex items-start gap-2">
-              {c.user && <Avatar user={c.user} size={22} />}
-              <div className="min-w-0 flex-1">
-                <p className="text-xs text-gray-500"><b className="font-medium text-gray-700">{c.user?.display_name || c.user?.email}</b> · {ago(c.created_at)}</p>
-                <p className="whitespace-pre-wrap text-sm text-gray-800">{c.body}</p>
-              </div>
-              {resolvable && (
-                <button type="button" onClick={() => collabApi.updateComment(c.id, { resolved: true }).then(refresh)} className="flex items-center gap-1 rounded-md border border-emerald-300 px-2 py-0.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
-                  <Check size={12} /> Resolve
-                </button>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-      {openTask && <TaskPanel taskId={openTask} onClose={() => { setOpenTask(null); refresh(); }} onChanged={refresh} onOpen={setOpenTask} />}
-    </>
-  );
-};
-
-export const RepliesPage: React.FC = () => {
-  const { workspace } = useWork();
-  const load = useCallback(() => (workspace ? collabApi.replies(workspace.id) : Promise.resolve([])), [workspace]);
-  return <Page icon={<MessageSquare size={18} />} title="Replies"><CommentList load={load} empty="No replies to your comments yet." /></Page>;
-};
-
-export const AssignedCommentsPage: React.FC = () => {
-  const { workspace } = useWork();
-  const load = useCallback(() => (workspace ? collabApi.assignedComments(workspace.id) : Promise.resolve([])), [workspace]);
-  return <Page icon={<UserCheck size={18} />} title="Assigned comments"><CommentList load={load} resolvable empty="No comments are waiting on you." /></Page>;
-};
-
 // --- Reminders ------------------------------------------------------------------------------------
 
 export const RemindersPage: React.FC = () => {
@@ -510,7 +532,7 @@ export const RemindersPage: React.FC = () => {
         ))}
       </nav>
       <ul className="mx-6 my-4 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white" aria-label="Reminders">
-        {items === null ? <li className="px-4 py-6 text-sm text-gray-400">Loading…</li> : items.length === 0 ? <li className="px-4 py-10 text-center text-sm text-gray-400">{state === 'upcoming' ? 'No reminders coming up.' : 'Nothing done yet.'}</li> : items.map((r) => {
+        {items === null ? <li className="px-4 py-6 text-sm text-gray-400"><LinesSkeleton /></li> : items.length === 0 ? <li className="px-4 py-10 text-center text-sm text-gray-400">{state === 'upcoming' ? 'No reminders coming up.' : 'Nothing done yet.'}</li> : items.map((r) => {
           const due = new Date(r.remind_at).getTime() <= now;
           return (
             <li key={r.id} className="flex items-center gap-3 px-4 py-2.5">
@@ -540,16 +562,30 @@ export const RemindersPage: React.FC = () => {
 };
 
 /** Unread Inbox count for the sidebar and header, kept fresh. */
-export function useInboxCount(): number {
+/** How many Inbox items are unread, kept fresh. `onNew` is called when a later count is higher
+ *  than the one before -- something new came in -- but never for the first count on load. */
+export function useInboxCount(onNew?: () => void): number {
   const { workspace } = useWork();
   const [count, setCount] = useState(0);
+  const last = useRef<number | null>(null);
+  const announce = useRef(onNew);
+  announce.current = onNew;
   useEffect(() => {
     if (!workspace) return;
-    const load = () => collabApi.counts(workspace.id).then((c) => setCount(c.primary + c.other)).catch(() => undefined);
+    last.current = null;
+    const load = () => collabApi.counts(workspace.id).then((c) => {
+      const next = c.primary + c.other;
+      if (last.current !== null && next > last.current) announce.current?.();
+      last.current = next;
+      setCount(next);
+    }).catch(() => undefined);
     load();
     const timer = setInterval(load, 30_000);
+    // Back on the tab: count again now, rather than up to 30 s later.
+    const back = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', back);
     window.addEventListener(INBOX_CHANGED, load);
-    return () => { clearInterval(timer); window.removeEventListener(INBOX_CHANGED, load); };
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', back); window.removeEventListener(INBOX_CHANGED, load); };
   }, [workspace]);
   return count;
 }
@@ -566,13 +602,26 @@ export const InboxLink: React.FC<{ className: string; leading?: React.ReactNode 
   );
 };
 
-/** The header bell: opens the Inbox, with a red dot while anything is unread. */
+/** The header bell: opens the Inbox, with the unread count. It rings when something new arrives. */
 export const HeaderInboxBell: React.FC = () => {
-  const count = useInboxCount();
+  const style = useBellStyle();
+  const [ringing, setRinging] = useState(false);
+  const stop = useRef<number | undefined>(undefined);
+  const count = useInboxCount(() => {
+    // Off and on again, so a second arrival while it is still ringing rings it afresh.
+    setRinging(false);
+    window.clearTimeout(stop.current);
+    requestAnimationFrame(() => setRinging(true));
+    stop.current = window.setTimeout(() => setRinging(false), 2000);
+  });
+  useEffect(() => () => window.clearTimeout(stop.current), []);
   return (
-    <Link to="/inbox" title={count ? `Inbox: ${count} unread` : 'Inbox'} aria-label="Inbox" className="relative p-1">
-      <Bell size={20} color="var(--color-text-secondary)" />
-      {count > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-4 text-white">{count > 99 ? '99+' : count}</span>}
+    <Link to="/inbox" title={count ? `Inbox: ${count} unread` : 'Inbox'} aria-label="Inbox" className={`header-bell bell-${style}${ringing ? ' is-ringing' : ''}`}>
+      <BellIcon />
+      {count > 0 && <span className="bell-count">{count > 99 ? '99+' : count}</span>}
     </Link>
   );
 };
+
+/** The bell as drawn in the top bar, for the bell-style picker on Settings. */
+export const BellIcon: React.FC = () => <BellRing size={19} className="header-bell-icon" />;

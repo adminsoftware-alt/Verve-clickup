@@ -182,10 +182,6 @@ const DEFAULTS = {
   // --- built, but kept out of the sidebar until we bring them in -------------------------------
   goals: false,
   teamWeek: false,
-  // The two comment pages in the sidebar. The pages themselves still answer at /replies and
-  // /assigned-comments, and comments still reach the Inbox.
-  replies: false,
-  assignedComments: false,
   // The Personal List row under My Tasks. The List itself still exists and still opens.
   personalList: false,
   // The Inbox is the notifications, not a page beside them: the header bell carries the unread

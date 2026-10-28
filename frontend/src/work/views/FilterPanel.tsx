@@ -202,12 +202,12 @@ export const FilterPanel: React.FC<{
         onClick={show}
         aria-expanded={open}
         className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm ${
-          count ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+          count ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
       >
         {/* The same shape as every other filter in the app: the word, and a count beside it. */}
         Filter
-        {count > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-semibold leading-none text-white">{count}</span>}
-        <ChevronDown size={13} className={count ? 'text-teal-500' : 'text-gray-400'} />
+        {count > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-semibold leading-none text-white">{count}</span>}
+        <ChevronDown size={13} className={count ? 'text-blue-500' : 'text-gray-400'} />
       </button>
 
       {open && createPortal(
@@ -232,7 +232,7 @@ export const FilterPanel: React.FC<{
                   </span>
                 );
               })}
-              <button type="button" onClick={() => onChange(EMPTY_FILTERS)} className="ml-auto text-[11px] text-gray-500 hover:text-gray-800">
+              <button type="button" onClick={() => onChange(EMPTY_FILTERS)} className="filter-clear ml-auto">
                 Clear all
               </button>
             </div>
@@ -268,7 +268,7 @@ export const FilterPanel: React.FC<{
                           type="checkbox"
                           checked={!!view?.showClosed}
                           onChange={(ev) => view?.onShowClosed(ev.target.checked)}
-                          className="h-3.5 w-3.5 accent-teal-600"
+                          className="h-3.5 w-3.5 accent-blue-600"
                         />
                       </label>
                     );
@@ -277,7 +277,7 @@ export const FilterPanel: React.FC<{
                     <button key={e.label} type="button" onClick={() => { setOpenField(e.label); setSearch(''); }} className={skin}>
                       <e.Icon size={14} className="shrink-0 text-gray-400" />
                       <span className="flex-1 truncate">{e.label}</span>
-                      {text && <span className="max-w-24 truncate text-[11px] text-teal-700">{text}</span>}
+                      {text && <span className="max-w-24 truncate text-[11px] text-blue-700">{text}</span>}
                       <ChevronRight size={13} className="shrink-0 text-gray-300" />
                     </button>
                   );
@@ -301,7 +301,7 @@ export const FilterPanel: React.FC<{
                 <field.Icon size={14} className="shrink-0 text-gray-400" />
                 <span className="flex-1 truncate text-[13px] font-medium text-gray-800">{field.label}</span>
                 {textOf(field) && (
-                  <button type="button" onClick={() => clearField(field)} className="text-[11px] text-gray-500 hover:text-gray-800">Clear</button>
+                  <button type="button" onClick={() => clearField(field)} className="filter-clear">Clear</button>
                 )}
               </div>
 
@@ -331,11 +331,11 @@ export const FilterPanel: React.FC<{
                         type="button"
                         onClick={() => pick(field, o)}
                         className={`flex w-full items-center gap-2 px-3 py-1 text-left text-[13px] ${
-                          on ? 'bg-teal-50/70 font-medium text-teal-900' : 'text-gray-700 hover:bg-gray-50'}`}
+                          on ? 'bg-blue-50/70 font-medium text-blue-900' : 'text-gray-700 hover:bg-gray-50'}`}
                       >
                         <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
                           field.kind === 'group' ? 'rounded-full' : 'rounded'} ${
-                          on ? 'border-teal-500 bg-teal-500 text-white' : 'border-gray-300'}`}>
+                          on ? 'border-blue-500 bg-blue-500 text-white' : 'border-gray-300'}`}>
                           {on && <Check size={10} strokeWidth={3} />}
                         </span>
                         {o.color && <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: o.color }} />}
