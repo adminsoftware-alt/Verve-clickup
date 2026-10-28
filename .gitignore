@@ -76,3 +76,5 @@ changes_screenshots/
 docs/ui-*/
 frontend/image.png
 frontend/public/*.docx
+!CLAUDE.md
+!.claude/commands/*.md
