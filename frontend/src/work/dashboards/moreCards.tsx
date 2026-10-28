@@ -298,12 +298,12 @@ export const VarianceCard: React.FC<{
                     </td>
                     <td className="px-2 text-right font-medium tabular-nums text-gray-900">{hours(t.logged_seconds)}</td>
                     <td className="pl-2 text-right">
-                      {kind !== 'exact' && (
-                        <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${pill}`}>
-                          {t.difference_seconds === null ? 'no estimate'
-                            : `${t.difference_seconds > 0 ? '+' : '−'}${hours(Math.abs(t.difference_seconds))}`}
-                        </span>
-                      )}
+                      {/* Always the figure: within 5% it is "on target" and drawn navy, but still says by how much. */}
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${pill}`}>
+                        {t.difference_seconds === null ? 'no estimate'
+                          : t.difference_seconds === 0 ? 'on target'
+                          : `${t.difference_seconds > 0 ? '+' : '−'}${hours(Math.abs(t.difference_seconds))}`}
+                      </span>
                     </td>
                   </tr>
                 );

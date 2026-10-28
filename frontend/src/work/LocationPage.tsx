@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Activity, ArrowDownToLine, Calendar, CalendarRange, ChevronRight, ClipboardList, Columns3, FileSpreadsheet, FileText, Folder, GanttChart, Globe, History, Home, LayoutDashboard, List as ListIcon, ListPlus, Lock, Map as MapIcon, MessagesSquare, Network, PenTool, Plus, Share2, Table2, Upload, Users } from 'lucide-react';
 import { useWork, useMe } from './WorkContext';
-import { useTopBarSlot } from '../components/topBarSlot';
+import { pathFor } from './SpacesSidebar';
 import { peek, workApi, type CustomField, type Dependency, type FolderNode, type ListNode, type LocationKind, type Recurrence, type SpaceNode, type Status, type Task, type TaskGroup, type TaskInput, type UserRef, type View, type ViewType } from './api';
 import { DateField } from './DateField';
 import { FieldEditor } from './fields/FieldValue';
@@ -95,7 +94,6 @@ export const LocationPage: React.FC = () => {
   const located = locate(kind, id);
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const topBarSlot = useTopBarSlot();
   const [loadedViews, setViews] = useState<View[]>([]);
   // Which location those views belong to: after moving to another Space, Folder or List, the old
   // tabs must not linger (a click on one would open a view of the previous page).
@@ -354,56 +352,62 @@ export const LocationPage: React.FC = () => {
     );
   }
 
-  // The breadcrumb goes up into the top bar; on a phone it keeps its own row above the views.
-  // One line, whatever the names. Wrapping put Space, Folder and a long List name on a line each
-  // on a phone; there the List's own name is enough, cut short with the full name on hover, and
-  // the path above it comes back on a wider screen.
+  // Where you are, on the page itself rather than squeezed into the top bar: the path above
+  // (Space, Folder), each a link back up, and this place's own name large beneath it with Share
+  // on the right. On a phone the path is left out; the name is enough there.
+  const parents = located.path.slice(0, -1);
+  const here = located.path[located.path.length - 1];
+  const HereIcon = kind === 'list' ? ListIcon : kind === 'folder' ? Folder : LayoutDashboard;
   const breadcrumb = (
-    <nav className="flex min-w-0 items-center gap-1.5 text-sm">
-      {located.path.map((crumb, i) => {
-        const last = i === located.path.length - 1;
-        return (
-          <React.Fragment key={crumb.id}>
-            {i > 0 && <ChevronRight size={14} className="hidden shrink-0 text-gray-300 sm:block" />}
-            <span title={crumb.name} className={`min-w-0 items-center gap-1.5 ${last ? 'flex text-lg font-semibold text-gray-900' : 'hidden max-w-[12rem] text-gray-500 sm:flex'}`}>
-              {crumb.kind === 'folder' && <Folder size={14} className="shrink-0" />}
-              {crumb.kind === 'list' && last && <ListIcon size={16} className="shrink-0" />}
-              <span className="truncate">{crumb.name}</span>
-            </span>
-          </React.Fragment>
-        );
-      })}
-      {located.node.is_private && <Lock size={14} className="ml-1 shrink-0 text-gray-400" />}
-      {kind === 'list' && (() => {
-        const lst = located.node as ListNode;
-        return (lst.start_date || lst.due_date) ? (
-          <span className="ml-1 hidden shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 sm:inline" title="List dates">
-            {lst.start_date ? formatDue(lst.start_date) : '…'} → {lst.due_date ? formatDue(lst.due_date) : '…'}
-          </span>
-        ) : null;
-      })()}
-      {isPersonal ? (
-        <span className="ml-auto hidden shrink-0 text-xs text-gray-400 sm:inline">Only you can see this List</span>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setSharing(true)}
-          className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"
-        >
-          <Share2 size={14} /> Share
-        </button>
+    <div className="loc-head min-w-0">
+      {parents.length > 0 && (
+        <nav aria-label="Location" className="hidden min-w-0 items-center gap-1 text-[12.5px] text-gray-500 sm:flex">
+          {parents.map((crumb, i) => (
+            <React.Fragment key={crumb.id}>
+              {i > 0 && <ChevronRight size={13} className="shrink-0 text-gray-300" />}
+              <Link to={pathFor(crumb.kind, crumb.id)} title={crumb.name}
+                className="flex min-w-0 max-w-[20rem] items-center gap-1 rounded px-1 py-0.5 hover:bg-gray-100 hover:text-gray-800">
+                {crumb.kind === 'folder' && <Folder size={13} className="shrink-0" />}
+                <span className="truncate">{crumb.name}</span>
+              </Link>
+            </React.Fragment>
+          ))}
+        </nav>
       )}
-    </nav>
+      <div className="mt-0.5 flex min-w-0 items-center gap-2.5">
+        <span className="loc-head-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"><HereIcon size={16} /></span>
+        <h1 title={here.name} className="min-w-0 truncate text-xl font-semibold tracking-tight text-gray-900">{here.name}</h1>
+        {located.node.is_private && <Lock size={14} className="shrink-0 text-gray-400" aria-label="Private" />}
+        {kind === 'list' && (() => {
+          const lst = located.node as ListNode;
+          return (lst.start_date || lst.due_date) ? (
+            <span className="hidden shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 sm:inline" title="List dates">
+              {lst.start_date ? formatDue(lst.start_date) : '…'} → {lst.due_date ? formatDue(lst.due_date) : '…'}
+            </span>
+          ) : null;
+        })()}
+        {isPersonal ? (
+          <span className="ml-auto hidden shrink-0 text-xs text-gray-400 sm:inline">Only you can see this List</span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setSharing(true)}
+            className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <Share2 size={14} /> Share
+          </button>
+        )}
+      </div>
+    </div>
   );
 
   return (
     <div className="ui-clean location-ui flex h-full min-h-0 flex-col bg-white">
-      {topBarSlot && createPortal(breadcrumb, topBarSlot)}
-      <header className={`border-b border-gray-200 px-4 sm:px-6 ${topBarSlot ? 'pt-1' : 'pt-4'}`}>
-        {!topBarSlot && breadcrumb}
+      <header className="border-b border-gray-200 px-4 pt-3 sm:px-6">
+        {breadcrumb}
 
         {/* Views bar */}
-        <div className={`flex items-center gap-1 ${topBarSlot ? '' : 'mt-3'}`}>
+        <div className="mt-2.5 flex items-center gap-1">
           {/* One tab per kind of view: a second Calendar or Team tab made earlier is left out. The
               tab menu (rename, favourite, default, share publicly) is gone; a tab is a tab. */}
           {views.filter((view, i) => views.findIndex((v) => v.type === view.type && v.private === view.private) === i).map((view) => (

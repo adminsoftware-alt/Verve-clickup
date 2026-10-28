@@ -444,24 +444,6 @@ select:not([multiple]):not([size]) {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
-.premium-btn-primary {
-  background: linear-gradient(135deg, #0B5FFF 0%, #12A89A 55%, #16A34A 100%);
-  color: #FFFFFF;
-  border: 1px solid rgba(0, 0, 0, 0.1) !important;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
-}
-
-.premium-btn-primary:hover {
-  background: linear-gradient(135deg, #2B76FF 0%, #16B5A6 55%, #1BB255 100%);
-  box-shadow: 0 4px 8px rgba(79, 70, 229, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-}
-
-.premium-btn-primary:active {
-  background: #4338CA;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
-}
-
 .premium-btn-danger {
   background: linear-gradient(180deg, #EF4444 0%, #DC2626 100%);
   color: #FFFFFF;
@@ -769,11 +751,18 @@ select:not([multiple]):not([size]) {
   background: linear-gradient(180deg, color-mix(in srgb, var(--tile) 7%, white) 0%, #fff 70%);
   border-color: color-mix(in srgb, var(--tile) 20%, #E2E6ED);
 }
-/* The colour line along the top: always there, so nothing appears or moves as the page scrolls. */
+/* The colour line along the top: always there, with its light drifting slowly along it -- one
+   pass every 6s, the pattern twice as wide as the card so the loop has no seam. */
 .dash-3d .stat-card::before {
   content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--tile) 55%, white), var(--tile) 50%, color-mix(in srgb, var(--tile) 55%, white));
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--tile) 45%, white) 0%, var(--tile) 25%, color-mix(in srgb, var(--tile) 45%, white) 50%,
+    var(--tile) 75%, color-mix(in srgb, var(--tile) 45%, white) 100%);
+  background-size: 200% 100%;
+  animation: stat-line-drift 6s linear infinite;
 }
+@keyframes stat-line-drift { from { background-position: 0% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .dash-3d .stat-card::before { animation: none; } }
 .dash-3d .stat-card:hover { border-color: color-mix(in srgb, var(--tile) 40%, white); }
 
 /* The small filter button on a card: a funnel in a square washed in the card's own colour (--tile,
@@ -1765,3 +1754,151 @@ header.app-topbar > div:last-child { gap: 10px; }
   .header-bell.is-ringing .header-bell-icon,
   .header-bell.is-ringing .bell-count { animation: none; }
 }
+
+/* --- Sign-in page (pages/Login.tsx): the stack -------------------------------------------------
+   The logo made into the page. The form is the front card of the card stack; the two cards behind
+   (the logo's light and mid blue) fan out from under it as the page opens, and a navy tick seal on
+   its corner draws itself in. Soft grey page with a dot grid. One accent, Verve navy. */
+.signin-page {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center; gap: clamp(56px, 8vw, 120px);
+  padding: 48px 40px; color: #1B2A4A; background-color: #F6F7FA;
+  background-image: radial-gradient(#D9E1EF 1px, transparent 1px); background-size: 24px 24px;
+}
+
+/* Left side: Verveflow leads, the firm signs underneath. */
+.signin-brand { flex: 0 1 400px; min-width: 0; }
+.signin-wordmark { display: flex; align-items: center; gap: 14px; }
+.signin-wordmark b {
+  display: block; font-family: 'Poppins', 'Inter', system-ui, sans-serif; font-weight: 700; font-size: 44px;
+  line-height: 1; letter-spacing: -0.035em; color: #1B2A4A; white-space: nowrap;
+}
+/* "flow" slides out from behind "verve": its box clips only on the left, at the end of "verve". */
+.signin-wordmark .is-flow-clip { display: inline-block; clip-path: inset(-50% -50% -50% 0); }
+.signin-wordmark .is-flow { display: inline-block; color: #234788; animation: signin-flow-out 1s cubic-bezier(.2, .8, .2, 1) .35s both; }
+@keyframes signin-flow-out { from { transform: translateX(-100%); opacity: 0; } 40% { opacity: 1; } }
+.signin-wordmark small {
+  display: block; margin-top: 9px; font-size: 10.5px; font-weight: 600; letter-spacing: .28em;
+  text-transform: uppercase; color: #8A94A8; animation: signin-fade .6s ease 1.1s both;
+}
+@keyframes signin-fade { from { opacity: 0; } }
+.signin-headline { font-size: 30px; line-height: 1.25; font-weight: 600; letter-spacing: -0.02em; margin: 36px 0 12px; text-wrap: balance; }
+.signin-lede { font-size: 15px; line-height: 1.6; color: #667085; margin: 0 0 36px; }
+.signin-endorse { display: flex; align-items: center; gap: 14px; padding-top: 22px; border-top: 1px solid #DCE2EC; }
+.signin-endorse span { font-size: 12px; color: #98A2B3; }
+.signin-endorse img { display: block; height: 26px; width: auto; }
+
+.signin-right { position: relative; flex: none; width: 440px; display: flex; flex-direction: column; align-items: center; }
+/* The local testing box hangs below the card without counting toward the row's height, so the
+   card and the brand side line up the way real users see them. */
+@media (min-width: 901px) { .signin-dev { position: absolute; top: 100%; left: 0; padding-bottom: 40px; } }
+
+.signin-stack { position: relative; width: 100%; max-width: 440px; }
+.signin-back {
+  position: absolute; inset: 0; border-radius: 22px; transform-origin: 50% 100%;
+  animation: signin-fan 1.1s cubic-bezier(.2, .8, .2, 1) .15s both;
+}
+.signin-back.is-far { background: #D3DDF1; --fan: rotate(-9deg) translate(-34px, 6px); }
+.signin-back.is-near { background: #7D98D1; --fan: rotate(-4deg) translate(-14px, 2px); }
+.signin-back { transform: var(--fan); }
+@keyframes signin-fan { from { transform: none; } to { transform: var(--fan); } }
+
+.signin-card {
+  position: relative; background: #FFFFFF; border-radius: 22px; padding: 40px 30px 30px;
+  box-shadow: 0 30px 60px -30px rgba(19, 40, 79, .45), 0 0 0 1px rgba(19, 40, 79, .06);
+  animation: signin-rise .6s cubic-bezier(.2, .8, .2, 1) both;
+}
+@keyframes signin-rise { from { opacity: 0; transform: translateY(12px); } }
+.signin-seal {
+  position: absolute; top: -18px; right: 26px; display: grid; place-items: center; width: 44px; height: 44px;
+  border-radius: 13px; background: #234788; color: #FFFFFF; box-shadow: 0 10px 20px -8px rgba(35, 71, 136, .7);
+}
+.signin-seal svg path { stroke-dasharray: 30; stroke-dashoffset: 30; animation: signin-tick .6s ease .9s forwards; }
+@keyframes signin-tick { to { stroke-dashoffset: 0; } }
+
+.signin-title { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; color: #1B2A4A; margin: 0 0 6px; }
+.signin-sub { font-size: 0.9rem; color: #667085; margin: 0 0 26px; }
+
+.signin-note {
+  display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; margin-bottom: 16px;
+  border-radius: 10px; font-size: 0.85rem; line-height: 1.45; border: 1px solid; border-left-width: 3px;
+}
+.signin-note svg { flex: none; margin-top: 1px; }
+.signin-note.is-error { background: #FEF3F2; border-color: #FBD5D1; border-left-color: #C53030; color: #912018; }
+.signin-note.is-info { background: #EEF2F8; border-color: #D3DDF1; border-left-color: #234788; color: #1B2A4A; }
+
+.signin-google, .signin-submit {
+  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 44px;
+  border-radius: 10px; font-size: 0.925rem; font-weight: 600; cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease;
+}
+.signin-google { background: #FFFFFF; color: #1B2A4A; border: 1px solid #D5DBE6; box-shadow: 0 1px 2px rgba(16, 24, 40, .05); }
+.signin-google:hover:not(:disabled) { background: #F6F7FA; border-color: #C3CCDB; }
+.signin-submit { margin-top: 4px; background: #234788; color: #FFFFFF; border: none; }
+.signin-submit:hover:not(:disabled) { background: #1C3A70; }
+.signin-google:disabled, .signin-submit:disabled { cursor: not-allowed; opacity: .7; }
+
+.signin-or { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: #98A2B3; font-size: 0.8rem; }
+.signin-or::before, .signin-or::after { content: ''; flex: 1; border-top: 1px solid #E6E9F0; }
+
+.signin-fields { display: flex; flex-direction: column; gap: 18px; }
+.signin-label { display: block; font-size: 0.85rem; font-weight: 600; color: #344054; margin-bottom: 6px; }
+.signin-label-row { display: flex; align-items: baseline; justify-content: space-between; }
+.signin-input {
+  width: 100%; height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #D5DBE6;
+  background: #FFFFFF; font-size: 0.925rem; color: #1B2A4A; outline: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.signin-input::placeholder { color: #98A2B3; }
+/* The firm's logo inside the email field once an "@" is typed (Login.tsx `company`). */
+.signin-input.has-company { padding-right: 84px; }
+.signin-company {
+  position: absolute; right: 12px; top: 50%; display: flex; align-items: center; height: 24px;
+  padding-left: 12px; border-left: 1px solid #E6E9F0; transform: translateY(-50%);
+  animation: signin-company-in .3s ease both; pointer-events: none;
+}
+.signin-company img { display: block; height: 20px; width: auto; transition: opacity .25s ease, filter .25s ease; }
+.signin-company.is-typing img { opacity: .4; filter: grayscale(1); }
+@keyframes signin-company-in { from { opacity: 0; transform: translate(6px, -50%); } }
+@media (prefers-reduced-motion: reduce) { .signin-company { animation: none; } }
+.signin-input:focus { border-color: #234788; box-shadow: 0 0 0 3px rgba(35, 71, 136, .15); }
+.signin-eye {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: grid; place-items: center;
+  width: 34px; height: 34px; border-radius: 8px; border: none; background: none; color: #667085; cursor: pointer;
+}
+.signin-eye:hover { background: #F2F4F7; color: #1B2A4A; }
+.signin-hint { margin: 6px 0 0; font-size: 0.775rem; color: #667085; }
+.signin-hint.is-ask { color: #B54708; font-weight: 500; }
+.signin-link { background: none; border: none; padding: 0; color: #234788; font-size: 0.825rem; font-weight: 600; cursor: pointer; }
+.signin-link:hover { text-decoration: underline; }
+.signin-switch { margin: 22px 0 0; text-align: center; font-size: 0.875rem; color: #667085; }
+.signin-switch .signin-link { font-size: inherit; }
+
+.signin-dev { width: 100%; max-width: 440px; margin-top: 28px; }
+.signin-dev:empty { display: none; }
+
+/* Under 900px the sides stack: the wordmark and "by Verve Advisory" centred above the card. */
+@media (max-width: 900px) {
+  .signin-page { flex-direction: column; justify-content: flex-start; gap: 40px; padding: 40px 16px; }
+  .signin-brand { flex: none; display: flex; flex-direction: column; align-items: center; }
+  .signin-wordmark b { font-size: 34px; }
+  .signin-wordmark svg { width: 48px; height: 48px; }
+  .signin-headline, .signin-lede { display: none; }
+  .signin-endorse { margin-top: 14px; padding-top: 0; border-top: 0; gap: 10px; }
+  .signin-endorse span { font-size: 0; }
+  .signin-endorse span::before { content: 'by'; font-size: 12px; }
+  .signin-endorse img { height: 22px; }
+  .signin-right { width: 100%; max-width: 440px; }
+}
+/* Narrow screens: the fan tucks in so it never runs off the left edge. */
+@media (max-width: 520px) {
+  .signin-card { padding: 34px 20px 24px; }
+  .signin-back.is-far { --fan: rotate(-5deg) translate(-8px, 6px); }
+  .signin-back.is-near { --fan: rotate(-2.5deg) translate(-4px, 2px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .signin-back, .signin-card, .signin-wordmark .is-flow, .signin-wordmark small { animation: none; }
+  .signin-seal svg path { animation: none; stroke-dashoffset: 0; }
+}
+
+/* A Space, Folder or List page: its own name with a navy icon tile, the path to it above. */
+.loc-head-icon { background: #EEF2F8; color: #234788; }

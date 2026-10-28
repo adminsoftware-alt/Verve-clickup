@@ -435,7 +435,7 @@ export const InsightsPanel: React.FC<{
         <h3 className="flex items-center gap-2 pb-3 text-base font-semibold text-gray-900">
           <span className="tile-3d h-7 w-7 rounded-lg" style={{ '--tile': '#234788' } as React.CSSProperties}><ListChecks size={15} /></span> Highlights
         </h3>
-        {insights && (
+        {insights && tabs.length > 1 && (
           <nav role="tablist" aria-label="Highlights for" className="-mb-px flex gap-1 overflow-x-auto sm:ml-auto">
             {tabs.map((g) => {
               const on = g.key === current;
