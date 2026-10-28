@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     # Where the v2 tests run (they empty every table). Set it whenever DATABASE_URL is a shared
     # database such as Supabase, so the tests stay on a local server.
     TEST_DATABASE_URL: Optional[str] = None
+    # Database connections each server keeps open. The Supabase session pooler allows 15 clients
+    # in all, shared by every server using it (Render and a local backend), so 7 apiece fits two.
+    DB_POOL_SIZE: int = 7
 
     # Scheduled Dashboard email reports. Without SMTP_HOST, reports are still built
     # and kept for preview, but not sent.

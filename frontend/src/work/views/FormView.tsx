@@ -5,6 +5,7 @@ import { workApi, type CustomField, type FormDef, type View } from '../api';
 import { PRIORITIES } from '../ui';
 import { useWork } from '../WorkContext';
 import { FieldEditor } from '../fields/FieldValue';
+import { LinesSkeleton } from '../Skeleton';
 
 interface FormFieldSetting { key: string; label?: string; required?: boolean; help?: string }
 interface FormSettings { title?: string; description?: string; fields?: FormFieldSetting[]; assignee_ids?: string[]; active?: boolean; success?: string }
@@ -30,7 +31,7 @@ export const FormFill: React.FC<{ viewId: string; preview?: boolean; refreshKey?
     setError(null);
     try { setDone((await workApi.submitForm(viewId, answers)).message); setAnswers({}); } catch (err) { setError((err as Error).message); }
   };
-  if (!form) return <p className="p-6 text-sm text-gray-400">{error ?? 'Loading…'}</p>;
+  if (!form) return <p className="p-6 text-sm text-gray-400">{error ?? <LinesSkeleton />}</p>;
   if (done) {
     return (
       <div className="rounded-xl border border-gray-200 bg-white p-8 text-center" role="status">

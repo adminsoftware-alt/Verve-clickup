@@ -105,7 +105,7 @@ export const TwoStepFilter: React.FC<{
         aria-expanded={open}
         className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium shadow-sm ${
           count
-            ? 'border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100'
+            ? 'border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100'
             : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'}`}
       >
         {/* Always the word, never the tally in words. The control said "Filter", then "1 filter",
@@ -113,8 +113,8 @@ export const TwoStepFilter: React.FC<{
             button is for -- was the thing that kept being replaced. The number is a badge now, and
             which filters they are is inside, where there is room to say. */}
         Filter
-        {count > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-semibold leading-none text-white">{count}</span>}
-        <ChevronDown size={13} className={count ? 'text-teal-500' : 'text-gray-400'} />
+        {count > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-semibold leading-none text-white">{count}</span>}
+        <ChevronDown size={13} className={count ? 'text-blue-500' : 'text-gray-400'} />
       </button>
 
       {open && createPortal(
@@ -139,7 +139,7 @@ export const TwoStepFilter: React.FC<{
                   </span>
                 );
               })}
-              <button type="button" onClick={onClearAll} className="ml-auto text-[11px] text-gray-500 hover:text-gray-800">Clear all</button>
+              <button type="button" onClick={onClearAll} className="filter-clear ml-auto">Clear all</button>
             </div>
           )}
 
@@ -166,7 +166,7 @@ export const TwoStepFilter: React.FC<{
                   >
                     <f.Icon size={14} className="shrink-0 text-gray-400" />
                     <span className="flex-1 truncate">{f.label}</span>
-                    {textOf(f) && <span className="max-w-24 truncate text-[11px] text-teal-700">{textOf(f)}</span>}
+                    {textOf(f) && <span className="max-w-24 truncate text-[11px] text-blue-700">{textOf(f)}</span>}
                     <ChevronRight size={13} className="shrink-0 text-gray-300" />
                   </button>
                 ))}
@@ -189,7 +189,7 @@ export const TwoStepFilter: React.FC<{
                 <field.Icon size={14} className="shrink-0 text-gray-400" />
                 <span className="flex-1 truncate text-[13px] font-medium text-gray-800">{field.label}</span>
                 {field.selected.length > 0 && (
-                  <button type="button" onClick={() => onClear(field)} className="text-[11px] text-gray-500 hover:text-gray-800">Clear</button>
+                  <button type="button" onClick={() => onClear(field)} className="filter-clear">Clear</button>
                 )}
               </div>
 
@@ -221,11 +221,11 @@ export const TwoStepFilter: React.FC<{
                         type="button"
                         onClick={() => onToggle(field, o.value)}
                         className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] ${
-                          on ? 'bg-teal-50/70 font-medium text-teal-900' : 'text-gray-700 hover:bg-gray-50'}`}
+                          on ? 'bg-blue-50/70 font-medium text-blue-900' : 'text-gray-700 hover:bg-gray-50'}`}
                       >
                         <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
                           field.single ? 'rounded-full' : 'rounded'} ${
-                          on ? 'border-teal-500 bg-teal-500 text-white' : 'border-gray-300'}`}>
+                          on ? 'border-blue-500 bg-blue-500 text-white' : 'border-gray-300'}`}>
                           {on && <Check size={10} strokeWidth={3} />}
                         </span>
                         {o.color && <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: o.color }} />}

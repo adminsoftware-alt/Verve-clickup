@@ -5,6 +5,7 @@ import { useWork } from '../WorkContext';
 import type { FolderNode, SpaceNode } from '../api';
 import { outboundApi, type ClientCompliance, type ComplianceItem, type Obligation } from '../outboundApi';
 import { ask } from '../../components/ask';
+import { LinesSkeleton } from '../Skeleton';
 
 type Tab = 'calendar' | 'clients' | 'catalogue';
 const input = 'rounded-md border border-gray-300 px-2 py-1.5 text-sm';
@@ -91,7 +92,7 @@ const Calendar: React.FC<{ ws: string }> = ({ ws }) => {
         <select aria-label="Filter by authority" value={authority} onChange={(e) => setAuthority(e.target.value)} className={input}><option value="">All authorities</option>{authorities.map((a) => <option key={a}>{a}</option>)}</select>
         {items && <span className="ml-auto text-xs text-gray-500">{shown.length} due · {done} done{overdue ? <b className="text-red-700"> · {overdue} overdue</b> : ''}</span>}
       </div>
-      {items === null ? <p className="text-sm text-gray-400">Loading…</p> : shown.length === 0 ? (
+      {items === null ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : shown.length === 0 ? (
         <p className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-400">Nothing due this month. Add clients' obligations under “Clients”.</p>
       ) : (
         <ol className="space-y-3" aria-label="Filings due">
@@ -146,7 +147,7 @@ const Clients: React.FC<{ ws: string }> = ({ ws }) => {
       <div className="flex items-center"><p className="text-sm text-gray-600">A client is a List. Tick what applies to them; tasks are made in that List ahead of each due date.</p>
         <button type="button" onClick={() => setAdding(true)} className={`ml-auto flex items-center gap-1.5 ${primary}`}><Plus size={14} /> Add a client's obligations</button></div>
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {rows === null ? <p className="text-sm text-gray-400">Loading…</p> : Object.keys(grouped).length === 0 ? <p className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-400">No clients yet.</p> : (
+      {rows === null ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : Object.keys(grouped).length === 0 ? <p className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-400">No clients yet.</p> : (
         <ul className="space-y-3" aria-label="Clients">
           {Object.entries(grouped).map(([name, items]) => (
             <li key={name} className="rounded-xl border border-gray-200 bg-white p-4">

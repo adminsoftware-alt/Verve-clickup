@@ -27,7 +27,7 @@ export const TABLE_COLUMNS: { key: string; label: string; width: number }[] = [
  * It reads as a plain cell until you point at it, so a table of two hundred rows is not two
  * hundred boxes; the border and the caret arrive on hover, which is when they mean something.
  */
-const PickCell: React.FC<{
+export const PickCell: React.FC<{
   label: string;
   current: React.ReactNode;
   disabled?: boolean;
@@ -46,7 +46,7 @@ const PickCell: React.FC<{
         label: i.label,
         icon: (
           <span className="flex items-center gap-1.5">
-            {i.on ? <Check size={12} className="text-teal-600" /> : <span className="w-3" />}
+            {i.on ? <Check size={12} className="text-brand-600" /> : <span className="w-3" />}
             {i.icon}
           </span>
         ),
@@ -66,7 +66,7 @@ const PickCell: React.FC<{
 };
 
 // The Assignees column reuses the People field editor.
-const ASSIGNEES: CustomField = { id: 'assignees', name: 'Assignees', type: 'people', config: {}, location: 'list', location_id: '', orderindex: 0 };
+export const ASSIGNEES: CustomField = { id: 'assignees', name: 'Assignees', type: 'people', config: {}, location: 'list', location_id: '', orderindex: 0 };
 
 /**
  * ClickUp's Table view: a spreadsheet of tasks, one row each, where every cell edits in

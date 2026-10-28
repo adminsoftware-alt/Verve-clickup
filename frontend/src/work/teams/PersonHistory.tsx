@@ -7,6 +7,7 @@ import { History } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 
 import { peopleApi, type AuditEvent } from './peopleApi';
+import { LinesSkeleton } from '../Skeleton';
 
 const FIELD_NAMES: Record<string, string> = {
   designation: 'Designation', level: 'Level', department: 'Department', manager_id: 'Reporting manager',
@@ -60,7 +61,7 @@ export const PersonHistory: React.FC<{ ws: string; userId: string; refreshKey?: 
   }, [ws, userId, refreshKey]);
 
   if (error) return <p className="text-sm text-red-700">{error}</p>;
-  if (rows === null) return <p className="text-sm text-gray-400">Loading…</p>;
+  if (rows === null) return <p className="text-sm text-gray-400"><LinesSkeleton /></p>;
   if (rows.length === 0) return <p className="text-sm text-gray-400">Nothing has changed for them yet.</p>;
 
   return (

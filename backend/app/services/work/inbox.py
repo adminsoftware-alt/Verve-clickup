@@ -20,7 +20,7 @@ from app.db.models import (
 )
 from app.schemas import collab as c
 from app.schemas import work as s
-from app.services.work import events
+from app.services.work import comments as comments_service, events
 from app.core.config import settings as config
 from app.services.work.access import Access, chain_for_task, open_task
 from app.services.work.errors import Forbidden, Invalid, NotFound
@@ -33,7 +33,8 @@ CLEARED_DAYS = 30
 KIND_GROUPS: Dict[str, List[str]] = {
     "assigned": ["assigned", "assignees"],
     "mentions": ["mentioned", "chat_mention"],
-    "comments": ["comment", "reply", "assigned_comment"],
+    "comments": ["comment", "reply", "assigned_comment", "reaction"],
+    "comment_todos": ["assigned_comment"],
     "status": ["status"],
     "dates": ["due_date"],
     "shared": ["shared", "space_join_request", "space_join_decision"],
@@ -135,7 +136,11 @@ def items(
                 status=s.StatusOut.model_validate(statuses[task.status_id]) if task.status_id in statuses else None,
                 priority=task.priority, due_date=task.due_date,
             ) if task else None,
-            comment={"id": str(comment.id), "body": comment.body[:300]} if comment else None,
+            # Enough to answer in place: the thread to reply in, and whether a to-do is still open.
+            comment={
+                "id": str(comment.id), "body": comments_service.plain(comment.body)[:300], "parent_id": str(comment.parent_id) if comment.parent_id else None,
+                "assignee_id": comment.assignee_id, "resolved": comment.resolved_at is not None,
+            } if comment else None,
             reminder={"id": str(reminder.id), "title": reminder.title, "remind_at": reminder.remind_at.isoformat()} if reminder else None,
             data=r.data, read=r.read_at is not None, cleared=r.cleared_at is not None, saved=r.saved,
             snoozed_until=r.snoozed_until, created_at=r.created_at,
@@ -145,9 +150,14 @@ def items(
 
 def counts(db: Session, access: Access) -> c.InboxCounts:
     now = _now()
-    unread = lambda tab: db.scalar(select(func.count()).select_from(Notification).where(
-        _mine(access), _tab_filter(tab, now), Notification.read_at.is_(None))) or 0
-    return c.InboxCounts(primary=unread("primary"), other=unread("other"), later=unread("later"))
+    # All three tabs in one query: each count filters the same unread rows by its tab.
+    tabs = ("primary", "other", "later")
+    row = db.execute(
+        select(*(func.count().filter(_tab_filter(tab, now)) for tab in tabs))
+        .select_from(Notification)
+        .where(_mine(access), Notification.read_at.is_(None))
+    ).one()
+    return c.InboxCounts(**{tab: n or 0 for tab, n in zip(tabs, row)})
 
 
 def _own(db: Session, user_id: str, notification_id: uuid.UUID) -> Notification:

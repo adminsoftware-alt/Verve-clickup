@@ -22,11 +22,105 @@ async function bearer(): Promise<string> {
   return user.getIdToken();
 }
 
+// --- reading cache -----------------------------------------------------------
+// Every request crosses the network, and screens ask for the same things over and over: several
+// parts of a page want the members at once, and going back to a page asks for what it showed a
+// moment ago. So identical reads in flight share one request, an answer under FRESH_MS old is
+// reused, and the last answer for each address is kept so a page can draw it at once (peek)
+// while the fresh one loads. Sending any change makes every kept answer stale.
+
+const FRESH_MS = 2000;
+const MAX_KEPT = 300;
+interface Kept { data?: unknown; at: number; generation: number; pending?: Promise<unknown> }
+const kept = new Map<string, Kept>();
+let keptFor = '';
+let generation = 0;
+let peeking: { key: string | null } | null = null;
+const PEEK = Symbol('peek');
+
+/** Whose answers these are, so one person never sees another's (dev sign-in can switch people). */
+function identity(): string {
+  const pretending = devUser();
+  return pretending ? `dev:${pretending.id}` : auth.currentUser?.uid ?? '';
+}
+
+function keyFor(path: string, query: string): string {
+  const who = identity();
+  if (who !== keptFor) {
+    kept.clear();
+    keptFor = who;
+  }
+  return `${path}${query}`;
+}
+
+/** Something changed on the server: no kept answer counts as fresh any more. */
+function changed() {
+  generation += 1;
+}
+
+function keep(key: string, entry: Kept) {
+  kept.delete(key); // re-inserted last, so the oldest entries are the ones dropped
+  kept.set(key, entry);
+  if (kept.size > MAX_KEPT) kept.delete(kept.keys().next().value as string);
+}
+
+/**
+ * The last answer to a read, without asking the server: `peek(() => workApi.members(ws))`.
+ * Lets a page draw what it showed last time straight away, then replace it when its own request
+ * returns. Only for calls that return the server's answer unchanged.
+ */
+export function peek<T>(call: () => Promise<T>): T | undefined {
+  const probe = { key: null as string | null };
+  peeking = probe;
+  try {
+    call().catch(() => undefined);
+  } finally {
+    peeking = null;
+  }
+  const entry = probe.key === null ? undefined : kept.get(probe.key);
+  return entry && entry.data !== undefined ? structuredClone(entry.data) as T : undefined;
+}
+
 export async function request<T>(method: string, path: string, body?: unknown, params?: Record<string, string | number | boolean | undefined>): Promise<T> {
-  const token = await bearer();
   const query = params
     ? '?' + Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')
     : '';
+  if (method !== 'GET') {
+    if (peeking) throw PEEK;
+    changed();
+    try {
+      return await send<T>(method, path, query, body);
+    } finally {
+      changed(); // reads that started while this was saving may have the old answer
+    }
+  }
+  const key = keyFor(path, query);
+  if (peeking) {
+    peeking.key = key;
+    throw PEEK;
+  }
+  const entry = kept.get(key);
+  if (entry && entry.generation === generation) {
+    // Each caller gets its own copy: screens sort and edit what they are given.
+    if (entry.pending) return structuredClone(await entry.pending) as T;
+    if (Date.now() - entry.at < FRESH_MS) return structuredClone(entry.data) as T;
+  }
+  const started = generation;
+  const pending = send<T>('GET', path, query);
+  keep(key, { data: entry?.data, at: entry?.at ?? 0, generation: started, pending });
+  try {
+    const data = await pending;
+    keep(key, { data, at: Date.now(), generation: started });
+    return structuredClone(data);
+  } catch (e) {
+    const now = kept.get(key);
+    if (now?.pending === pending) keep(key, { data: entry?.data, at: 0, generation: -1 });
+    throw e;
+  }
+}
+
+async function send<T>(method: string, path: string, query: string, body?: unknown): Promise<T> {
+  const token = await bearer();
   const res = await fetch(`${API_V2}${path}${query}`, {
     method,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -42,7 +136,9 @@ export async function request<T>(method: string, path: string, body?: unknown, p
 
 /** Send a multipart form (file uploads) with the user's token. */
 export async function upload<T>(method: string, path: string, form: FormData): Promise<T> {
-  const res = await fetch(`${API_V2}${path}`, { method, headers: { Authorization: `Bearer ${await bearer()}` }, body: form });
+  changed();
+  const res = await fetch(`${API_V2}${path}`, { method, headers: { Authorization: `Bearer ${await bearer()}` }, body: form })
+    .finally(changed);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new ApiError(res.status, (typeof data.detail === 'string' && data.detail) || `Upload failed (${res.status})`);
@@ -328,6 +424,13 @@ export const workApi = {
     default_permission?: 'view' | 'comment' | 'edit' | 'full';
     statuses?: { name: string; color: string; group: StatusGroup }[]; views?: ViewType[]; clickapps?: Record<string, boolean>;
   }) => request<{ id: string }>('POST', `/workspaces/${workspaceId}/spaces`, space),
+  /** An admin's own picture as a Space's icon (PNG, JPG or WebP, up to 1 MB). */
+  setSpaceIcon: (workspaceId: string, spaceId: string, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return upload<{ icon: string | null }>('PUT', `/workspaces/${workspaceId}/spaces/${spaceId}/icon`, form);
+  },
+  removeSpaceIcon: (workspaceId: string, spaceId: string) => request('DELETE', `/workspaces/${workspaceId}/spaces/${spaceId}/icon`),
   createFolder: (parent: { kind: 'space' | 'folder'; id: string }, name: string, is_private = false) =>
     request<{ id: string }>('POST', `/${seg(parent.kind)}/${parent.id}/folders`, { name, is_private }),
   /** `assignees` hands the List over as it is made: they get full access and it appears for them. */
@@ -446,3 +549,7 @@ export const workApi = {
   setPrivate: (kind: ShareKind, id: string, is_private: boolean) =>
     request('PATCH', `/${seg(kind)}/${id}`, { is_private }),
 };
+
+/** A Space icon that is an uploaded picture ("img:<key>") as the address to show it from; null for an emoji or a letter. */
+export const spaceIconSrc = (icon: string | null | undefined): string | null =>
+  icon && icon.startsWith('img:') ? `${API_V2}/space-icons/${icon.slice(4)}` : null;

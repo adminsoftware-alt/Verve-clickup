@@ -43,10 +43,8 @@ const PlannerPage = lazy(() => import('./work/planner/PlannerPage').then((m) => 
 const TeamWeekPage = lazy(() => import('./work/TeamWeekPage').then((m) => ({ default: m.TeamWeekPage })));
 const CompliancePage = lazy(() => import('./work/compliance/CompliancePage').then((m) => ({ default: m.CompliancePage })));
 const FormPage = lazy(() => import('./work/views/FormView').then((m) => ({ default: m.FormPage })));
-const AssignedCommentsPage = lazy(() => import('./work/InboxPages').then((m) => ({ default: m.AssignedCommentsPage })));
 const InboxPage = lazy(() => import('./work/InboxPages').then((m) => ({ default: m.InboxPage })));
 const RemindersPage = lazy(() => import('./work/InboxPages').then((m) => ({ default: m.RemindersPage })));
-const RepliesPage = lazy(() => import('./work/InboxPages').then((m) => ({ default: m.RepliesPage })));
 const DashboardsHub = lazy(() => import('./work/dashboards/DashboardsHub').then((m) => ({ default: m.DashboardsHub })));
 const DashboardPage = lazy(() => import('./work/dashboards/DashboardPage').then((m) => ({ default: m.DashboardPage })));
 const PersonDashboardPage = lazy(() => import('./work/dashboards/PeopleBoards').then((m) => ({ default: m.PersonDashboardPage })));
@@ -68,12 +66,9 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 };
 
 /** For a page that renders with no shell around it -- a public link, or the sign-in screen. */
-// Both of these reach for framer-motion, which is 40 KB gzipped of animation library. Neither is
-// on the path to seeing your work: the sign-in screen is for people who are not signed in, and the
-// day's note shows once a day and leaves on its own. Loaded eagerly they taxed every page load in
-// the app for an animation most of those loads never played.
+// It reaches for framer-motion, which is 40 KB gzipped of animation library, and is not on the
+// path to seeing your work: the sign-in screen is for people who are not signed in.
 const Login = lazy(() => import('./pages/Login').then((m) => ({ default: m.Login })));
-const DayLift = lazy(() => import('./components/DayLift').then((m) => ({ default: m.DayLift })));
 
 const FullPageWaiting: React.FC = () => (
   <div className="flex min-h-screen items-center justify-center" aria-busy="true" aria-label="Loading">
@@ -102,8 +97,6 @@ const AppContent: React.FC = () => {
     // shell has its own boundary inside Layout, so the sidebar and header stay put there; here
     // there is nothing to keep, so a plain wait is honest.
     <Suspense fallback={<FullPageWaiting />}>
-    {/* A word about the day, once a day, after signing in -- never on the sign-in screen. */}
-    {user && <Suspense fallback={null}><DayLift /></Suspense>}
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
       {/* Public links: read-only, no sign-in. */}
@@ -148,8 +141,6 @@ const AppContent: React.FC = () => {
         <Route path="goals/:id" element={<GoalsPage />} />
         <Route path="forms/:viewId" element={<FormPage />} />
         <Route path="inbox" element={<InboxPage />} />
-        <Route path="replies" element={<RepliesPage />} />
-        <Route path="assigned-comments" element={<AssignedCommentsPage />} />
         <Route path="reminders" element={<RemindersPage />} />
         <Route path="dashboards" element={<DashboardsHub />} />
         {/* Before ":id", or "preview" is read as a dashboard id. */}

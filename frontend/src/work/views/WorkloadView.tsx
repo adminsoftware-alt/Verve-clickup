@@ -3,6 +3,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, Users } from 'lucide-react';
 import { useMe, useWork } from '../WorkContext';
 import { workApi, type LocationKind, type Workload, type WorkloadRow } from '../api';
 import { Avatar, StatusDot, formatDue, startOfDay } from '../ui';
+import { LinesSkeleton } from '../Skeleton';
 
 const DAY_MS = 86_400_000;
 
@@ -96,7 +97,7 @@ export const WorkloadView: React.FC<{
 
       {error && <div className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {!data ? (
-        <div className="py-10 text-center text-sm text-gray-400">Loading workload…</div>
+        <div className="py-10 text-center text-sm text-gray-400"><LinesSkeleton /></div>
       ) : (
         <>
           <div className="overflow-x-auto rounded-lg border border-gray-200" role="table" aria-label="Workload">

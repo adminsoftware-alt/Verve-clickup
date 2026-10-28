@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Lock, Trash2, Users, X } from 'lucide-react';
 import { useWork } from './WorkContext';
 import { workApi, type Level, type ShareKind, type Sharing } from './api';
-import { Avatar, Portal } from './ui';
+import { Avatar, Portal, SearchSelect } from './ui';
 import { PublicLinks } from './PublicLinks';
+import { LinesSkeleton } from './Skeleton';
 
 const LEVELS: { value: Level; label: string; hint: string }[] = [
   { value: 'view', label: 'View only', hint: 'Can see it' },
@@ -69,7 +70,7 @@ export const ShareDialog: React.FC<{
           </header>
 
           {!info ? (
-            <div className="p-5 text-sm text-gray-500">{error ?? 'Loading…'}</div>
+            <div className="p-5 text-sm text-gray-500">{error ?? <LinesSkeleton />}</div>
           ) : (
             <div className="overflow-y-auto px-5 py-4">
               <label className={`flex items-start gap-3 rounded-lg border p-3 ${info.is_private ? 'border-amber-200 bg-amber-50' : 'border-gray-200'}`}>
@@ -96,19 +97,14 @@ export const ShareDialog: React.FC<{
                   className="mt-4 flex gap-2"
                   onSubmit={(e) => { e.preventDefault(); if (grantee) run(() => workApi.share(kind, id, target(grantee), level)).then(() => setGrantee('')); }}
                 >
-                  <select aria-label="Person or Team" value={grantee} onChange={(e) => setGrantee(e.target.value)} className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm">
-                    <option value="">Add a person or Team…</option>
-                    {openTeams.length > 0 && (
-                      <optgroup label="Teams">
-                        {openTeams.map((t) => <option key={t.id} value={`team:${t.id}`}>{t.name} ({t.members.length})</option>)}
-                      </optgroup>
-                    )}
-                    {people.length > 0 && (
-                      <optgroup label="People">
-                        {people.map((m) => <option key={m.user.id} value={`user:${m.user.id}`}>{m.user.display_name || m.user.email}{m.role === 'guest' ? ' (guest)' : ''}</option>)}
-                      </optgroup>
-                    )}
-                  </select>
+                  <SearchSelect label="Person or Team" value={grantee} onChange={setGrantee} placeholder="Add a person or Team…" className="flex-1" width={320}
+                    options={[
+                      ...openTeams.map((t) => ({ value: `team:${t.id}`, label: `${t.name} (${t.members.length})`, group: 'Teams' })),
+                      ...people.map((m) => ({
+                        value: `user:${m.user.id}`, label: `${m.user.display_name || m.user.email}${m.role === 'guest' ? ' (guest)' : ''}`,
+                        hint: m.user.email, group: 'People',
+                      })),
+                    ]} />
                   <select aria-label="Access level" value={level} onChange={(e) => setLevel(e.target.value as Level)} className="rounded-md border border-gray-300 px-2 py-1.5 text-sm">
                     {allowedLevels.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
                   </select>

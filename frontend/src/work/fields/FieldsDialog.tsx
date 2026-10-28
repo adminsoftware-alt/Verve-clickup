@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { workApi, type CustomField, type FieldConfig, type FieldOption, type FieldType, type LocationKind } from '../api';
-import { Portal } from '../ui';
+import { NoMatch, Portal, matchesSearch } from '../ui';
 import { useWork } from '../WorkContext';
 import { FIELD_TYPES, fieldIcon } from './FieldValue';
 import { ask } from '../../components/ask';
+import { LinesSkeleton } from '../Skeleton';
 
 const KIND = { space: 'Space', folder: 'Folder', list: 'List' } as const;
 const SWATCHES = ['#7c3aed', '#0ea5e9', '#16a34a', '#ea580c', '#db2777', '#4f46e5', '#0d9488', '#b45309', '#dc2626', '#64748b'];
@@ -39,6 +40,7 @@ export const FieldsDialog: React.FC<{
   const [fields, setFields] = useState<CustomField[] | null>(null);
   const [draft, setDraft] = useState<Draft | null>(startCreating && canEdit ? { name: '', type: 'dropdown', config: { options: [] } } : null);
   const [error, setError] = useState<string | null>(null);
+  const [q, setQ] = useState('');
   const load = useCallback(() => workApi.fields(kind, id).then(setFields).catch((e) => setError(e.message)), [kind, id]);
   useEffect(() => { load(); }, [load]);
 
@@ -47,6 +49,7 @@ export const FieldsDialog: React.FC<{
     const node = locate(f.location, f.location_id);
     return `From ${KIND[f.location]} ${node ? `“${node.path[node.path.length - 1]?.name}”` : ''}`;
   };
+  const shownFields = (fields ?? []).filter((f) => matchesSearch(q, f.name, FIELD_TYPES.find((t) => t.type === f.type)?.label, where(f)));
   const pickType = (type: FieldType) => setDraft((d) => d && ({
     ...d, type,
     config: type === 'dropdown' || type === 'labels' ? { options: d.config.options ?? [] }
@@ -138,10 +141,19 @@ export const FieldsDialog: React.FC<{
             </div>
           ) : (
             <>
+              {/* Searchable by name, type or where it lives, once there are enough to lose one. */}
+              {fields && fields.length > 5 && (
+                <label className="mb-2 flex items-center gap-1.5 rounded-md border border-gray-300 px-2 py-1.5 focus-within:border-brand-500">
+                  <Search size={13} className="shrink-0 text-gray-400" />
+                  <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search fields…" aria-label="Search fields"
+                    className="w-full border-0 bg-transparent p-0 text-sm outline-none focus:ring-0" />
+                </label>
+              )}
               <ul className="min-h-0 flex-1 overflow-auto" aria-label="Fields">
-                {fields === null ? <li className="text-sm text-gray-400">Loading…</li>
+                {fields === null ? <li className="text-sm text-gray-400"><LinesSkeleton /></li>
                   : fields.length === 0 ? <li className="py-6 text-center text-sm text-gray-400">No custom fields yet. Add one to track things like client tier, fee or KYC status on every task.</li>
-                  : fields.map((f) => (
+                  : shownFields.length === 0 ? <li><NoMatch query={q} /></li>
+                  : shownFields.map((f) => (
                     <li key={f.id} className="group flex items-center gap-2 border-t border-gray-100 py-2 first:border-t-0">
                       <span className="text-gray-400">{fieldIcon(f.type)}</span>
                       <span className="min-w-0 flex-1">

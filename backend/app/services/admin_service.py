@@ -1,3 +1,4 @@
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
@@ -16,7 +17,22 @@ def _get_db() -> Client:
     return firebase.db
 
 
+# Whether a user is switched off, remembered for a minute: asking Firestore on every request
+# added a network round trip to each one. Changes made through this service apply at once.
+_DISABLED_TTL_SECONDS = 60
+_disabled: Dict[str, tuple] = {}
+
+
 class AdminService:
+    def is_disabled(self, uid: str) -> bool:
+        cached = _disabled.get(uid)
+        if cached is not None and cached[0] > time.monotonic():
+            return cached[1]
+        user = self.get_user(uid)
+        answer = bool(user and getattr(user, "disabled", False))
+        _disabled[uid] = (time.monotonic() + _DISABLED_TTL_SECONDS, answer)
+        return answer
+
     def _log_audit(
         self,
         action: str,
@@ -81,6 +97,7 @@ class AdminService:
     def create_user(self, user: UserInDB, admin_id: str) -> UserInDB:
         db = _get_db()
         db.collection("users").document(user.uid).set(user.model_dump())
+        _disabled.pop(user.uid, None)
         self._log_audit("CREATE_USER", admin_id, f"user/{user.uid}", None, user.model_dump())
         return user
 
@@ -95,6 +112,7 @@ class AdminService:
         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         db.collection("users").document(uid).update(update_data)
+        _disabled.pop(uid, None)
         self._log_audit("UPDATE_USER", admin_id, f"user/{uid}", old_user, update_data)
 
         updated_doc = db.collection("users").document(uid).get()

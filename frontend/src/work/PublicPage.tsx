@@ -5,6 +5,7 @@ import { CheckSquare, Lock } from 'lucide-react';
 import { Markdown } from './task/RichText';
 import { PRIORITIES } from './ui';
 import { fetchPublicPage, type PublicPage as Page, type PublicTask } from './spacesApi';
+import { LinesSkeleton } from './Skeleton';
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 
@@ -46,7 +47,7 @@ export const PublicPage: React.FC = () => {
       </div>
     );
   }
-  if (!page) return <div className="p-10 text-center text-sm text-gray-400">Loading…</div>;
+  if (!page) return <div className="p-10 text-center text-sm text-gray-400"><LinesSkeleton /></div>;
   const pages = Array.isArray(page.doc?.pages) ? (page.doc!.pages as { title?: string; body?: string }[]) : [];
   return (
     <div className="min-h-screen bg-gray-50">

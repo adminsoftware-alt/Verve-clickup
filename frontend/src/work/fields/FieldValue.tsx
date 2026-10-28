@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import type { CustomField, FieldType, Task, UserRef } from '../api';
 import type { LocatedNode } from '../WorkContext';
-import { Avatar, Portal } from '../ui';
+import { Avatar, NoMatch, Portal, SearchBox, matchesSearch } from '../ui';
 
 export const FIELD_TYPES: { type: FieldType; label: string; icon: React.ReactNode; hint: string }[] = [
   { type: 'dropdown', label: 'Dropdown', icon: <ChevronDown size={14} />, hint: 'Pick one option' },
@@ -105,7 +105,28 @@ const Picker: React.FC<{ label: string; trigger: React.ReactNode; disabled?: boo
   );
 };
 
-const Chip: React.FC<{ color: string; children: React.ReactNode }> = ({ color, children }) => (
+/** Above this many choices a picker gets a search box. */
+const SEARCH_FROM = 7;
+
+/** A picker's choices with a search box over them once there are enough to need one. */
+function Searchable<T>({ items, text, label, placeholder, always, onEnter, children }: {
+  items: T[]; text: (item: T) => string; label: string; placeholder?: string; always?: boolean;
+  onEnter?: (first: T) => void; children: (item: T) => React.ReactNode;
+}) {
+  const [q, setQ] = useState('');
+  const shown = items.filter((it) => matchesSearch(q, text(it)));
+  if (!always && items.length < SEARCH_FROM) return <>{items.map(children)}</>;
+  return (
+    <>
+      <SearchBox value={q} onChange={setQ} label={label} placeholder={placeholder}
+        onEnter={onEnter && shown[0] ? () => onEnter(shown[0]) : undefined} />
+      {shown.map(children)}
+      {shown.length === 0 && items.length > 0 && <NoMatch query={q} />}
+    </>
+  );
+}
+
+const Chip: React.FC<{ color: string; children: React.ReactNode }> =({ color, children }) => (
   <span className="max-w-full truncate rounded px-1.5 py-px text-[11px] font-medium text-white" style={{ backgroundColor: color }}>{children}</span>
 );
 
@@ -227,12 +248,15 @@ export const FieldEditor: React.FC<{
             : current ? <Chip color={current.color}>{current.name}</Chip> : <span className="text-sm text-gray-300">{compact ? '' : '—'}</span>}>
           {(close) => (
             <>
-              {opts.map((o) => (
-                <button key={o.id} type="button" role="option" aria-selected={o.id === value} onClick={() => { close(); onChange(o.id === value ? null : o.id); }}
-                  className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-gray-50">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: o.color }} /> {o.name}
-                </button>
-              ))}
+              <Searchable items={opts} text={(o) => o.name} label={`Search ${field.name}`}
+                onEnter={(o) => { close(); onChange(o.id === value ? null : o.id); }}>
+                {(o) => (
+                  <button key={o.id} type="button" role="option" aria-selected={o.id === value} onClick={() => { close(); onChange(o.id === value ? null : o.id); }}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-gray-50">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: o.color }} /> {o.name}
+                  </button>
+                )}
+              </Searchable>
               {opts.length === 0 && <p className="px-2 py-1 text-xs text-gray-400">No options yet — add them in the field's settings.</p>}
               {current && <button type="button" onClick={() => { close(); onChange(null); }} className="w-full rounded px-2 py-1 text-left text-xs text-gray-500 hover:bg-gray-50">Clear</button>}
             </>
@@ -258,13 +282,23 @@ export const FieldEditor: React.FC<{
         : people.map((p) => ({ id: p.id, name: p.display_name || p.email, color: undefined }));
       return (
         <Picker label={field.name} disabled={disabled} trigger={trigger}>
-          {() => choices.map((c) => (
-            <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-gray-50">
-              <input type="checkbox" checked={chosen.includes(c.id)} onChange={() => toggle(c.id)} aria-label={c.name} />
-              {c.color && <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: c.color }} />}
-              <span className="truncate">{c.name}</span>
-            </label>
-          ))}
+          {() => (
+            <Searchable
+              items={choices} text={(c) => c.name} label={`Search ${field.name}`}
+              // People are always searchable; a short list of labels reads faster without a box.
+              always={field.type === 'people'}
+              placeholder={field.type === 'people' ? 'Search people…' : 'Search…'}
+              onEnter={(c) => toggle(c.id)}
+            >
+              {(c) => (
+                <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-gray-50">
+                  <input type="checkbox" checked={chosen.includes(c.id)} onChange={() => toggle(c.id)} aria-label={c.name} />
+                  {c.color && <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: c.color }} />}
+                  <span className="truncate">{c.name}</span>
+                </label>
+              )}
+            </Searchable>
+          )}
         </Picker>
       );
     }

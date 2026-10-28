@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Lock, PartyPopper, Send, Trash2 } from 'lucide-react';
 import { useMe } from '../WorkContext';
@@ -6,7 +6,7 @@ import { workApi, type Task, type UserRef } from '../api';
 import { Avatar, AvatarStack, StatusDot, formatDue, formatDuration } from '../ui';
 import { BatteryCard, CapacityCard, GoalCard, SprintCard, VarianceCard, WorkedOnCard } from './moreCards';
 import { PlanCard } from './PlanCard';
-import { CardSkeleton } from '../Skeleton';
+import { CardSkeleton, LinesSkeleton } from '../Skeleton';
 import { dashApi, type BehindRow, type Card, type CardData, type CardType, type CompletedRow, type DiscussionMessage, type PortfolioRow, type Segment, type TimeRow } from './api';
 
 export const CARD_TYPES: { type: CardType; label: string; hint: string; width: number; height: number }[] = [
@@ -60,7 +60,7 @@ export const CardBody: React.FC<{ card: Card; data: CardData | undefined; dashbo
   switch (card.type) {
     case 'calculation':
       return (
-        <button type="button" onClick={() => onDrill(undefined, card.title)} className="flex h-full w-full flex-col items-center justify-center rounded-lg hover:bg-gray-50" title="Show these tasks">
+        <button type="button" onClick={() => onDrill(undefined, card.title)} className="flex h-full w-full flex-col items-center justify-center rounded-lg hover:bg-gray-50">
           <span className="text-4xl font-semibold tracking-tight text-gray-900">
             {fmt(d.value, d.format)}
             {d.unit && <span className="ml-1 text-lg font-normal text-gray-500">{d.unit}</span>}
@@ -71,7 +71,7 @@ export const CardBody: React.FC<{ card: Card; data: CardData | undefined; dashbo
     case 'pie':
       return <PieCard segments={d.segments} format={d.format} total={d.total} donut={card.config.donut} onDrill={onDrill} />;
     case 'bar':
-      return <BarCard segments={d.segments} format={d.format} onDrill={onDrill} />;
+      return <BarCard segments={d.segments} format={d.format} byPriority={card.config.group_by === 'priority'} onDrill={onDrill} />;
     case 'line':
       return <LineCard segments={d.segments} format={d.format} onDrill={onDrill} />;
     case 'task_list':
@@ -321,34 +321,103 @@ const Empty: React.FC<{ text?: string }> = ({ text = 'No matching tasks' }) => (
   <div className="flex h-full items-center justify-center text-xs text-gray-400">{text}</div>
 );
 
+/** Nothing to chart: an empty ring draws itself closed, then the card says so. */
+const EmptyRing: React.FC = () => (
+  <div className="flex h-full flex-col items-center justify-center gap-3" role="img" aria-label="No matching tasks">
+    <svg viewBox="0 0 100 100" className="h-24 w-24 -rotate-90" aria-hidden>
+      <circle cx="50" cy="50" r="38" fill="none" stroke="#F1F3F6" strokeWidth="11" />
+      <circle className="empty-ring" cx="50" cy="50" r="38" fill="none" stroke="#D5DAE1" strokeWidth="11" strokeLinecap="round" pathLength={100} />
+    </svg>
+    <span className="empty-bars-label text-xs font-medium text-gray-400">No matching tasks</span>
+  </div>
+);
+
+/** How far the slice under the pointer eases out from the middle, in px. */
+const LIFT_PX = 6;
+/** Room one label needs: its name and, under it, the count. */
+const LABEL_GAP = 30;
+
+/** Where each slice's middle sits, in degrees: recharts starts at 3 o'clock and goes anticlockwise. */
+const midAngles = (segments: Segment[], total: number) => {
+  let at = 0;
+  return segments.map((sg) => {
+    const sweep = total ? (360 * sg.value) / total : 0;
+    const mid = at + sweep / 2;
+    at += sweep;
+    return mid;
+  });
+};
+
+/**
+ * Labels in two columns, one each side of the ring. On each side they are put in order top to
+ * bottom and pushed apart until no two are closer than LABEL_GAP, so a small slice between two
+ * big ones can no longer write its name over theirs.
+ */
+const placeLabels = (segments: Segment[], mids: number[], cx: number, cy: number, outer: number) => {
+  const reach = outer + LIFT_PX + 16;
+  const spots = segments.map((sg, i) => {
+    const rad = (-mids[i] * Math.PI) / 180;
+    return { i, right: Math.cos(rad) >= 0, cos: Math.cos(rad), sin: Math.sin(rad), y: cy + reach * Math.sin(rad), show: sg.value > 0 };
+  }).filter((s) => s.show);
+  for (const right of [true, false]) {
+    const side = spots.filter((s) => s.right === right).sort((a, b) => a.y - b.y);
+    for (let k = 1; k < side.length; k++) side[k].y = Math.max(side[k].y, side[k - 1].y + LABEL_GAP);
+    // Pushed past the bottom? Walk back up from there so the column stays inside the card.
+    const floor = cy + reach;
+    if (side.length && side[side.length - 1].y > floor) {
+      side[side.length - 1].y = floor;
+      for (let k = side.length - 2; k >= 0; k--) side[k].y = Math.min(side[k].y, side[k + 1].y - LABEL_GAP);
+    }
+  }
+  const out = new Map<number, { from: { x: number; y: number }; bend: { x: number; y: number }; end: { x: number; y: number }; right: boolean }>();
+  for (const s of spots) {
+    const from = { x: cx + (outer + 2) * s.cos, y: cy + (outer + 2) * s.sin };
+    const bend = { x: cx + (outer + LIFT_PX + 10) * s.cos, y: s.y };
+    const column = cx + (s.right ? 1 : -1) * (reach + 10);
+    const end = { x: s.right ? Math.max(column, bend.x + 8) : Math.min(column, bend.x - 8), y: s.y };
+    out.set(s.i, { from, bend, end, right: s.right });
+  }
+  return out;
+};
+
 const PieCard: React.FC<{ segments: Segment[]; format: string; total: number; donut: boolean } & Pick<CardHandlers, 'onDrill'>> = ({ segments, format, total, donut, onDrill }) => {
-  if (!segments.length || !total) return <Empty />;
+  const [hover, setHover] = useState<number | null>(null);
+  const shade = useId().replace(/:/g, '');
+  const mids = useMemo(() => midAngles(segments, total), [segments, total]);
+  if (!segments.length || !total) return <EmptyRing />;
+  const picked = hover !== null ? segments[hover] : undefined;
   const share = (value: number) => (total ? (100 * value) / total : 0);
 
-  // Each slice is named where it sits, with a leader line back to it, so nothing has to be
+  // Each slice is named beside the ring, with a leader line back to it, so nothing has to be
   // matched up against a legend on the far side of the card.
-  const Label = (props: {
-    cx?: number; cy?: number; midAngle?: number; outerRadius?: number; index?: number;
-  }) => {
-    const { cx = 0, cy = 0, midAngle = 0, outerRadius = 0, index = 0 } = props;
+  const Label = (props: { cx?: number; cy?: number; outerRadius?: number; index?: number }) => {
+    const { cx = 0, cy = 0, outerRadius = 0, index = 0 } = props;
     const sg = segments[index];
-    if (!sg || !sg.value) return null;
-    const rad = -midAngle * (Math.PI / 180);
-    const cos = Math.cos(rad);
-    const sin = Math.sin(rad);
-    const from = { x: cx + outerRadius * cos, y: cy + outerRadius * sin };
-    const bend = { x: cx + (outerRadius + 14) * cos, y: cy + (outerRadius + 14) * sin };
-    const right = cos >= 0;
-    const end = { x: bend.x + (right ? 14 : -14), y: bend.y };
+    const spot = placeLabels(segments, mids, cx, cy, outerRadius).get(index);
+    if (!sg || !spot) return null;
+    const { from, bend, end, right } = spot;
     const text = `${fmt(sg.value, format)} (${share(sg.value).toFixed(1)}%)`;
+    const lit = hover === index;
     return (
       <g style={{ pointerEvents: 'none' }}>
-        <polyline points={`${from.x},${from.y} ${bend.x},${bend.y} ${end.x},${end.y}`} stroke={sg.color} strokeWidth={1} fill="none" opacity={0.6} />
+        <polyline points={`${from.x},${from.y} ${bend.x},${bend.y} ${end.x},${end.y}`} stroke={sg.color} strokeWidth={1} fill="none" opacity={lit ? 0.9 : 0.5} style={{ transition: 'opacity 250ms ease' }} />
         <circle cx={end.x + (right ? 5 : -5)} cy={end.y - 6} r={3} fill={sg.color} />
-        <text x={end.x + (right ? 12 : -12)} y={end.y - 2.5} textAnchor={right ? 'start' : 'end'} fontSize={11} fontWeight={600} fill="#374151">{sg.label}</text>
+        <text x={end.x + (right ? 12 : -12)} y={end.y - 2.5} textAnchor={right ? 'start' : 'end'} fontSize={11} fontWeight={lit ? 700 : 600} fill={lit ? '#111827' : '#374151'}>{sg.label}</text>
         <text x={end.x + (right ? 5 : -5)} y={end.y + 11} textAnchor={right ? 'start' : 'end'} fontSize={10.5} fill="#6b7280">{text}</text>
       </g>
     );
+  };
+
+  // The slice under the pointer eases a few px out along its own middle and casts a soft shadow;
+  // it slides there and back rather than being swapped for a bigger shape in one frame.
+  const lift = (i: number): React.CSSProperties => {
+    const rad = (-mids[i] * Math.PI) / 180;
+    const on = hover === i && segments.length > 1;
+    return {
+      transform: on ? `translate(${LIFT_PX * Math.cos(rad)}px, ${LIFT_PX * Math.sin(rad)}px)` : 'translate(0, 0)',
+      filter: on ? 'drop-shadow(0 6px 10px rgba(16, 24, 40, 0.22))' : 'drop-shadow(0 0 0 rgba(16, 24, 40, 0))',
+      transition: 'transform 280ms cubic-bezier(.2, .8, .2, 1), filter 280ms ease',
+    };
   };
 
   return (
@@ -356,35 +425,55 @@ const PieCard: React.FC<{ segments: Segment[]; format: string; total: number; do
       <div className="relative min-h-0 flex-1">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
+            {/* Each slice lit from the top: its own colour, a shade lighter above. */}
             <defs>
-              {segments.map((sg) => (
-                <linearGradient key={sg.key} id={`pie-${sg.key.replace(/[^\w-]/g, '')}`} x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor={`color-mix(in oklab, ${sg.color} 72%, white)`} />
-                  <stop offset="100%" stopColor={`color-mix(in oklab, ${sg.color} 88%, black)`} />
+              {segments.map((sg, i) => (
+                <linearGradient key={sg.key} id={`${shade}-${i}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" style={{ stopColor: `color-mix(in srgb, ${sg.color} 78%, white)` }} />
+                  <stop offset="100%" style={{ stopColor: sg.color }} />
                 </linearGradient>
               ))}
             </defs>
+            {/* What you see: the slices, which ease out under the pointer. They take no pointer
+                events themselves -- a slice that slid away from the pointer would count as left,
+                slide back, count as entered, and shake. */}
             <Pie
               data={segments}
               dataKey="value"
               nameKey="label"
               innerRadius={donut ? '52%' : 0}
-              outerRadius="68%"
+              outerRadius="64%"
               paddingAngle={segments.length > 1 ? 2 : 0}
               labelLine={false}
               label={Label}
-              onClick={(entry: { key?: string; label?: string }) => entry.key && onDrill(entry.key, entry.label ?? '')}
               isAnimationActive={false}
             >
-              {segments.map((sg) => <Cell key={sg.key} fill={`url(#pie-${sg.key.replace(/[^\w-]/g, '')})`} stroke={segments.length > 1 ? '#fff' : 'none'} strokeWidth={2} className="cursor-pointer outline-none" />)}
+              {segments.map((sg, i) => (
+                <Cell key={sg.key} fill={`url(#${shade}-${i})`} stroke={segments.length > 1 ? '#fff' : 'none'} strokeWidth={2} className="outline-none" style={{ ...lift(i), pointerEvents: 'none' }} />
+              ))}
             </Pie>
-            <Tooltip formatter={(v: number) => fmt(v, format)} />
+            {/* What you point at: the same ring, invisible, and it never moves. */}
+            <Pie
+              data={segments}
+              dataKey="value"
+              nameKey="label"
+              innerRadius={donut ? '52%' : 0}
+              outerRadius="64%"
+              paddingAngle={segments.length > 1 ? 2 : 0}
+              isAnimationActive={false}
+              onMouseEnter={(_: unknown, i: number) => setHover(i)}
+              onMouseLeave={() => setHover(null)}
+              onClick={(entry: { key?: string; label?: string }) => entry.key && onDrill(entry.key, entry.label ?? '')}
+            >
+              {segments.map((sg) => <Cell key={sg.key} fill="transparent" stroke="none" className="cursor-pointer outline-none" />)}
+            </Pie>
           </PieChart>
         </ResponsiveContainer>
         {donut && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-2xl font-semibold leading-none text-gray-900">{fmt(total, format)}</span>
-            <span className="mt-1 text-[10px] uppercase tracking-wide text-gray-400">{format === 'duration' ? 'total' : 'total tasks'}</span>
+            {/* The middle names the slice under the pointer, and the whole again when it leaves. */}
+            <span className="text-2xl font-semibold leading-none text-gray-900 transition-colors duration-200" style={picked ? { color: picked.color } : undefined}>{fmt(picked ? picked.value : total, format)}</span>
+            <span className="mt-1 max-w-[7rem] truncate text-[10px] uppercase tracking-wide text-gray-400">{picked ? picked.label : format === 'duration' ? 'total' : 'total tasks'}</span>
           </div>
         )}
       </div>
@@ -393,6 +482,18 @@ const PieCard: React.FC<{ segments: Segment[]; format: string; total: number; do
     </div>
   );
 };
+
+/** Nothing to chart: a few bars sink to the baseline, then the card says so. */
+const EmptyBars: React.FC = () => (
+  <div className="flex h-full flex-col items-center justify-center gap-3" role="img" aria-label="No matching tasks">
+    <div className="flex h-20 w-48 items-end justify-center gap-3 border-b border-gray-200">
+      {[62, 88, 46, 74, 34].map((h, i) => (
+        <span key={i} className="empty-bar w-6 rounded-t-md bg-gray-200" style={{ height: `${h}%`, animationDelay: `${i * 90}ms` }} />
+      ))}
+    </div>
+    <span className="empty-bars-label text-xs font-medium text-gray-400">No matching tasks</span>
+  </div>
+);
 
 /** Past this many, upright bars become a row of slivers under slanted names. */
 const UPRIGHT_MAX = 10;
@@ -407,12 +508,18 @@ const ROW_PX = 30;
  * its side: one row each, names written properly along the left, and the card scrolls. Nobody is
  * summarised away.
  */
-const BarCard: React.FC<{ segments: Segment[]; format: string } & Pick<CardHandlers, 'onDrill'>> = ({ segments, format, onDrill }) => {
-  const shown = useMemo(() => [...segments].sort((a, b) => b.value - a.value), [segments]);
+/** Priority bars stand in this order whatever their counts: Urgent first, No priority last. */
+const PRIORITY_ORDER = ['1', '2', '3', '4', '0'];
+
+const BarCard: React.FC<{ segments: Segment[]; format: string; byPriority?: boolean } & Pick<CardHandlers, 'onDrill'>> = ({ segments, format, byPriority, onDrill }) => {
+  const shown = useMemo(() => (byPriority
+    ? [...segments].sort((a, b) => PRIORITY_ORDER.indexOf(a.key) - PRIORITY_ORDER.indexOf(b.key))
+    : [...segments].sort((a, b) => b.value - a.value)), [segments, byPriority]);
   const sideways = shown.length > UPRIGHT_MAX;
   const crowded = !sideways && shown.length > 6;
   const total = useMemo(() => shown.reduce((n, sg) => n + sg.value, 0), [shown]);
-  if (!segments.length || segments.every((sg) => !sg.value)) return <Empty />;
+  if (!segments.length || segments.every((sg) => !sg.value)) return <EmptyBars />;
+  if (byPriority && !sideways) return <PriorityBars shown={shown} total={total} format={format} onDrill={onDrill} />;
 
   // The count and its share sit on top of each bar: a bar you have to measure against the axis
   // makes you do arithmetic to learn what the chart already knows.
@@ -486,17 +593,6 @@ const BarCard: React.FC<{ segments: Segment[]; format: string } & Pick<CardHandl
           {/* The figure and its share sit above each bar and need about 36px; any less and the
               tallest bar's label is cut off at the top of the card. */}
           <BarChart data={shown} margin={{ top: 40, right: 8, bottom: crowded ? 34 : 0, left: 6 }}>
-            <defs>
-              {shown.map((sg) => (
-                // Lit from above: a lighter top running down into the full colour, so the bars
-                // read as solid blocks rather than flat paint.
-                <linearGradient key={sg.key} id={`bar-${sg.key.replace(/[^\w-]/g, '')}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={`color-mix(in oklab, ${sg.color} 70%, white)`} />
-                  <stop offset="45%" stopColor={sg.color} />
-                  <stop offset="100%" stopColor={`color-mix(in oklab, ${sg.color} 85%, black)`} />
-                </linearGradient>
-              ))}
-            </defs>
             <CartesianGrid vertical={false} stroke="#e9ecef" strokeDasharray="4 4" />
             <XAxis
               dataKey="label"
@@ -520,7 +616,7 @@ const BarCard: React.FC<{ segments: Segment[]; format: string } & Pick<CardHandl
               }}
               tickFormatter={(v: number) => (format === 'duration' ? `${Math.round(v / 3600)}h` : String(v))}
             />
-            <Tooltip formatter={(v: number) => fmt(v, format)} cursor={{ fill: '#f3f4f6' }} />
+            <Tooltip formatter={(v: number) => fmt(v, format)} cursor={false} />
             <Bar
               dataKey="value"
               radius={[8, 8, 0, 0]}
@@ -528,13 +624,126 @@ const BarCard: React.FC<{ segments: Segment[]; format: string } & Pick<CardHandl
               isAnimationActive={false}
               onClick={(entry: { key?: string; label?: string }) => entry.key && onDrill(entry.key, entry.label ?? '')}
             >
-              {shown.map((sg) => <Cell key={sg.key} fill={`url(#bar-${sg.key.replace(/[^\w-]/g, '')})`} className="cursor-pointer" />)}
+              {shown.map((sg) => <Cell key={sg.key} fill={sg.color} className="cursor-pointer" />)}
               <LabelList dataKey="value" content={Cap} />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
 
+    </div>
+  );
+};
+
+/* ---- The priority card: Urgent first, a flag on each name, the urgent count up top. ---- */
+type PriorityProps = { shown: Segment[]; total: number; format: string } & Pick<CardHandlers, 'onDrill'>;
+
+const tone = (sg: Segment) => (sg.key === '0' ? '#9ca3af' : sg.color);
+/** A bar's outline under the pointer: the same colour, darker. */
+const darker = (color: string) => `color-mix(in srgb, ${color} 62%, black)`;
+
+/**
+ * "2 urgent with no owner · 7 need a priority": what a manager reads first,
+ * and each part that has a list behind it opens that list.
+ */
+const PrioritySummary: React.FC<PriorityProps> = ({ shown, format, onDrill }) => {
+  const urgent = shown.find((sg) => sg.key === '1');
+  const none = shown.find((sg) => sg.key === '0');
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 pb-1 text-[13px] text-gray-500">
+      {!!urgent?.unowned && (
+        <span className="rounded-full bg-amber-50 px-2 py-px text-[11px] font-semibold text-amber-700">
+          {urgent.unowned} urgent with no owner
+        </span>
+      )}
+      {!!none?.value && (
+        <button
+          type="button"
+          onClick={() => onDrill(none.key, none.label)}
+          className="text-[12px] font-medium text-[#234788] underline-offset-2 hover:underline"
+        >
+          · {fmt(none.value, format)} need a priority
+        </button>
+      )}
+    </div>
+  );
+};
+
+/** The axis names each bar with a flag, and under it how many are new. */
+const FlagTick = (shown: Segment[]) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- recharts tick props
+  const Tick = (p: any) => {
+    const sg = shown.find((s) => s.label === p.payload?.value);
+    const fresh = sg?.new ?? 0;
+    return (
+      <g transform={`translate(${p.x},${Number(p.y) + 4})`}>
+        <text textAnchor="middle" y={12} fontSize={11.5} fill="#4b5563">
+          <tspan fill={sg ? tone(sg) : '#9ca3af'}>⚑ </tspan>{p.payload?.value}
+        </text>
+        {fresh > 0 && (
+          <text textAnchor="middle" y={27} fontSize={10.5} fontWeight={600}>
+            <tspan fill="#6b7280">+{fresh} new</tspan>
+          </text>
+        )}
+      </g>
+    );
+  };
+  return Tick;
+};
+
+/** Upright bars in priority order, each one plain colour. */
+const PriorityBars: React.FC<PriorityProps> = (props) => {
+  const { shown, format, onDrill } = props;
+  const [hover, setHover] = useState<number | null>(null);
+  const rows = shown;
+  const drill = (entry: { key?: string; label?: string }) => entry.key && onDrill(entry.key, entry.label ?? '');
+
+  // The count above each bar in bold, its share small and grey beside nothing else.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- recharts label props
+  const Cap = (p: any) => {
+    const sg = rows[Number(p.index ?? 0)];
+    if (!sg || !sg.value) return null;
+    const mid = Number(p.x ?? 0) + Number(p.width ?? 0) / 2;
+    const y = Number(p.y ?? 0);
+    const share = props.total ? (100 * sg.value) / props.total : 0;
+    return (
+      <g style={{ pointerEvents: 'none' }}>
+        <text x={mid} y={y - 20} textAnchor="middle" fontSize={14} fontWeight={700} fill="#111827">{fmt(sg.value, format)}</text>
+        <text x={mid} y={y - 7} textAnchor="middle" fontSize={10.5} fill="#9ca3af">{share.toFixed(0)}%</text>
+      </g>
+    );
+  };
+
+  const outline = (i: number, color: string) => (hover === i ? { stroke: darker(color), strokeWidth: 2 } : {});
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <PrioritySummary {...props} />
+      <div className="min-h-0 flex-1">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={rows} margin={{ top: 34, right: 8, bottom: 0, left: 6 }} onMouseLeave={() => setHover(null)}>
+            <CartesianGrid vertical={false} stroke="#e9ecef" strokeDasharray="4 4" />
+            <XAxis dataKey="label" tick={FlagTick(shown)} interval={0} height={rows.some((r) => r.new) ? 44 : 30} tickLine={false} axisLine={false} />
+            <YAxis
+              tick={{ fontSize: 11, fill: '#9ca3af' }}
+              allowDecimals={false}
+              tickLine={false}
+              axisLine={false}
+              width={48}
+              tickFormatter={(v: number) => (format === 'duration' ? `${Math.round(v / 3600)}h` : String(v))}
+              // Says what the height counts: tasks, or hours on a time card.
+              label={{
+                value: format === 'duration' ? 'Hours' : 'Number of tasks',
+                angle: -90, position: 'insideLeft', offset: 10, style: { textAnchor: 'middle', fontSize: 11, fill: '#9ca3af' },
+              }}
+            />
+            <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={96} isAnimationActive={false} onClick={drill} onMouseEnter={(_: unknown, i: number) => setHover(i)}>
+              {rows.map((sg, i) => <Cell key={sg.key} fill={tone(sg)} className="cursor-pointer" {...outline(i, tone(sg))} />)}
+              <LabelList dataKey="value" content={Cap} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 };
@@ -591,7 +800,7 @@ const DiscussionCard: React.FC<{ dashboardId: string; cardId: string }> = ({ das
   return (
     <div className="flex h-full flex-col">
       <ul ref={listRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1" aria-label="Messages">
-        {messages === null ? <li className="text-xs text-gray-400">Loading…</li> : messages.length === 0 ? <li className="py-4 text-center text-xs text-gray-400">No messages yet. Start the conversation.</li> : messages.map((m) => (
+        {messages === null ? <li className="text-xs text-gray-400"><LinesSkeleton /></li> : messages.length === 0 ? <li className="py-4 text-center text-xs text-gray-400">No messages yet. Start the conversation.</li> : messages.map((m) => (
           <li key={m.id} className="group flex items-start gap-2">
             {m.user ? <Avatar user={m.user} size={22} /> : <span className="h-[22px] w-[22px] rounded-full bg-gray-200" />}
             <div className="min-w-0 flex-1">
@@ -992,6 +1201,18 @@ const TimesheetCard: React.FC<{
     return `${d.toLocaleDateString(undefined, { weekday: 'short' }).toUpperCase()}, ${d.getDate()}`;
   };
   const span = days.length;
+  // The week asked for moves the dates at once; the old week stays, faded, until the new one is in.
+  const [target, setTarget] = useState<[string, string] | null>(null);
+  // Settles when the week last asked for arrives (not an in-between one from a quick double
+  // click); after 20 s it gives up, so a failed save never leaves the card faded.
+  useEffect(() => { if (target && days[0] === target[0]) setTarget(null); }, [days[0]]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!target) return;
+    const t = window.setTimeout(() => setTarget(null), 20000);
+    return () => window.clearTimeout(t);
+  }, [target]);
+  const shownStart = target?.[0] ?? days[0];
+  const shownEnd = target?.[1] ?? days[span - 1];
   const shift = (by: number) => {
     if (!onShift || !span) return;
     const move = (iso: string) => {
@@ -999,10 +1220,12 @@ const TimesheetCard: React.FC<{
       d.setDate(d.getDate() + by * span);
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     };
-    onShift(move(days[0]), move(days[span - 1]));
+    const next: [string, string] = [move(shownStart), move(shownEnd)];
+    setTarget(next);
+    onShift(next[0], next[1]);
   };
   const range = span
-    ? `${new Date(`${days[0]}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${new Date(`${days[span - 1]}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
+    ? `${new Date(`${shownStart}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${new Date(`${shownEnd}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
     : '';
 
   return (
@@ -1018,7 +1241,7 @@ const TimesheetCard: React.FC<{
           </span>
         )}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className={`ts-week min-h-0 flex-1 overflow-auto ${target ? 'is-busy' : ''}`}>
       {rows.length === 0 ? (
         <Empty text="No time tracked in this week" />
       ) : (

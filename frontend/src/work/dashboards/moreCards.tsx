@@ -1,11 +1,11 @@
 // The Battery, Worked on, Goals and Sprint cards.
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FEATURES } from '../../config/features';
 import { Link } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, CheckCircle2, MessageSquare, Pencil, Target, Timer, TrendingDown, TrendingUp } from 'lucide-react';
 import type { UserRef } from '../api';
-import { Avatar, formatDuration } from '../ui';
+import { Avatar, SearchSelect, formatDuration } from '../ui';
 import type { Segment } from './api';
 import type { SprintReport } from '../spacesApi';
 
@@ -161,15 +161,6 @@ function shapeOf(t: VarianceTask): Exclude<Shape, 'all'> {
   return t.difference_seconds > 0 ? 'over' : 'under';
 }
 
-const SORTS: { value: string; label: string; of: (t: VarianceTask) => number }[] = [
-  { value: 'gap', label: 'Biggest difference', of: (t) => -Math.abs(t.difference_seconds ?? -1) },
-  { value: 'over', label: 'Most over', of: (t) => -(t.difference_seconds ?? -Infinity) },
-  { value: 'under', label: 'Most under', of: (t) => (t.difference_seconds ?? Infinity) },
-  { value: 'actual', label: 'Longest actual', of: (t) => -t.logged_seconds },
-  { value: 'estimate', label: 'Largest estimate', of: (t) => -(t.expected_seconds ?? -1) },
-  { value: 'recent', label: 'Finished most recently', of: (t) => -new Date(t.done_at).getTime() },
-];
-
 const PRIORITY_LOOK: Record<number, { label: string; dot: string }> = {
   1: { label: 'Urgent', dot: 'bg-red-500' },
   2: { label: 'High', dot: 'bg-amber-500' },
@@ -189,16 +180,18 @@ export const VarianceCard: React.FC<{
   rows: VarianceRow[]; tasks?: VarianceTask[]; more_tasks?: number;
   expected_seconds: number; logged_seconds: number;
   sees_everyone: boolean;
+  period?: { start: string; end: string };
   onDrill: (segment: string | undefined, label: string) => void;
   onOpenTask?: (id: string) => void;
-}> = ({ tasks = [], more_tasks = 0, expected_seconds, logged_seconds, onDrill, onOpenTask }) => {
+}> = ({ tasks = [], more_tasks = 0, expected_seconds, logged_seconds, period, onDrill, onOpenTask }) => {
   const [shape, setShape] = useState<Shape>('all');
   const [who, setWho] = useState<string>('all');
-  const [sort, setSort] = useState<string>('gap');
 
   const hours = (seconds: number) => formatDuration(seconds) || '0h';
   const total = logged_seconds - expected_seconds;
   const used = expected_seconds ? logged_seconds / expected_seconds : 0;
+  const empty = tasks.length === 0;
+  const span = period ? periodText(period.start, period.end) : 'this period';
 
   // Everyone who appears on the finished work, for the person filter on the card itself.
   const people = useMemo(() => {
@@ -213,58 +206,20 @@ export const VarianceCard: React.FC<{
     return n;
   }, [tasks, who]);
 
-  const shown = useMemo(() => {
-    const by = SORTS.find((x) => x.value === sort) ?? SORTS[0];
-    return tasks
-      .filter((t) => who === 'all' || t.assignees.some((u) => u.id === who))
-      .filter((t) => shape === 'all' || shapeOf(t) === shape)
-      .slice()
-      .sort((a, b) => by.of(a) - by.of(b));
-  }, [tasks, shape, who, sort]);
+  // In the server's order: biggest difference first, tasks with no estimate last.
+  const shown = useMemo(() => tasks
+    .filter((t) => who === 'all' || t.assignees.some((u) => u.id === who))
+    .filter((t) => shape === 'all' || shapeOf(t) === shape), [tasks, shape, who]);
 
-  // One hue per tile, kept pale: the colour tells you which figure you are looking at without
-  // reading the label, and the value stays the darkest thing in the tile.
-  // Not indigo or brand-600: index.css remaps both to the teal brand colour, so a tile asking
-  // for indigo comes out the same shade as the teal one beside it.
-  const SKINS = {
-    sky: { tile: 'border-sky-100 bg-gradient-to-br from-sky-50 to-white', badge: 'bg-sky-100 text-sky-600', value: 'text-sky-900', note: 'text-sky-600/80' },
-    purple: { tile: 'border-purple-100 bg-gradient-to-br from-purple-50 to-white', badge: 'bg-purple-100 text-purple-600', value: 'text-purple-900', note: 'text-purple-500/80' },
-    teal: { tile: 'border-teal-100 bg-gradient-to-br from-teal-50 to-white', badge: 'bg-teal-100 text-teal-600', value: 'text-teal-900', note: 'text-teal-600/80' },
-    amber: { tile: 'border-amber-100 bg-gradient-to-br from-amber-50 to-white', badge: 'bg-amber-100 text-amber-600', value: 'text-amber-800', note: 'text-amber-600/90' },
-    slate: { tile: 'border-gray-200 bg-gradient-to-br from-gray-50 to-white', badge: 'bg-gray-100 text-gray-500', value: 'text-gray-900', note: 'text-gray-400' },
-  } as const;
-
-  const Tile: React.FC<{
-    icon: React.ReactNode; label: string; value: string; skin: keyof typeof SKINS;
-    note?: React.ReactNode; bar?: React.ReactNode; onClick?: () => void;
-  }> = ({ icon, label, value, skin, note, bar, onClick }) => {
-    const look = SKINS[skin];
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={!onClick}
-        title={onClick ? 'Show the tasks behind this figure' : undefined}
-        className={`flex-1 rounded-xl border px-3 py-2 text-left shadow-sm transition-colors ${look.tile} ${
-          onClick ? 'cursor-pointer hover:brightness-[0.98]' : 'cursor-default'}`}
-      >
-        <span className="flex items-center gap-2">
-          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${look.badge}`}>{icon}</span>
-          <span className="truncate text-[11px] font-medium text-gray-600">{label}</span>
-        </span>
-        <span className={`mt-1.5 block text-xl font-semibold leading-none ${look.value}`}>{value}</span>
-        {bar}
-        {note && <span className={`mt-1 block truncate text-[11px] ${look.note}`}>{note}</span>}
-      </button>
-    );
-  };
+  const drillAll = () => onDrill(undefined, 'the work these figures cover');
+  const summary = { tasks, empty, expected_seconds, logged_seconds, total, used, counts, hours, onOpen: drillAll };
 
   const Chip: React.FC<{ value: Shape; label: string; count: number }> = ({ value, label, count }) => (
     <button
       type="button"
       onClick={() => setShape(value)}
       className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
-        shape === value ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+        shape === value ? 'bg-[#234788] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
     >
       {label} <span className={shape === value ? 'text-white/70' : 'text-gray-400'}>{count}</span>
     </button>
@@ -272,109 +227,65 @@ export const VarianceCard: React.FC<{
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-wrap gap-2 sm:flex-nowrap">
-        <Tile
-          skin="sky"
-          icon={<Target size={15} />}
-          label="Estimated"
-          value={hours(expected_seconds)}
-          note={tasks.length ? `across ${tasks.length} finished task${tasks.length === 1 ? '' : 's'}` : undefined}
-          onClick={() => onDrill(undefined, 'the work these estimates cover')}
-        />
-        <Tile
-          skin={used > 1 ? 'amber' : 'purple'}
-          icon={<Timer size={15} />}
-          label="Actual"
-          value={hours(logged_seconds)}
-          bar={expected_seconds > 0 ? (
-            <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-white/80 ring-1 ring-black/[0.04]">
-              <span
-                className={`block h-full rounded-full ${used > 1 ? 'bg-amber-500' : 'bg-teal-500'}`}
-                style={{ width: `${Math.min(100, used * 100)}%` }}
-              />
-            </span>
-          ) : undefined}
-          note={expected_seconds > 0 ? `${Math.round(used * 100)}% of the estimate` : undefined}
-          onClick={() => onDrill(undefined, 'the work these hours were logged against')}
-        />
-        <Tile
-          skin={total === 0 ? 'slate' : total > 0 ? 'amber' : 'teal'}
-          icon={total > 0 ? <TrendingUp size={15} /> : <TrendingDown size={15} />}
-          label="Difference"
-          value={total === 0 ? 'None' : hours(Math.abs(total))}
-          note={total === 0 ? 'exactly as estimated' : total > 0 ? 'longer than estimated' : 'quicker than estimated'}
-          onClick={() => onDrill(undefined, 'the work behind this difference')}
-        />
-      </div>
+      <VarianceWater {...summary} />
 
-      {/* Sorting only: which way a task went against its estimate is read off the table, and who
-          it belongs to is the card's own Filter. */}
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-b border-gray-100 pb-2">
-        {FEATURES.dashboardVarianceChips && (
-          <>
-            <Chip value="all" label="All" count={counts.over + counts.under + counts.exact + counts.none} />
-            <Chip value="over" label="Over" count={counts.over} />
-            <Chip value="under" label="Under" count={counts.under} />
-            <Chip value="exact" label="On target" count={counts.exact} />
-            <Chip value="none" label="No estimate" count={counts.none} />
-          </>
-        )}
-        <span className="flex-1" />
-        {FEATURES.dashboardVarianceChips && people.length > 1 && (
-          <select
-            aria-label="Person"
-            value={who}
-            onChange={(e) => setWho(e.target.value)}
-            className="rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[11px] text-gray-600"
-          >
-            <option value="all">Everyone</option>
-            {people.map((u) => <option key={u.id} value={u.id}>{u.display_name || u.email}</option>)}
-          </select>
-        )}
-        <select
-          aria-label="Sort"
-          value={sort}
-          onChange={(e) => setSort(e.target.value)}
-          className="no-print rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[11px] text-gray-600"
-        >
-          {SORTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      </div>
+      {!empty && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-medium text-gray-400">{tasks.length} finished task{tasks.length === 1 ? '' : 's'} · {span}</span>
+          {FEATURES.dashboardVarianceChips && (
+            <>
+              <Chip value="all" label="All" count={counts.over + counts.under + counts.exact + counts.none} />
+              <Chip value="over" label="Over" count={counts.over} />
+              <Chip value="under" label="Under" count={counts.under} />
+              <Chip value="exact" label="On target" count={counts.exact} />
+              <Chip value="none" label="No estimate" count={counts.none} />
+            </>
+          )}
+          <span className="flex-1" />
+          {FEATURES.dashboardVarianceChips && people.length > 1 && (
+            <SearchSelect label="Person" value={who} onChange={setWho} size="sm" className="max-w-40"
+              options={[
+                { value: 'all', label: 'Everyone' },
+                ...people.map((u) => ({ value: u.id, label: u.display_name || u.email, hint: u.email })),
+              ]} />
+          )}
+        </div>
+      )}
 
       {/* Task by task. The header stays put while the rows scroll. */}
-      <div className="min-h-0 flex-1 overflow-auto">
-        {shown.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-gray-400">
-            {tasks.length === 0 ? 'Nothing was finished in this period.' : 'Nothing here matches these filters.'}
-          </p>
+      <div className="mt-1.5 min-h-0 flex-1 overflow-auto">
+        {empty ? (
+          <div className="flex h-full min-h-28 flex-col items-center justify-center gap-2 text-center">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#EEF2F8] text-[#234788]"><CheckCircle2 size={18} /></span>
+            <p className="text-[13px] font-medium text-gray-600">Nothing finished yet</p>
+            <p className="text-[11.5px] text-gray-400">{span} · finished tasks show here, with their estimate and what they took.</p>
+          </div>
+        ) : shown.length === 0 ? (
+          <p className="px-4 py-6 text-center text-[13px] text-gray-400">Nothing here matches these filters.</p>
         ) : (
           <table className="w-full border-collapse text-[13px]">
             <thead className="sticky top-0 z-10 bg-white">
-              <tr className="text-[10px] uppercase tracking-wide text-gray-400">
-                <th className="py-1.5 pr-2 text-left font-semibold">Task</th>
-                <th className="w-20 px-2 py-1.5 text-right font-semibold">Estimated</th>
-                <th className="w-20 px-2 py-1.5 text-right font-semibold">Actual</th>
-                <th className="w-28 py-1.5 pl-2 text-right font-semibold">Difference</th>
+              <tr className="border-b border-gray-200 text-[11px] text-gray-500">
+                <th className="py-1.5 pr-2 text-left font-medium">Task</th>
+                <th className="w-20 px-2 py-1.5 text-right font-medium">Estimated</th>
+                <th className="w-20 px-2 py-1.5 text-right font-medium">Actual</th>
+                <th className="w-28 py-1.5 pl-2 text-right font-medium">Difference</th>
               </tr>
             </thead>
             <tbody>
               {shown.map((t) => {
                 const kind = shapeOf(t);
-                const look = kind === 'over' ? 'bg-amber-50 text-amber-800'
-                  : kind === 'under' ? 'bg-teal-50 text-teal-800'
-                  : kind === 'exact' ? 'bg-gray-100 text-gray-600'
-                  : 'bg-gray-50 text-gray-400';
+                const pill = kind === 'over' ? 'bg-red-50 text-red-700'
+                  : kind === 'under' ? 'bg-green-50 text-green-700'
+                  : kind === 'exact' ? 'bg-[#EEF2F8] text-[#234788]'
+                  : 'text-gray-400 ring-1 ring-inset ring-dashed ring-gray-200';
                 const priority = t.priority ? PRIORITY_LOOK[t.priority] : undefined;
                 return (
-                  <tr
-                    key={t.id}
-                    onClick={() => onOpenTask?.(t.id)}
-                    className="cursor-pointer border-t border-gray-100 align-middle hover:bg-gray-50"
-                  >
-                    <td className="min-w-0 py-1.5 pr-2">
+                  <tr key={t.id} onClick={() => onOpenTask?.(t.id)} className="cursor-pointer border-b border-gray-100 align-middle hover:bg-[#F7F9FC]">
+                    <td className="min-w-0 py-2 pr-2">
                       <div className="flex items-center gap-1.5">
-                        {priority && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${priority.dot}`} title={priority.label} />}
-                        <span className="min-w-0 truncate font-medium text-gray-800" title={t.name}>{t.name}</span>
+                        {priority && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${priority.dot}`} aria-label={priority.label} />}
+                        <span className="min-w-0 truncate font-medium text-gray-800">{t.name}</span>
                         {t.late && <span className="shrink-0 rounded bg-red-50 px-1 text-[10px] font-medium text-red-600">late</span>}
                       </div>
                       <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-gray-400">
@@ -382,16 +293,17 @@ export const VarianceCard: React.FC<{
                         <span className="truncate">{t.list}</span>
                       </div>
                     </td>
-                    <td className="px-2 text-right tabular-nums text-gray-600">
-                      {t.expected_seconds === null ? <span className="text-gray-300">—</span> : hours(t.expected_seconds)}
+                    <td className="px-2 text-right tabular-nums text-gray-500">
+                      {t.expected_seconds === null ? <span className="text-gray-300">–</span> : hours(t.expected_seconds)}
                     </td>
-                    <td className="px-2 text-right font-medium tabular-nums text-gray-800">{hours(t.logged_seconds)}</td>
+                    <td className="px-2 text-right font-medium tabular-nums text-gray-900">{hours(t.logged_seconds)}</td>
                     <td className="pl-2 text-right">
-                      <span className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${look}`}>
-                        {t.difference_seconds === null ? 'no estimate'
-                          : kind === 'exact' ? 'on target'
-                          : `${t.difference_seconds > 0 ? '+' : '−'}${hours(Math.abs(t.difference_seconds))}`}
-                      </span>
+                      {kind !== 'exact' && (
+                        <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${pill}`}>
+                          {t.difference_seconds === null ? 'no estimate'
+                            : `${t.difference_seconds > 0 ? '+' : '−'}${hours(Math.abs(t.difference_seconds))}`}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -405,6 +317,112 @@ export const VarianceCard: React.FC<{
     </div>
   );
 };
+
+/* ---- The figures at the top: Estimated as it is; Actual and Difference as boxes of water. ---- */
+
+type VarianceSummary = {
+  tasks: VarianceTask[]; empty: boolean; expected_seconds: number; logged_seconds: number;
+  total: number; used: number; counts: Record<Exclude<Shape, 'all'>, number>;
+  hours: (seconds: number) => string; onOpen: () => void;
+};
+
+const periodText = (start: string, end: string) => {
+  const f = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return start === end ? f(start) : `${f(start)} – ${f(end)}`;
+};
+
+/** "+2h over" / "1h under" / "on estimate", with its colour: red over, green under. */
+const gapWords = (s: VarianceSummary) => {
+  if (s.empty) return { text: 'Nothing finished yet', tone: 'text-gray-400', short: '–' };
+  if (s.total === 0) return { text: 'on estimate', tone: 'text-[#234788]', short: 'On estimate' };
+  const pct = s.expected_seconds ? ` · ${Math.round(Math.abs(s.used - 1) * 100)}%` : '';
+  return s.total > 0
+    ? { text: `longer than estimated${pct}`, tone: 'text-red-600', short: `+${s.hours(s.total)}` }
+    : { text: `quicker than estimated${pct}`, tone: 'text-green-700', short: `−${s.hours(-s.total)}` };
+};
+
+/** How long the waves move each time the box comes into view before the water settles. */
+const WAVE_MS = 6000;
+
+/**
+ * Water filling a box to `level` percent, with a slow wave on its surface. It rises from empty
+ * when the card first draws, so the eye reads "how full" before it reads the number.
+ *
+ * The waves move only for a few seconds after the box comes into view, then settle; off screen
+ * they stay still. Nothing keeps running while someone simply has the Dashboard open.
+ */
+const Water: React.FC<{ level: number; color: string }> = ({ level, color }) => {
+  const [shown, setShown] = useState(0);
+  const [moving, setMoving] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => { const t = window.setTimeout(() => setShown(level), 60); return () => window.clearTimeout(t); }, [level]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    let timer = 0;
+    const seen = new IntersectionObserver(([entry]) => {
+      window.clearTimeout(timer);
+      if (entry.isIntersecting) {
+        setMoving(true);
+        timer = window.setTimeout(() => setMoving(false), WAVE_MS);
+      } else {
+        setMoving(false);
+      }
+    });
+    seen.observe(el);
+    return () => { seen.disconnect(); window.clearTimeout(timer); };
+  }, []);
+  // Two waves the same shape, one behind the other, drifting at different speeds.
+  const wave = 'M0 6 Q 25 0 50 6 T 100 6 T 150 6 T 200 6 V 20 H 0 Z';
+  return (
+    <span ref={ref} aria-hidden className={`water pointer-events-none absolute inset-x-0 bottom-0 ${moving ? '' : 'is-still'}`} style={{ height: `${Math.min(100, Math.max(0, shown))}%`, '--water': color } as React.CSSProperties}>
+      <svg className="water-wave water-wave-back" viewBox="0 0 200 20" preserveAspectRatio="none"><path d={wave} /></svg>
+      <svg className="water-wave water-wave-front" viewBox="0 0 200 20" preserveAspectRatio="none"><path d={wave} /></svg>
+      <span className="water-body" />
+    </span>
+  );
+};
+
+/** The Estimated figure as a plain box; Actual and Difference as boxes of water. */
+const VarianceWater: React.FC<VarianceSummary> = (s) => {
+  const gap = gapWords(s);
+  const over = s.used > 1;
+  const pct = Math.round(s.used * 100);
+  const diffLevel = s.expected_seconds ? Math.min(100, Math.abs(s.used - 1) * 100) : 0;
+  const Box: React.FC<{ label: string; Icon: React.ElementType; children: React.ReactNode; note?: React.ReactNode; water?: React.ReactNode }> = ({ label, Icon, children, note, water }) => (
+    <button type="button" onClick={s.empty ? undefined : s.onOpen} disabled={s.empty}
+      className="relative flex min-h-[92px] min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#E6E9F0] bg-white px-4 py-3 text-left transition-colors enabled:hover:border-[#C9D3E6] disabled:cursor-default">
+      {water}
+      <span className="relative flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-gray-500">
+        <Icon size={13} className="text-[#234788]" /> {label}
+      </span>
+      <span className="relative">{children}</span>
+      {note && <span className="relative mt-1 truncate text-[11.5px] text-gray-600">{note}</span>}
+    </button>
+  );
+  return (
+    <div className="flex flex-wrap gap-2.5 sm:flex-nowrap">
+      <Box label="Estimated" Icon={Target} note={s.empty ? undefined : `across ${s.tasks.length} task${s.tasks.length === 1 ? '' : 's'}`}>
+        <span className="mt-1.5 block text-[22px] font-semibold leading-none tabular-nums text-[#1B2A4A]">{s.empty ? '–' : s.hours(s.expected_seconds)}</span>
+      </Box>
+      <Box
+        label="Actual" Icon={Timer}
+        water={!s.empty && s.expected_seconds > 0 ? <Water level={Math.min(100, s.used * 100)} color={over ? '#ef4444' : '#234788'} /> : undefined}
+        note={!s.empty && s.expected_seconds ? <span className={over ? 'font-medium text-red-700' : ''}>{pct}% of the estimate{over ? ' · overflowing' : ' used'}</span> : undefined}
+      >
+        <span className="mt-1.5 block text-[22px] font-semibold leading-none tabular-nums text-[#1B2A4A]">{s.empty ? '–' : s.hours(s.logged_seconds)}</span>
+      </Box>
+      <Box
+        label="Difference" Icon={s.total > 0 ? TrendingUp : TrendingDown}
+        water={!s.empty && s.total !== 0 && s.expected_seconds > 0 ? <Water level={Math.max(8, diffLevel)} color={s.total > 0 ? '#ef4444' : '#16a34a'} /> : undefined}
+        note={<span className={gap.tone}>{gap.text}</span>}
+      >
+        <span className={`mt-1.5 block text-[22px] font-semibold leading-none tabular-nums ${s.empty ? 'text-gray-300' : gap.tone}`}>{gap.short}</span>
+      </Box>
+    </div>
+  );
+};
+
 
 interface WorkedTask { id: string; name: string; tracked_seconds: number; changes: number; comments: number; completed: boolean }
 interface WorkedRow { key: string; user: UserRef | null; tracked_seconds: number; task_count: number; tasks: WorkedTask[] }

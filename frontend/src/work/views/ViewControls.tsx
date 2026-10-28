@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowDownUp, Check, Columns3, Filter, Layers3, Plus, UserRound, X } from 'lucide-react';
+import { ArrowDownUp, Check, Columns3, Filter, Layers3, Plus, UserRound } from 'lucide-react';
 import type { Status, Task, TaskGroupRef, UserRef } from '../api';
-import { PRIORITIES, Portal } from '../ui';
+import { NoMatch, PRIORITIES, Portal, SearchBox, matchesSearch } from '../ui';
 import { GROUP_BY_LABELS, type GroupBy } from './grouping';
 import { AdvancedFilters } from './AdvancedFilters';
 import {
@@ -76,6 +76,24 @@ const Chip: React.FC<{ on: boolean; onClick: () => void; color?: string; childre
   </button>
 );
 
+/** Filter → Assignee: Me and Unassigned always, then everyone, with a search once the firm is big. */
+const AssigneeChips: React.FC<{ people: UserRef[]; value: string[]; onToggle: (id: string) => void }> = ({ people, value, onToggle }) => {
+  const [q, setQ] = useState('');
+  // Whoever is already picked stays in sight, so a search never hides a filter that is on.
+  const shown = people.filter((p) => value.includes(p.id) || matchesSearch(q, p.display_name, p.email));
+  return (
+    <>
+      {people.length > 8 && (
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people…" aria-label="Search assignees"
+          className="mb-1 w-full rounded-md border border-gray-200 px-2 py-1 text-xs focus:border-brand-400 focus:outline-none" />
+      )}
+      <Chip on={value.includes('me')} onClick={() => onToggle('me')}>Me</Chip>
+      <Chip on={value.includes('none')} onClick={() => onToggle('none')}>Unassigned</Chip>
+      {shown.map((p) => <Chip key={p.id} on={value.includes(p.id)} onClick={() => onToggle(p.id)}>{p.display_name || p.email}</Chip>)}
+    </>
+  );
+};
+
 function toggled<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
 }
@@ -103,11 +121,7 @@ export const FilterButton: React.FC<{
             ))}
           </Section>
           <Section title="Assignee">
-            <Chip on={filters.assignees.includes('me')} onClick={() => set('assignees', toggled(filters.assignees, 'me'))}>Me</Chip>
-            <Chip on={filters.assignees.includes('none')} onClick={() => set('assignees', toggled(filters.assignees, 'none'))}>Unassigned</Chip>
-            {people.map((p) => (
-              <Chip key={p.id} on={filters.assignees.includes(p.id)} onClick={() => set('assignees', toggled(filters.assignees, p.id))}>{p.display_name || p.email}</Chip>
-            ))}
+            <AssigneeChips people={people} value={filters.assignees} onToggle={(id) => set('assignees', toggled(filters.assignees, id))} />
           </Section>
           <Section title="Priority">
             {[1, 2, 3, 4].map((p) => (
@@ -134,7 +148,7 @@ export const FilterButton: React.FC<{
           <AdvancedFilters value={filters.advanced} onChange={(advanced) => onChange({ ...filters, advanced })}
             statuses={[...statusOptions.values()]} tags={[...tagOptions.values()].map((t) => t.name)} groups={groups} people={people} fields={fields} />
           {n > 0 && (
-            <button type="button" onClick={() => onChange(EMPTY_FILTERS)} className="mt-1 flex items-center gap-1 text-xs text-gray-500 hover:text-red-600"><X size={12} /> Clear all filters</button>
+            <button type="button" onClick={() => onChange(EMPTY_FILTERS)} className="filter-clear mt-1">Clear all filters</button>
           )}
         </>
       )}
@@ -213,24 +227,38 @@ export const ColumnsButton: React.FC<{
   label?: string;
 }> = ({ hidden, onChange, columns = COLUMNS, fields = [], label = 'Columns' }) => (
   <Popover label={label} icon={<Columns3 size={14} />} text={label} width={220}>
-    {() => (
-      <>
-        <p className="mb-1 text-xs text-gray-400">Show these</p>
-        {columns.map((c) => (
-          <label key={c.key} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-gray-50">
-            <input type="checkbox" checked={!hidden.includes(c.key)} onChange={() => onChange(toggled(hidden, c.key))} /> {c.label}
-          </label>
-        ))}
-        {fields.length > 0 && <p className="mb-1 mt-2 text-xs text-gray-400">Custom fields</p>}
-        {fields.map((f) => (
-          <label key={f.id} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-gray-50">
-            <input type="checkbox" checked={!hidden.includes(`cf:${f.id}`)} onChange={() => onChange(toggled(hidden, `cf:${f.id}`))} /> {f.name}
-          </label>
-        ))}
-      </>
-    )}
+    {() => <ColumnChecks hidden={hidden} onChange={onChange} columns={columns} fields={fields} label={label} />}
   </Popover>
 );
+
+/** The panel's contents, its own component so the search starts empty each time it opens. */
+const ColumnChecks: React.FC<{
+  hidden: string[]; onChange: (hidden: string[]) => void;
+  columns: { key: string; label: string }[]; fields: { id: string; name: string }[]; label: string;
+}> = ({ hidden, onChange, columns, fields, label }) => {
+  const [q, setQ] = useState('');
+  const cols = columns.filter((c) => matchesSearch(q, c.label));
+  const custom = fields.filter((f) => matchesSearch(q, f.name));
+  return (
+    <>
+      <SearchBox value={q} onChange={setQ} label={`Search ${label.toLowerCase()}`} placeholder={`Search ${label.toLowerCase()}…`} inset="lg"
+        onEnter={() => { const first = cols[0]?.key ?? (custom[0] && `cf:${custom[0].id}`); if (first) onChange(toggled(hidden, first)); }} />
+      {cols.length > 0 && <p className="mb-1 text-xs text-gray-400">Show these</p>}
+      {cols.map((c) => (
+        <label key={c.key} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-gray-50">
+          <input type="checkbox" checked={!hidden.includes(c.key)} onChange={() => onChange(toggled(hidden, c.key))} /> {c.label}
+        </label>
+      ))}
+      {custom.length > 0 && <p className="mb-1 mt-2 text-xs text-gray-400">Custom fields</p>}
+      {custom.map((f) => (
+        <label key={f.id} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-gray-50">
+          <input type="checkbox" checked={!hidden.includes(`cf:${f.id}`)} onChange={() => onChange(toggled(hidden, `cf:${f.id}`))} /> {f.name}
+        </label>
+      ))}
+      {cols.length === 0 && custom.length === 0 && <NoMatch query={q} />}
+    </>
+  );
+};
 
 /** "Me mode": only tasks assigned to you. Personal, so it isn't saved into the view. */
 export const MeButton: React.FC<{ on: boolean; onChange: (on: boolean) => void }> = ({ on, onChange }) => (

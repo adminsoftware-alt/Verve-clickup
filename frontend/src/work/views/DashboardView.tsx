@@ -3,6 +3,7 @@ import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis
 import { AlertTriangle, CalendarX, CheckCircle2, Clock3, ListTodo, UserX } from 'lucide-react';
 import { workApi, type Bucket, type Dashboard, type LocationKind } from '../api';
 import { StatusDot, formatDue } from '../ui';
+import { LinesSkeleton } from '../Skeleton';
 
 type BucketKey = 'done_today' | 'overdue' | 'unassigned' | 'no_estimate' | 'unscheduled';
 
@@ -32,7 +33,7 @@ export const DashboardView: React.FC<{
   }, [kind, id, refreshKey]);
 
   if (error) return <div className="p-6 text-sm text-red-600">{error}</div>;
-  if (!data) return <div className="p-6 text-sm text-gray-400">Loading dashboard…</div>;
+  if (!data) return <div className="p-6 text-sm text-gray-400"><LinesSkeleton /></div>;
 
   const bucket: Bucket | null = openBucket ? data[openBucket] : null;
   const assigneeData = data.by_assignee.map((a) => ({

@@ -12,6 +12,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 
 import { ask } from '../../components/ask';
 import { peopleApi, type CostLine, type CostSuggestion, type CostSummary } from './peopleApi';
+import { LinesSkeleton } from '../Skeleton';
 
 const PERIODS: [string, string][] = [
   ['monthly', 'a month'], ['yearly', 'a year'], ['daily', 'a day'], ['once', 'one-off'],
@@ -132,7 +133,7 @@ export const RunningCosts: React.FC<{ ws: string }> = ({ ws }) => {
   const biggest = useMemo(() => Math.max(1, ...(data?.lines ?? []).map((l) => l.yearly_minor)), [data]);
   const gb = (data?.usage.stored_bytes ?? 0) / 1024 ** 3;
 
-  if (!data) return <p className="text-sm text-gray-400">{error ?? 'Loading…'}</p>;
+  if (!data) return <p className="text-sm text-gray-400">{error ?? <LinesSkeleton />}</p>;
   const running = data.lines.filter((l) => l.active && l.period !== 'once');
 
   return (

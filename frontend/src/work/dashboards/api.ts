@@ -115,7 +115,11 @@ export interface Insights {
   goals_behind: { id: string; name: string; progress: number; expected: number }[];
 }
 
-export interface Segment { key: string; label: string; color: string; value: number }
+export interface Segment {
+  key: string; label: string; color: string; value: number;
+  /** Priority cards only: how much is past due, tasks added in the last 7 days, open tasks with nobody on them. */
+  new?: number; unowned?: number;
+}
 export interface CardData {
   card_id: string; type: CardType; computed_at: string; no_access: boolean; hidden_sources: number;
   error: string | null;

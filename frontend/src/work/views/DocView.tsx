@@ -5,6 +5,7 @@ import { FileText, Plus, Trash2 } from 'lucide-react';
 import { RichTextEditor } from '../task/RichText';
 import { spacesApi, type ViewContent } from '../spacesApi';
 import { ask } from '../../components/ask';
+import { LinesSkeleton } from '../Skeleton';
 
 interface Page { id: string; title: string; body: string }
 interface Doc { pages: Page[] }
@@ -57,7 +58,7 @@ export const DocView: React.FC<{ viewId: string; canEdit: boolean }> = ({ viewId
     });
   };
 
-  if (!data) return <p className="p-10 text-center text-sm text-gray-400">{error ?? 'Loading…'}</p>;
+  if (!data) return <p className="p-10 text-center text-sm text-gray-400">{error ?? <LinesSkeleton />}</p>;
   const doc = data.content;
   const page = doc.pages.find((p) => p.id === pageId) ?? null;
   const addPage = () => {

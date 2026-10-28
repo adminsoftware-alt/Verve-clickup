@@ -46,3 +46,21 @@ export const ListSkeleton: React.FC<{ rows?: number; label?: string }> = ({ rows
     ))}
   </div>
 );
+
+/** A few lines of placeholder where a short list or a paragraph is on the way. Spans only, so it
+ *  can stand wherever the word "Loading…" used to -- inside a <p>, an <li> or a table cell. */
+export const LinesSkeleton: React.FC<{ rows?: number; label?: string; className?: string }> = ({ rows = 3, label = 'Loading', className = '' }) => (
+  <span className={`block space-y-2.5 py-1 ${className}`} role="status" aria-live="polite" aria-label={label}>
+    {Array.from({ length: rows }).map((_, i) => (
+      <span key={i} className="flex items-center gap-2.5">
+        <Bar className="h-5 w-5 shrink-0 rounded-md" />
+        <Bar className={`h-3 ${['w-3/4', 'w-1/2', 'w-2/3', 'w-5/12'][i % 4]}`} />
+      </span>
+    ))}
+  </span>
+);
+
+/** One short placeholder in a line of text: a name or a count that has not come yet. */
+export const WordSkeleton: React.FC<{ className?: string }> = ({ className = 'w-20' }) => (
+  <span className={`skeleton inline-block h-3 align-middle ${className}`} role="status" aria-label="Loading" />
+);

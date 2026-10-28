@@ -16,7 +16,7 @@ from app.db.models import User
 from app.db.session import get_db
 from app.schemas import costs as cs
 from app.schemas import work as s
-from app.services.work import audit, costs, onboarding, people, people_admin
+from app.services.work import audit, costs, onboarding, people, people_admin, space_icons
 from app.services.work.access import Access
 from app.services.work.errors import Forbidden, Invalid, NotFound
 from app.services.work.permissions import can_manage_workspace
@@ -202,6 +202,38 @@ def avatar(key: str):
     path = os.path.join(people_admin.avatar_dir(), key)
     if not os.path.isfile(path):
         raise NotFound("Photo not found")
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+# --- a Space's picture -------------------------------------------------------------------------------------------------
+
+
+class SpaceIconOut(BaseModel):
+    icon: Optional[str]
+
+
+@router.put("/workspaces/{workspace_id}/spaces/{space_id}/icon", response_model=SpaceIconOut)
+async def set_space_icon(workspace_id: uuid.UUID, space_id: uuid.UUID, file: UploadFile = File(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    content = await file.read(space_icons.MAX_ICON + 1)
+    space = space_icons.set_icon(db, _access(db, user, workspace_id), space_id, content, file.content_type or "")
+    db.commit()
+    return SpaceIconOut(icon=space.icon)
+
+
+@router.delete("/workspaces/{workspace_id}/spaces/{space_id}/icon", status_code=status.HTTP_204_NO_CONTENT)
+def remove_space_icon(workspace_id: uuid.UUID, space_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    space_icons.remove_icon(db, _access(db, user, workspace_id), space_id)
+    db.commit()
+
+
+@router.get("/space-icons/{key}", include_in_schema=False)
+def space_icon(key: str):
+    """Served by an unguessable name, like profile photos, so the sidebar's <img> needs no sign-in."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,64}\.(png|jpg|webp)", key):
+        raise NotFound("Picture not found")
+    path = os.path.join(space_icons.icon_dir(), key)
+    if not os.path.isfile(path):
+        raise NotFound("Picture not found")
     return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 

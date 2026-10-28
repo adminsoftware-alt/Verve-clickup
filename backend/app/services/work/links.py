@@ -140,7 +140,7 @@ def counts(db: Session, task_ids: Sequence[uuid.UUID]) -> Dict[uuid.UUID, Dict[s
             select(Task.id, Status.group).join(Status, Status.id == Task.status_id)
             .where(Task.id.in_({r.task_id for r in rows}))
         ) if group in FINISHED
-    }
+    } if rows else set()
     for r in rows:
         if r.kind == "relates":
             for tid in (r.task_id, r.other_id):

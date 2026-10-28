@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Layers } from 'lucide-react';
 import { FEATURES } from '../config/features';
+import { useTopBarSlot } from '../components/topBarSlot';
 import { workApi, type Task } from './api';
 import { useMe, useWork } from './WorkContext';
 import { ListView } from './views/ListView';
@@ -138,16 +140,22 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
   const openTask = (id: string) => { const t = tasks?.find((x) => x.id === id); if (t) navigate(`/l/${t.list_id}?task=${id}`); };
   const select = (ids: string[], on: boolean) => setSelected((prev) => { const n = new Set(prev); ids.forEach((x) => (on ? n.add(x) : n.delete(x))); return n; });
   const selectedTasks = filtered.filter((t) => selected.has(t.id));
+  const topBarSlot = useTopBarSlot();
+  const title = (
+    <h1 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
+      <Layers size={18} className="text-brand-600" /> {scope === 'all' ? 'All Tasks' : scope === 'team' ? 'My Team’s Tasks' : 'My Tasks'}
+      {/* The Mine / Everyone switch used to sit here. Two controls were saying the same thing:
+          the line underneath already gives both numbers, and narrowing to your own work is
+          what Filter -> Assignee is for. One list, and the subtitle says what is in it. */}
+    </h1>
+  );
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white">
-      <header className="border-b border-gray-200 px-6 pb-2 pt-4">
-        <h1 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
-          <Layers size={18} className="text-brand-600" /> {scope === 'all' ? 'All Tasks' : scope === 'team' ? 'My Team’s Tasks' : 'My Tasks'}
-          {/* The Mine / Everyone switch used to sit here. Two controls were saying the same thing:
-              the line underneath already gives both numbers, and narrowing to your own work is
-              what Filter -> Assignee is for. One list, and the subtitle says what is in it. */}
-        </h1>
-      </header>
+    <div className="ui-clean mytasks-ui flex h-full min-h-0 flex-col bg-white">
+      {/* The title goes up into the top bar, as a List's does; on a phone, where the bar has no
+          room for it, it stays here. */}
+      {topBarSlot
+        ? createPortal(title, topBarSlot)
+        : <header className="border-b border-gray-200 px-6 pb-2 pt-4">{title}</header>}
       <ViewTabs value={layout} onChange={setLayout} only={OFFERED} />
       {/* The Planner answers its own question and carry their own controls, so
           the filter toolbar would only be furniture above them. */}
@@ -191,7 +199,7 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
         )}
       </div>
       )}
-      <main className={`min-h-0 flex-1 ${SCROLLS_ITSELF.includes(layout) ? 'overflow-hidden' : 'overflow-auto'}`}>
+      <main data-layout={layout} className={`min-h-0 flex-1 ${SCROLLS_ITSELF.includes(layout) ? 'overflow-hidden' : 'overflow-auto'}`}>
         {/* Workload reads from its own endpoint -- it needs every task spread across days, which
             is a different question from the filtered list above it. */}
         {layout === 'workload' ? (
@@ -216,7 +224,7 @@ export const AllTasksPage: React.FC<{ initialScope?: Scope }> = ({ initialScope 
           <ListView tasks={filtered} statuses={null} listName={where} groupBy={settings.groupBy} makeGroups={makeGroups}
             canAddIn={() => false} onCreate={async () => undefined} onOpenTask={openTask}
             columns={COLUMNS.map((c) => c.key).filter((k) => !settings.hidden.includes(k))} fields={[]} people={people}
-            onSetField={() => undefined} selected={selected} onSelect={select}
+            onSetField={() => undefined} selected={selected} onSelect={select} onChanged={load}
             emptyBecause={hasFilters ? 'filters' : scope === 'mine' ? 'none-assigned' : 'nothing-here'} />
         ) : (
           <TableView tasks={filtered} statuses={null} fields={[]} hidden={settings.hidden} people={people} listName={where}

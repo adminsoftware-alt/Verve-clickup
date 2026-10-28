@@ -9,6 +9,7 @@ import { useWritableLists } from '../task/TaskActions';
 import { goalsApi, type CheckIn, type Goal, type GoalTarget, type TargetInput, type TargetKind } from './goalsApi';
 import { notify } from '../../components/notify';
 import { ask } from '../../components/ask';
+import { LinesSkeleton } from '../Skeleton';
 
 const KINDS: { kind: TargetKind; label: string }[] = [
   { kind: 'number', label: 'Number' }, { kind: 'currency', label: 'Money' }, { kind: 'true_false', label: 'Done / not done' }, { kind: 'tasks', label: 'Tasks' },
@@ -286,7 +287,7 @@ const GoalDetail: React.FC<{ id: string }> = ({ id }) => {
   const favorites = useFavorites();
   const navigate = useNavigate();
   useEffect(() => { goalsApi.get(id).then(setGoal).catch((e) => setError(e.message)); }, [id]);
-  if (!goal) return <p className="p-10 text-center text-sm text-gray-400">{error ?? 'Loading…'}</p>;
+  if (!goal) return <p className="p-10 text-center text-sm text-gray-400">{error ?? <LinesSkeleton />}</p>;
   const fav = favorites.isFavorite('goal', goal.id);
   return (
     <div className="mx-auto max-w-4xl p-6">

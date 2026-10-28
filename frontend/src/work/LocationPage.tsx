@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Activity, ArrowDownToLine, Calendar, CalendarRange, ChevronRight, ClipboardList, Columns3, FileSpreadsheet, FileText, Folder, GanttChart, Globe, History, Home, LayoutDashboard, List as ListIcon, ListPlus, Lock, Map as MapIcon, MessagesSquare, Network, PenTool, Plus, Share2, Table2, Upload, Users } from 'lucide-react';
 import { useWork, useMe } from './WorkContext';
-import { workApi, type CustomField, type Dependency, type FolderNode, type ListNode, type LocationKind, type Recurrence, type SpaceNode, type Status, type Task, type TaskGroup, type TaskInput, type UserRef, type View, type ViewType } from './api';
+import { useTopBarSlot } from '../components/topBarSlot';
+import { peek, workApi, type CustomField, type Dependency, type FolderNode, type ListNode, type LocationKind, type Recurrence, type SpaceNode, type Status, type Task, type TaskGroup, type TaskInput, type UserRef, type View, type ViewType } from './api';
 import { DateField } from './DateField';
 import { FieldEditor } from './fields/FieldValue';
 import { TaskRowsSkeleton } from './Skeleton';
@@ -93,6 +95,7 @@ export const LocationPage: React.FC = () => {
   const located = locate(kind, id);
 
   const [searchParams, setSearchParams] = useSearchParams();
+  const topBarSlot = useTopBarSlot();
   const [loadedViews, setViews] = useState<View[]>([]);
   // Which location those views belong to: after moving to another Space, Folder or List, the old
   // tabs must not linger (a click on one would open a view of the previous page).
@@ -163,6 +166,10 @@ export const LocationPage: React.FC = () => {
     const seq = ++loadSeq.current;
     try {
       setError(null);
+      // Everything the page needs is asked for at once rather than one after another.
+      workApi.groups(kind, id).then((g) => { if (seq === loadSeq.current) setGroups(g); }).catch(() => undefined);
+      workApi.fields(kind, id, true).then((f) => { if (seq === loadSeq.current) setViewFields(f); }).catch(() => undefined);
+      workApi.dependencies(kind, id).then((d) => { if (seq === loadSeq.current) setDependencies(d); }).catch(() => undefined);
       const [page, set] = await Promise.all([
         workApi.tasks(kind, id, { include_closed: includeClosed }),
         kind === 'list' ? workApi.statuses('list', id) : Promise.resolve(null),
@@ -171,19 +178,30 @@ export const LocationPage: React.FC = () => {
       setTasks(page.tasks);
       setLoadingTasks(false);
       setStatuses(set ? set.statuses : null);
-      workApi.groups(kind, id).then((g) => { if (seq === loadSeq.current) setGroups(g); }).catch(() => undefined);
-      workApi.fields(kind, id, true).then((f) => { if (seq === loadSeq.current) setViewFields(f); }).catch(() => undefined);
-      workApi.dependencies(kind, id).then((d) => { if (seq === loadSeq.current) setDependencies(d); }).catch(() => undefined);
     } catch (e) {
       if (seq === loadSeq.current) { setError((e as Error).message); setLoadingTasks(false); }
     }
   }, [kind, id, includeClosed]);
-  // Moving to another List starts the wait again.
-  useEffect(() => { setLoadingTasks(true); }, [kind, id]);
+  // Moving to another List starts the wait again, unless it was open a moment ago: then it is
+  // drawn as it was while the fresh copy loads.
+  useEffect(() => {
+    const lastViews = peek(() => workApi.views(kind, id));
+    if (lastViews) { setViews(lastViews); setViewsOf(`${kind}:${id}`); }
+    const last = peek(() => workApi.tasks(kind, id, { include_closed: includeClosed }));
+    const lastStatuses = kind === 'list' ? peek(() => workApi.statuses('list', id)) : null;
+    if (last && (kind !== 'list' || lastStatuses)) {
+      setTasks(last.tasks);
+      setStatuses(lastStatuses ? lastStatuses.statuses : null);
+      setLoadingTasks(false);
+    } else {
+      setLoadingTasks(true);
+    }
+  }, [kind, id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Only fetch once the location is in the (permission-filtered) tree: otherwise the
-  // caller cannot open it and every request would just be refused.
-  const reachable = !!located;
+  // Only fetch once the location is in the (permission-filtered) tree: otherwise the caller
+  // cannot open it and every request would just be refused. While the tree is still loading,
+  // start anyway: a place the caller can't open shows its own message whatever these return.
+  const reachable = !!located || !hierarchy;
   useEffect(() => { if (reachable) loadViews(); }, [loadViews, reachable]);
   useEffect(() => { if (reachable) loadTasks(); }, [loadTasks, reachable]);
   // Starting or stopping a timer changes the Time tracked totals on screen.
@@ -336,51 +354,56 @@ export const LocationPage: React.FC = () => {
     );
   }
 
+  // The breadcrumb goes up into the top bar; on a phone it keeps its own row above the views.
+  // One line, whatever the names. Wrapping put Space, Folder and a long List name on a line each
+  // on a phone; there the List's own name is enough, cut short with the full name on hover, and
+  // the path above it comes back on a wider screen.
+  const breadcrumb = (
+    <nav className="flex min-w-0 items-center gap-1.5 text-sm">
+      {located.path.map((crumb, i) => {
+        const last = i === located.path.length - 1;
+        return (
+          <React.Fragment key={crumb.id}>
+            {i > 0 && <ChevronRight size={14} className="hidden shrink-0 text-gray-300 sm:block" />}
+            <span title={crumb.name} className={`min-w-0 items-center gap-1.5 ${last ? 'flex text-lg font-semibold text-gray-900' : 'hidden max-w-[12rem] text-gray-500 sm:flex'}`}>
+              {crumb.kind === 'folder' && <Folder size={14} className="shrink-0" />}
+              {crumb.kind === 'list' && last && <ListIcon size={16} className="shrink-0" />}
+              <span className="truncate">{crumb.name}</span>
+            </span>
+          </React.Fragment>
+        );
+      })}
+      {located.node.is_private && <Lock size={14} className="ml-1 shrink-0 text-gray-400" />}
+      {kind === 'list' && (() => {
+        const lst = located.node as ListNode;
+        return (lst.start_date || lst.due_date) ? (
+          <span className="ml-1 hidden shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 sm:inline" title="List dates">
+            {lst.start_date ? formatDue(lst.start_date) : '…'} → {lst.due_date ? formatDue(lst.due_date) : '…'}
+          </span>
+        ) : null;
+      })()}
+      {isPersonal ? (
+        <span className="ml-auto hidden shrink-0 text-xs text-gray-400 sm:inline">Only you can see this List</span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setSharing(true)}
+          className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"
+        >
+          <Share2 size={14} /> Share
+        </button>
+      )}
+    </nav>
+  );
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white">
-      {/* Breadcrumb */}
-      <header className="border-b border-gray-200 px-4 pt-4 sm:px-6">
-        {/* One line, whatever the names. Wrapping put Space, Folder and a long List name on a line
-            each on a phone; there the List's own name is enough, cut short with the full name on
-            hover, and the path above it comes back on a wider screen. */}
-        <nav className="flex min-w-0 items-center gap-1.5 text-sm">
-          {located.path.map((crumb, i) => {
-            const last = i === located.path.length - 1;
-            return (
-              <React.Fragment key={crumb.id}>
-                {i > 0 && <ChevronRight size={14} className="hidden shrink-0 text-gray-300 sm:block" />}
-                <span title={crumb.name} className={`min-w-0 items-center gap-1.5 ${last ? 'flex text-lg font-semibold text-gray-900' : 'hidden max-w-[12rem] text-gray-500 sm:flex'}`}>
-                  {crumb.kind === 'folder' && <Folder size={14} className="shrink-0" />}
-                  {crumb.kind === 'list' && last && <ListIcon size={16} className="shrink-0" />}
-                  <span className="truncate">{crumb.name}</span>
-                </span>
-              </React.Fragment>
-            );
-          })}
-          {located.node.is_private && <Lock size={14} className="ml-1 shrink-0 text-gray-400" />}
-          {kind === 'list' && (() => {
-            const lst = located.node as ListNode;
-            return (lst.start_date || lst.due_date) ? (
-              <span className="ml-1 hidden shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 sm:inline" title="List dates">
-                {lst.start_date ? formatDue(lst.start_date) : '…'} → {lst.due_date ? formatDue(lst.due_date) : '…'}
-              </span>
-            ) : null;
-          })()}
-          {isPersonal ? (
-            <span className="ml-auto hidden shrink-0 text-xs text-gray-400 sm:inline">Only you can see this List</span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setSharing(true)}
-              className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <Share2 size={14} /> Share
-            </button>
-          )}
-        </nav>
+    <div className="ui-clean location-ui flex h-full min-h-0 flex-col bg-white">
+      {topBarSlot && createPortal(breadcrumb, topBarSlot)}
+      <header className={`border-b border-gray-200 px-4 sm:px-6 ${topBarSlot ? 'pt-1' : 'pt-4'}`}>
+        {!topBarSlot && breadcrumb}
 
         {/* Views bar */}
-        <div className="mt-3 flex items-center gap-1">
+        <div className={`flex items-center gap-1 ${topBarSlot ? '' : 'mt-3'}`}>
           {/* One tab per kind of view: a second Calendar or Team tab made earlier is left out. The
               tab menu (rename, favourite, default, share publicly) is gone; a tab is a tab. */}
           {views.filter((view, i) => views.findIndex((v) => v.type === view.type && v.private === view.private) === i).map((view) => (
@@ -474,7 +497,7 @@ export const LocationPage: React.FC = () => {
         <SprintBar listId={id} canManage={located.node.permission_level === 'full'} refreshKey={refreshKey} onChanged={changed} />
       )}
 
-      <main className="min-h-0 flex-1 overflow-auto">
+      <main data-layout={activeView?.type} className="min-h-0 flex-1 overflow-auto">
         {loadingTasks && activeView?.type !== 'overview' ? (
           <TaskRowsSkeleton rows={8} />
         ) : activeView?.type === 'overview' && kind !== 'list' ? (
@@ -607,6 +630,7 @@ export const LocationPage: React.FC = () => {
             selected={selected}
             onSelect={select}
             onManageGroups={canCreate ? () => setManagingGroups(true) : undefined}
+            onChanged={changed}
           />
         )}
       </main>

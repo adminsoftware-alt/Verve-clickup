@@ -10,6 +10,7 @@ import {
 } from './api';
 import { SourcePicker } from './pickers';
 import { ask } from '../../components/ask';
+import { LinesSkeleton } from '../Skeleton';
 
 export const Modal: React.FC<{ label: string; title: React.ReactNode; onClose: () => void; width?: string; children: React.ReactNode; footer?: React.ReactNode }> = ({
   label, title, onClose, width = 'w-[34rem]', children, footer,
@@ -155,7 +156,7 @@ export const DrillDialog: React.FC<{ dashboardId: string; cardId: string; segmen
   return (
     <Modal label="Tasks behind this card" title={<>{title} <span className="font-normal text-gray-400">{tasks ? total : ''}</span></>} onClose={onClose} width="w-[46rem]">
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {!tasks ? <p className="text-sm text-gray-400">Loading…</p> : tasks.length === 0 ? <p className="text-sm text-gray-400">No tasks.</p> : (
+      {!tasks ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : tasks.length === 0 ? <p className="text-sm text-gray-400">No tasks.</p> : (
         <ul className="divide-y divide-gray-100">
           {tasks.map((t) => (
             <li key={t.id}>
@@ -224,7 +225,7 @@ export const ShareDashboardDialog: React.FC<{ dashboardId: string; name: string;
       )}
       {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       <h4 className="mb-1 mt-4 text-xs font-semibold uppercase tracking-wide text-gray-400">Shared with</h4>
-      {!info ? <p className="text-sm text-gray-400">Loading…</p> : info.shares.length === 0 ? <p className="py-2 text-sm text-gray-400">Not shared with anyone.</p> : (
+      {!info ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : info.shares.length === 0 ? <p className="py-2 text-sm text-gray-400">Not shared with anyone.</p> : (
         <ul className="divide-y divide-gray-100">
           {info.shares.map((sh) => {
             const editable = canShare && RANK[sh.level as DashLevel] <= mine;
@@ -314,7 +315,7 @@ export const ReportsDialog: React.FC<{ dashboardId: string; name: string; canEdi
 
       {tab === 'schedules' ? (
         <>
-          {!info ? <p className="text-sm text-gray-400">Loading…</p> : info.schedules.length === 0 ? <p className="py-3 text-sm text-gray-400">No email reports yet.</p> : (
+          {!info ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : info.schedules.length === 0 ? <p className="py-3 text-sm text-gray-400">No email reports yet.</p> : (
             <ul className="space-y-2">
               {info.schedules.map((s) => (
                 <li key={s.id} className="rounded-lg border border-gray-200 p-3">

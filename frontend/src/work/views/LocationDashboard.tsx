@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { View } from '../api';
 import { dashApi, type Dashboard } from '../dashboards/api';
 import { DashboardPage } from '../dashboards/DashboardPage';
+import { LinesSkeleton } from '../Skeleton';
 
 /**
  * A Space/Folder/List Dashboard view: the standard summary of this location. A view that was
@@ -15,7 +16,7 @@ export const LocationDashboard: React.FC<{ view: View; canEdit: boolean; standar
     dashApi.forView(view.id).then(setDash).catch(() => setDash(null));
   }, [view.id]);
 
-  if (dash === undefined) return <div className="p-6 text-sm text-gray-400">Loading dashboard…</div>;
+  if (dash === undefined) return <div className="p-6 text-sm text-gray-400"><LinesSkeleton /></div>;
   if (dash) return <DashboardPage key={dash.id} dashboardId={dash.id} embedded={{ onReset: () => setDash(null) }} />;
   return <div>{standard}</div>;
 };

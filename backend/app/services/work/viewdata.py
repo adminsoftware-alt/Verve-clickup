@@ -21,7 +21,7 @@ from app.db.models import (
     ViewType,
 )
 from app.schemas import work as s
-from app.services.work import customfields
+from app.services.work import comments, customfields
 from app.services.work import tasks as task_service
 from app.services.work.access import Access, Opened
 from app.services.work.errors import Forbidden, Invalid, NotFound
@@ -91,7 +91,7 @@ def activity_in(db: Session, opened: Opened, limit: int, before: Optional[dateti
     for c in coms:
         t = info[c.task_id]
         items.append(s.LocationActivity(
-            id=c.id, kind="comment", data={}, created_at=c.created_at, comment=c.body[:500],
+            id=c.id, kind="comment", data={}, created_at=c.created_at, comment=comments.plain(c.body)[:500],
             user=s.UserOut.model_validate(people[c.user_id]) if c.user_id in people else None,
             task_id=t.id, task_name=t.name, list_id=t.list_id,
         ))

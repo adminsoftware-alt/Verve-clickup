@@ -13,7 +13,7 @@ import { useFavorites } from '../Favorites';
 import { useWork, useMe } from '../WorkContext';
 import { collabApi } from '../collabApi';
 import { workApi, type FolderNode, type ListNode, type SpaceNode, type TaskDetail } from '../api';
-import { Avatar, Menu, Portal } from '../ui';
+import { Avatar, Menu, Portal, SearchSelect } from '../ui';
 
 const Dialog: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => (
   <Portal>
@@ -252,12 +252,13 @@ export const ReminderDialog: React.FC<{ taskId?: string; defaultTitle?: string; 
       <label className="mt-3 block text-xs font-medium text-gray-600">When
         <input type="datetime-local" aria-label="Remind at" value={at} min={toLocalInput(new Date())} onChange={(e) => { setAt(e.target.value); setError(null); }} className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal" />
       </label>
-      <label className="mt-3 block text-xs font-medium text-gray-600">For
-        <select value={who} onChange={(e) => setWho(e.target.value)} className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal">
-          <option value="">Me</option>
-          {members.map((m) => <option key={m.user.id} value={m.user.id}>{m.user.display_name || m.user.email}</option>)}
-        </select>
-      </label>
+      <div className="mt-3 text-xs font-medium text-gray-600">For
+        <SearchSelect label="Remind who" value={who} onChange={setWho} className="mt-1 w-full font-normal" width={320}
+          options={[
+            { value: '', label: 'Me' },
+            ...members.map((m) => ({ value: m.user.id, label: m.user.display_name || m.user.email, hint: m.user.email })),
+          ]} />
+      </div>
       {past && !error && <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">That time has already passed.</p>}
       {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       <div className="mt-4 flex justify-end gap-2">

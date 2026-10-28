@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Diamond, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { workApi, type LocationKind, type TagUsage, type TaskType } from './api';
+import { spaceIconSrc, workApi, type LocationKind, type TagUsage, type TaskType } from './api';
 import { Portal, fromDateInput, toDateInput, useEscapeToClose } from './ui';
-import { useWork } from './WorkContext';
+import { useIsAdmin, useWork } from './WorkContext';
 import { ask } from '../components/ask';
+import { LinesSkeleton } from './Skeleton';
 
 const Shell: React.FC<{ title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }> = ({ title, onClose, children, wide }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -30,7 +31,9 @@ const input = 'mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 t
 
 /** Space, Folder or List settings: name, colour, icon, description; the task ID prefix; List dates. */
 export const LocationSettingsDialog: React.FC<{ kind: LocationKind; id: string; onClose: () => void }> = ({ kind, id, onClose }) => {
-  const { refresh } = useWork();
+  const { refresh, workspace } = useWork();
+  const isAdmin = useIsAdmin();
+  const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { workApi.location(kind, id).then(setForm).catch((e) => setError(e.message)); }, [kind, id]);
@@ -52,7 +55,7 @@ export const LocationSettingsDialog: React.FC<{ kind: LocationKind; id: string; 
   const label = kind === 'space' ? 'Space' : kind === 'folder' ? 'Folder' : 'List';
   return (
     <Shell title={`${label} settings`} onClose={onClose}>
-      {!form ? <p className="text-sm text-gray-400">{error ?? 'Loading…'}</p> : (
+      {!form ? <p className="text-sm text-gray-400">{error ?? <LinesSkeleton />}</p> : (
         <div className="min-h-0 space-y-3 overflow-auto">
           <label className="block text-xs font-medium text-gray-600">Name
             <input aria-label="Name" value={(form.name as string) ?? ''} onChange={(e) => set({ name: e.target.value })} className={input} />
@@ -77,6 +80,45 @@ export const LocationSettingsDialog: React.FC<{ kind: LocationKind; id: string; 
                   </button>
                 ))}
               </div>
+              {isAdmin && workspace && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {spaceIconSrc(form.icon as string) && (
+                    <img src={spaceIconSrc(form.icon as string)!} alt="Space picture" className="h-8 w-8 rounded-md border border-gray-200 object-cover" />
+                  )}
+                  <label className="cursor-pointer rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                    {uploading ? 'Uploading…' : spaceIconSrc(form.icon as string) ? 'Change picture' : 'Upload picture'}
+                    <input
+                      type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={uploading}
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!file) return;
+                        setUploading(true);
+                        setError(null);
+                        try {
+                          const r = await workApi.setSpaceIcon(workspace.id, id, file);
+                          set({ icon: r.icon });
+                          await refresh();
+                        } catch (err) { setError((err as Error).message); }
+                        setUploading(false);
+                      }}
+                    />
+                  </label>
+                  {spaceIconSrc(form.icon as string) && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try { await workApi.removeSpaceIcon(workspace.id, id); set({ icon: null }); await refresh(); }
+                        catch (err) { setError((err as Error).message); }
+                      }}
+                      className="rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+                    >
+                      Remove
+                    </button>
+                  )}
+                  <span className="text-[11px] text-gray-400">PNG, JPG or WebP, up to 1 MB</span>
+                </div>
+              )}
             </div>
           )}
           {kind !== 'folder' && (
@@ -124,7 +166,7 @@ export const TagManagerDialog: React.FC<{ spaceId: string; spaceName: string; ca
     <Shell title={`Tags in ${spaceName}`} onClose={onClose}>
       {error && <p className="mb-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       <ul className="min-h-0 flex-1 overflow-auto" aria-label="Tags">
-        {tags === null ? <li className="text-sm text-gray-400">Loading…</li> : tags.length === 0 ? <li className="py-6 text-center text-sm text-gray-400">No tags yet.</li> : tags.map((t) => (
+        {tags === null ? <li className="text-sm text-gray-400"><LinesSkeleton /></li> : tags.length === 0 ? <li className="py-6 text-center text-sm text-gray-400">No tags yet.</li> : tags.map((t) => (
           <li key={t.id} className="group flex items-center gap-2 border-t border-gray-100 py-1.5 first:border-t-0">
             <label className="relative h-5 w-5 shrink-0 cursor-pointer rounded" style={{ backgroundColor: t.bg_color }} title="Colour">
               {canEdit && <input type="color" aria-label={`Colour of ${t.name}`} value={t.bg_color} onChange={(e) => run(() => workApi.updateTag(t.id, { bg_color: e.target.value }))} className="absolute inset-0 opacity-0" />}

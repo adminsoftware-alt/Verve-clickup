@@ -5,6 +5,7 @@ import { DuplicateLocation } from './DuplicateLocation';
 import { collabApi } from './collabApi';
 import { workApi, type FolderNode, type Hierarchy, type ListNode, type LocationKind, type SpaceNode, type StatusGroup } from './api';
 import { Portal } from './ui';
+import { LinesSkeleton } from './Skeleton';
 
 export const Dialog: React.FC<{ title: string; wide?: boolean; onClose: () => void; children: React.ReactNode }> = ({ title, wide, onClose, children }) => (
   <Portal>
@@ -96,7 +97,7 @@ export const StatusEditorDialog: React.FC<{ kind: LocationKind; id: string; name
 
   return (
     <Dialog title={`Statuses of ${name}`} wide onClose={onClose}>
-      {!rows ? <p className="text-sm text-gray-400">{error ?? 'Loading…'}</p> : (
+      {!rows ? <p className="text-sm text-gray-400">{error ?? <LinesSkeleton />}</p> : (
         <>
           {kind !== 'space' && (
             <div className="mb-3 flex gap-2 rounded-lg bg-gray-50 p-1 text-sm">
@@ -246,7 +247,7 @@ export const ArchivedDialog: React.FC<{ onClose: () => void; onRestored: () => v
     <Dialog title="Archived" onClose={onClose}>
       {error && <p className="mb-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       <ul className="max-h-80 overflow-auto" aria-label="Archived locations">
-        {rows === null ? <li className="text-sm text-gray-400">Loading…</li> : rows.length === 0 ? <li className="py-6 text-center text-sm text-gray-400">Nothing is archived.</li> : rows.map((r) => (
+        {rows === null ? <li className="text-sm text-gray-400"><LinesSkeleton /></li> : rows.length === 0 ? <li className="py-6 text-center text-sm text-gray-400">Nothing is archived.</li> : rows.map((r) => (
           <li key={r.id} className="flex items-center gap-2 border-t border-gray-100 py-2 first:border-t-0">
             {r.kind === 'list' ? <ListIcon size={15} className="text-gray-400" /> : r.kind === 'folder' ? <Folder size={15} className="text-gray-400" /> : <span className="flex h-4 w-4 items-center justify-center rounded bg-gray-400 text-[9px] font-bold text-white">{r.name[0]?.toUpperCase()}</span>}
             <span className="min-w-0 flex-1">

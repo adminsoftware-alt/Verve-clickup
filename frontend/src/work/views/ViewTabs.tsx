@@ -15,32 +15,24 @@ export type ViewKey = 'list' | 'board' | 'table' | 'workload' | 'calendar' | 'pl
 
 export const VIEWS: {
   key: ViewKey; label: string; Icon: React.ElementType; hint: string;
-  /** Its colour when it is the one you are in. */
-  tint: string; badge: string;
 }[] = [
   {
     key: 'list', label: 'List', Icon: LayoutList, hint: 'Your tasks, grouped',
-    tint: 'text-teal-700 border-teal-500', badge: 'bg-teal-100 text-teal-700',
   },
   {
     key: 'board', label: 'Board', Icon: SquareKanban, hint: 'Columns you can drag cards between',
-    tint: 'text-brand-700 border-brand-500', badge: 'bg-brand-100 text-brand-700',
   },
   {
     key: 'table', label: 'Table', Icon: Table2, hint: 'A spreadsheet of the same tasks',
-    tint: 'text-emerald-700 border-emerald-500', badge: 'bg-emerald-100 text-emerald-700',
   },
   {
     key: 'workload', label: 'Workload', Icon: CalendarRange, hint: 'Your week, day by day, against your capacity',
-    tint: 'text-purple-700 border-purple-500', badge: 'bg-purple-100 text-purple-700',
   },
   {
     key: 'calendar', label: 'Calendar', Icon: CalendarDays, hint: 'The month, by due date',
-    tint: 'text-sky-700 border-sky-500', badge: 'bg-sky-100 text-sky-700',
   },
   {
     key: 'planner', label: 'Planner', Icon: Timer, hint: 'Block out the hours of your day',
-    tint: 'text-amber-700 border-amber-500', badge: 'bg-amber-100 text-amber-700',
   },
 ];
 
@@ -65,10 +57,11 @@ export const ViewTabs: React.FC<{
           aria-selected={on}
           title={v.hint}
           onClick={() => onChange(v.key)}
+          // One colour for every tab: blue for the one you are in, grey for the rest.
           className={`-mb-px flex items-center gap-1.5 border-b-2 px-2.5 py-2 text-sm transition-colors ${
-            on ? `${v.tint} font-semibold` : 'border-transparent text-gray-600 hover:text-gray-900'}`}
+            on ? 'border-blue-600 font-semibold text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-900'}`}
         >
-          <span className={`flex h-5 w-5 items-center justify-center rounded ${v.badge} ${on ? '' : 'opacity-80'}`}>
+          <span className={`flex h-5 w-5 items-center justify-center rounded ${on ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
             <v.Icon size={13} />
           </span>
           {v.label}

@@ -3,6 +3,7 @@ import { workApi, type LocationActivity, type LocationKind } from '../api';
 import { Avatar } from '../ui';
 import { useWork } from '../WorkContext';
 import { describeActivity } from '../task/TaskFeed';
+import { LinesSkeleton } from '../Skeleton';
 
 const FILTERS: { key: string; label: string; kinds: string[] | null }[] = [
   { key: 'all', label: 'Everything', kinds: null },
@@ -57,7 +58,7 @@ export const ActivityView: React.FC<{ kind: LocationKind; id: string; refreshKey
             className={`rounded-full border px-2.5 py-0.5 text-xs ${filter === f.key ? 'border-brand-400 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{f.label}</button>
         ))}
       </div>
-      {items === null ? <p className="text-sm text-gray-400">Loading…</p> : days.length === 0 ? <p className="py-10 text-center text-sm text-gray-400">Nothing yet.</p> : (
+      {items === null ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : days.length === 0 ? <p className="py-10 text-center text-sm text-gray-400">Nothing yet.</p> : (
         <div className="space-y-5" aria-label="Activity">
           {days.map((d) => (
             <section key={d.day}>

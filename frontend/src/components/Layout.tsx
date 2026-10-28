@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { useTimer } from '../context/TimerContext';
 import { useNotifications } from '../context/NotificationContext';
-import { LayoutDashboard, Bell, ChevronDown, X } from 'lucide-react';
+import { LayoutDashboard, Bell, ChevronDown, ChevronsLeft, ChevronsRight, X } from 'lucide-react';
 import { SpacesSidebar } from '../work/SpacesSidebar';
 import { MyTasksNav } from '../work/MyTasksNav';
 import { FavoritesNav } from '../work/Favorites';
@@ -19,6 +19,10 @@ import type { UserPresence } from '../services/presenceService';
 import { BottomNav } from './BottomNav';
 import { MobileScopeBar } from './MobileScope';
 import { usePhone } from '../work/useBreakpoint';
+import { TopBarSlotContext } from './topBarSlot';
+import { BrandLockup } from './BrandMark';
+
+const SIDEBAR_KEY = 'verveflow.sidebar.collapsed';
 
 /** What the content pane shows while a page's own chunk is still on the way. */
 /** `padded` for the pages that fill the pane and so bring no padding of their own. */
@@ -35,7 +39,7 @@ const PageWaiting: React.FC<{ padded?: boolean }> = ({ padded }) => (
 export const Layout: React.FC = () => {
   const { hasRole, user } = useAuth();  // signing out moved into the profile menu
   const location = useLocation();
-  const isLocationPage = /^\/($|(s|f|l)\/|my-tasks|dashboards|timesheets|inbox|replies|assigned-comments|reminders|people|all-tasks|forms|planner|leave|billing|team-week|compliance|all-spaces|goals)/.test(location.pathname);
+  const isLocationPage = /^\/($|(s|f|l)\/|my-tasks|dashboards|timesheets|inbox|reminders|people|all-tasks|forms|planner|leave|billing|team-week|compliance|all-spaces|goals)/.test(location.pathname);
   const { timers, stopTimer, getLiveElapsedSeconds, focusSession, stopFocus } = useTimer();
   const { notifications, unreadCount, markAsRead, markAllAsRead, clearAll } = useNotifications();
   
@@ -51,6 +55,15 @@ export const Layout: React.FC = () => {
   const [onlineUsers, setOnlineUsers] = useState<UserPresence[]>([]);
   // On a phone there is no sidebar: the four tabs across the bottom and the Spaces tab replace it.
   const phone = usePhone();
+  const [titleSlot, setTitleSlot] = useState<HTMLDivElement | null>(null);
+  // The sidebar slides down to its icons and back; the choice is kept on this computer.
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_KEY) === '1'; } catch { return false; }
+  });
+  const toggleSidebar = () => setCollapsed((was) => {
+    try { localStorage.setItem(SIDEBAR_KEY, was ? '0' : '1'); } catch { /* not kept, still works */ }
+    return !was;
+  });
 
   useEffect(() => {
     // Presence runs on Firestore, and Firestore is 114 KB gzipped. This was the only door it came
@@ -138,29 +151,34 @@ export const Layout: React.FC = () => {
     // 100vh keeps counting the space it used to take -- which puts the bottom of the app under
     // the address bar.
     <div
-      className="flex h-[100dvh] overflow-hidden"
-      style={{ background: 'linear-gradient(135deg, #FAFBFB 0%, #EEF2F1 100%)' }}
+      className="app-shell flex h-[100dvh] overflow-hidden"
+      style={{ background: 'linear-gradient(135deg, #F4F7FC 0%, #E6EDF8 100%)' }}
     >
       {/* Sidebar: a desktop column. On a phone the bottom tabs and the Spaces tab take its place. */}
       <aside
-        className="glass-panel app-sidebar no-print z-10 flex w-60 shrink-0 flex-col overflow-y-auto px-3 py-5 max-md:hidden"
+        className={`glass-panel app-sidebar no-print z-10 flex shrink-0 flex-col overflow-y-auto overflow-x-hidden px-3 py-5 max-md:hidden ${collapsed ? 'is-collapsed w-[76px]' : 'w-[216px]'}`}
         style={{ borderRight: '1px solid rgba(255,255,255,0.4)' }}
       >
         {/* Logo Area */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '0 6px', marginBottom: '20px' }}>
-          <div style={{ display: 'flex' }}>
-            <img
-              src="/verve-workflow-logo.png"
-              alt="Verve Workflow"
-              style={{ width: '186px', height: 'auto', display: 'block' }}
-            />
-          </div>
+        <div className="side-brand">
+          <BrandLockup />
+          <button
+            type="button"
+            className="side-fold"
+            onClick={toggleSidebar}
+            aria-label={collapsed ? 'Widen the sidebar' : 'Narrow the sidebar'}
+            aria-expanded={!collapsed}
+          >
+            {collapsed ? <ChevronsRight size={15} /> : <ChevronsLeft size={15} />}
+          </button>
         </div>
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {renderNavGroup(mainNavItems)}
-
-          <MyTasksNav />
+          {/* The main pages sit together in their own panel, apart from the Spaces tree. */}
+          <div className="side-main">
+            {renderNavGroup(mainNavItems)}
+            <MyTasksNav />
+          </div>
           <FavoritesNav />
 
           <SpacesSidebar />
@@ -197,21 +215,26 @@ export const Layout: React.FC = () => {
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
 
         {/* Top Header */}
-        {/* Three columns -- who you work for, search, and you -- so the search sits in the middle
-            of the bar whatever the two sides hold. The menu button, "Recent" and the help menu
+        {/* Three columns -- the page's title (or who you work for), search, and you. The title
+            column takes the room the search does not need, so a breadcrumb reads in full. The menu button, "Recent" and the help menu
             came off: on a phone the bottom tabs replace the sidebar, the sidebar
             already lists where you've been, and the shortcuts are in the search box itself. */}
         <header
-          className="glass-panel no-print z-[5] grid h-14 shrink-0 grid-cols-[minmax(7rem,1fr)_minmax(0,36rem)_minmax(max-content,1fr)] items-center gap-2 px-3 sm:h-16 sm:gap-4 sm:px-6"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.5)' }}
+          className="app-topbar glass-panel no-print z-[5] grid h-14 shrink-0 grid-cols-[minmax(7rem,1fr)_minmax(0,1fr)_max-content] items-center gap-2 px-3 sm:h-16 sm:gap-4 sm:px-6"
         >
-          <div className="flex min-w-0 items-center">
-            <span className="truncate text-base font-bold tracking-tight text-blue-700 sm:text-lg">{workspaceName}</span>
+          {/* The firm's own logo, then the page's title portalled in after a thin rule. The logo
+              already names the workspace, so the bar no longer spells it out a second time. */}
+          <div className="flex min-w-0 items-center gap-3">
+            <Link to="/" className="topbar-logo" aria-label={workspaceName || 'Verve Advisory'}>
+              <img src="/verve-advisory-logo.png" alt="Verve Advisory" />
+            </Link>
+            <span className="topbar-sep" aria-hidden />
+            <div ref={setTitleSlot} className="topbar-title flex min-w-0 flex-1 items-center" />
           </div>
 
-          {/* The search takes up to 36rem and gives way first when the bar is narrow: the right-hand
+          {/* The search takes up to 30rem and gives way first when the bar is narrow: the right-hand
               column never shrinks below the bell and your name, so nothing runs over them. */}
-          <div className="flex min-w-0 justify-center">
+          <div className="mx-auto flex w-full min-w-0 max-w-[30rem] justify-center">
             <SearchButton />
           </div>
 
@@ -228,7 +251,7 @@ export const Layout: React.FC = () => {
                       title={`${user.name} (${user.currentStatus})`}
                       style={{ 
                         width: '28px', height: '28px', borderRadius: '50%', 
-                        backgroundColor: user.avatarColor || '#4F46E5', 
+                        backgroundColor: user.avatarColor || '#234788', 
                         color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', 
                         fontSize: '0.7rem', fontWeight: 600,
                         border: '2px solid var(--color-surface)',
@@ -238,7 +261,7 @@ export const Layout: React.FC = () => {
                     >
                       {user.initials}
                       {/* Active indicator dot */}
-                      <span style={{ position: 'absolute', bottom: 0, right: 0, width: '8px', height: '8px', backgroundColor: '#10B981', border: '1.5px solid var(--color-surface)', borderRadius: '50%' }}></span>
+                      <span style={{ position: 'absolute', bottom: 0, right: 0, width: '8px', height: '8px', backgroundColor: '#7D98D1', border: '1.5px solid var(--color-surface)', borderRadius: '50%' }}></span>
                     </div>
                   ))}
                   {onlineUsers.length > 5 && (
@@ -261,14 +284,13 @@ export const Layout: React.FC = () => {
                   display: 'flex', 
                   alignItems: 'center', 
                   gap: '8px', 
-                  backgroundColor: '#FEF2F2',
-                  color: '#991B1B',
+                  backgroundColor: '#EEF2F8',
+                  color: '#234788',
                   padding: '6px 12px', 
                   borderRadius: '20px', 
-                  border: '1.5px solid #FCA5A5', 
+                  border: '1px solid #C9D5EA', 
                   fontSize: '0.75rem', 
                   fontWeight: 600,
-                  boxShadow: '1px 1px 0px 0px #7F1D1D',
                   marginRight: '8px'
                 }}
               >
@@ -276,13 +298,12 @@ export const Layout: React.FC = () => {
                   width: '6px', 
                   height: '6px', 
                   borderRadius: '50%', 
-                  backgroundColor: '#DC2626', 
-                  animation: 'pulse 1s infinite' 
+                  backgroundColor: '#234788' 
                 }}></span>
                 <span style={{ maxWidth: '90px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   Focus: {focusSession.taskTitle}
                 </span>
-                <span style={{ fontFamily: 'monospace', fontWeight: 700, backgroundColor: '#FEE2E2', padding: '2px 6px', borderRadius: '10px' }}>
+                <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700, backgroundColor: '#fff', padding: '2px 6px', borderRadius: '10px' }}>
                   {Math.floor(focusSession.timeLeft / 60)}:{(focusSession.timeLeft % 60).toString().padStart(2, '0')}
                 </span>
                 <button 
@@ -291,13 +312,13 @@ export const Layout: React.FC = () => {
                   style={{ 
                     background: 'none', 
                     border: 'none', 
-                    color: '#DC2626', 
+                    color: '#234788', 
                     cursor: 'pointer', 
                     display: 'flex', 
                     alignItems: 'center', 
                     padding: '2px',
                     borderRadius: '50%',
-                    backgroundColor: '#FEE2E2'
+                    backgroundColor: '#fff'
                   }}
                 >
                   <X size={10} />
@@ -314,14 +335,13 @@ export const Layout: React.FC = () => {
                     alignItems: 'center',
                     gap: '8px',
                     backgroundColor: '#FFFBEB',
-                    color: '#B45309',
+                    color: '#92400E',
                     padding: '6px 12px',
                     borderRadius: '20px',
-                    border: '1.5px solid #F59E0B',
+                    border: '1px solid #F3D9A4',
                     fontSize: '0.75rem',
                     fontWeight: 600,
                     cursor: 'pointer',
-                    boxShadow: '1px 1px 0px 0px #78350F',
                     outline: 'none'
                   }}
                   title="View Active Timers"
@@ -330,15 +350,14 @@ export const Layout: React.FC = () => {
                     width: '6px', 
                     height: '6px', 
                     borderRadius: '50%', 
-                    backgroundColor: '#DC2626', 
-                    animation: 'pulse 1.5s infinite' 
+                    backgroundColor: '#D97706' 
                   }}></span>
                   
                   <span>
                     ({runningTimers.length}) Running
                   </span>
                   
-                  <span style={{ fontFamily: 'monospace', opacity: 0.85 }}>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
                     {formatTime(getLiveElapsedSeconds(runningTimers[0][0]))}
                   </span>
                   
@@ -424,9 +443,13 @@ export const Layout: React.FC = () => {
               </div>
             )}
 
-            <RunningTimerChip />
-
-            <div style={{ width: '1px', height: '24px', backgroundColor: 'var(--color-border)', margin: '0 8px' }}></div>
+            {/* The running timer floats here instead of taking room in the bar, so starting or
+                stopping it never pushes the search and the title sideways. */}
+            {phone ? <RunningTimerChip /> : (
+              <span className="relative flex h-8 w-0 items-center">
+                <span className="absolute right-0 top-1/2 -translate-y-1/2"><RunningTimerChip /></span>
+              </span>
+            )}
 
             {FEATURES.legacyNotifications ? (
             <div style={{ position: 'relative' }} ref={notificationsRef}>
@@ -515,9 +538,11 @@ export const Layout: React.FC = () => {
               it is still downloading. The shell stays put and only this pane waits: a skeleton
               in the right shape, which reads as the page arriving rather than the app hanging.
               Navigating back to a page already fetched is instant -- the chunk is cached. */}
-          <Suspense fallback={<PageWaiting padded={isLocationPage} />}>
-            <Outlet />
-          </Suspense>
+          <TopBarSlotContext.Provider value={titleSlot}>
+            <Suspense fallback={<PageWaiting padded={isLocationPage} />}>
+              <Outlet />
+            </Suspense>
+          </TopBarSlotContext.Provider>
           <GlobalSearch />
         </div>
       </main>

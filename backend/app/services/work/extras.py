@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import Attachment, Checklist, ChecklistItem, ChecklistTemplate, PermissionLevel, Task, User, WorkspaceMember
+from app.db.models import Attachment, Checklist, ChecklistItem, ChecklistTemplate, PermissionLevel, Task, TaskComment, User, WorkspaceMember
 from app.schemas import work as s
 from app.services.work import events
 from app.services.work.access import Access, Opened, open_task
@@ -219,6 +219,7 @@ def attachment_out(db: Session, a: Attachment) -> dict:
     return {
         "id": str(a.id), "filename": a.filename, "content_type": a.content_type, "size": a.size,
         "user": s.UserOut.model_validate(user).model_dump() if user else None, "created_at": a.created_at.isoformat(),
+        "comment_id": str(a.comment_id) if a.comment_id else None,
     }
 
 
@@ -227,9 +228,17 @@ def attachments_out(db: Session, task_id: uuid.UUID) -> List[dict]:
     return [attachment_out(db, a) for a in rows]
 
 
-def add_attachment(db: Session, opened: Opened[Task], filename: str, content_type: str, data: bytes) -> Attachment:
-    # Edit, like checklists: a file is part of the task, and with comment access it is somebody else's.
-    _require(opened, PermissionLevel.edit, "attach files")
+def add_attachment(
+    db: Session, opened: Opened[Task], filename: str, content_type: str, data: bytes, comment: Optional[TaskComment] = None,
+) -> Attachment:
+    if comment is None:
+        # Edit, like checklists: a file is part of the task, and with comment access it is somebody else's.
+        _require(opened, PermissionLevel.edit, "attach files")
+    else:
+        # A file sent with your own comment is part of what you said, so comment access is enough.
+        _require(opened, PermissionLevel.comment, "attach files to comments")
+        if comment.user_id != opened.access.user_id or comment.task_id != opened.obj.id:
+            raise Forbidden("Only the author can add files to a comment")
     limit = settings.MAX_UPLOAD_MB * 1024 * 1024
     if len(data) > limit:
         raise Invalid(f"Files can be at most {settings.MAX_UPLOAD_MB} MB")
@@ -239,10 +248,12 @@ def add_attachment(db: Session, opened: Opened[Task], filename: str, content_typ
     (upload_dir() / key).write_bytes(data)
     safe_name = os.path.basename(filename or "file")[:255] or "file"
     a = Attachment(task_id=opened.obj.id, user_id=opened.access.user_id, filename=safe_name,
-                   content_type=(content_type or "application/octet-stream")[:127], size=len(data), storage_key=key)
+                   content_type=(content_type or "application/octet-stream")[:127], size=len(data), storage_key=key,
+                   comment_id=comment.id if comment else None)
     db.add(a)
     db.flush()
-    events.record(db, opened.obj, opened.access.user_id, "attachment", {"filename": safe_name})
+    if comment is None:  # the comment itself already told everyone
+        events.record(db, opened.obj, opened.access.user_id, "attachment", {"filename": safe_name})
     return a
 
 

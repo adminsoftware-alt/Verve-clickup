@@ -16,7 +16,7 @@ import type { TemplateKind } from './api';
 import { collabApi } from './collabApi';
 import { ArchivedDialog, DuplicateLocationDialog, MoveLocationDialog, StatusEditorDialog } from './LocationDialogs';
 import { useWork } from './WorkContext';
-import { workApi, type FolderNode, type Level, type ListNode, type LocationKind, type SpaceNode } from './api';
+import { spaceIconSrc, workApi, type FolderNode, type Level, type ListNode, type LocationKind, type SpaceNode } from './api';
 import { Menu, NameDialog, type MenuItem } from './ui';
 import { FEATURES } from '../config/features';
 import { ShareLocationDialog } from './ShareLocationDialog';
@@ -24,6 +24,7 @@ import { AssignListDialog } from './AssignListDialog';
 import { CreateSpaceDialog } from './CreateSpace';
 import { notify } from '../components/notify';
 import { ask } from '../components/ask';
+import { LinesSkeleton } from './Skeleton';
 
 const EXPANDED_KEY = 'timetriq.expanded';
 const SPACE_COLORS = ['#7c3aed', '#0ea5e9', '#16a34a', '#ea580c', '#db2777', '#4f46e5', '#0d9488', '#b45309'];
@@ -305,8 +306,10 @@ export const SpacesSidebar: React.FC = () => {
           active={activeId === space.id}
           kind="space"
           icon={
-            <span className="flex h-5 w-5 items-center justify-center rounded-md text-[11px] font-bold text-white shadow-sm" style={{ backgroundColor: color }}>
-              {space.icon || space.name[0]?.toUpperCase()}
+            <span className="flex h-5 w-5 items-center justify-center overflow-hidden rounded-md text-[11px] font-bold text-white shadow-sm" style={{ backgroundColor: color }}>
+              {spaceIconSrc(space.icon)
+                ? <img src={spaceIconSrc(space.icon)!} alt="" className="h-full w-full object-cover" />
+                : space.icon || space.name[0]?.toUpperCase()}
             </span>
           }
           name={space.name}
@@ -355,7 +358,7 @@ export const SpacesSidebar: React.FC = () => {
         )}
       </div>
 
-      {loading && <div className="px-3.5 py-1 text-xs text-gray-400">Loading…</div>}
+      {loading && <div className="px-3.5 py-1 text-xs text-gray-400"><LinesSkeleton /></div>}
       {error && <div className="mx-2 rounded-md bg-amber-50 px-2.5 py-2 text-xs text-amber-800">{error}</div>}
       {needsWorkspace && (
         <button

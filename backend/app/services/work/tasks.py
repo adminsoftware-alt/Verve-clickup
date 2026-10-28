@@ -7,9 +7,12 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.db.models import (
+    Attachment,
+    Checklist,
+    ChecklistItem,
     Folder,
     PermissionLevel,
     Space,
@@ -18,10 +21,12 @@ from app.db.models import (
     Tag,
     Task,
     TaskAssignee,
+    TaskComment,
     TaskGroup,
     TaskList,
     TaskTag,
     TaskType,
+    TimeEntry,
     User,
     WorkspaceMember,
     WorkspaceRole,
@@ -36,11 +41,9 @@ from app.services.work.access import (
     task_node,
 )
 from app.services.work import groups as task_groups
-from app.services.work import comments as comment_service
-from app.services.work import customfields, events, extras, recurrence
+from app.services.work import customfields, events, recurrence
 from app.services.work.errors import Forbidden, Invalid, NotFound
 from app.services.work.permissions import Node
-from app.services.work.timetracking import tracked_totals
 from app.services.work.statuses import (
     OPEN_GROUPS,
     apply_group_transition,
@@ -628,6 +631,39 @@ def _is_overdue(task: Task, status: Status, now: datetime) -> bool:
     return task.due_date is not None and task.due_date < now and status.group in OPEN_GROUPS
 
 
+def _task_numbers(db: Session, ids: Sequence[uuid.UUID]) -> Dict[uuid.UUID, Tuple]:
+    """Per task, the counts a task row shows, read in one query rather than one per count.
+
+    (time tracked, comments, attachments, checklist items, resolved items, open subtasks, ID prefix)
+    """
+    sub = aliased(Task)
+    tracked = (
+        select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0))
+        .where(TimeEntry.task_id == Task.id, TimeEntry.ended_at.is_not(None))
+        .scalar_subquery()
+    )
+    comments = select(func.count()).select_from(TaskComment).where(TaskComment.task_id == Task.id).scalar_subquery()
+    attachments = select(func.count()).select_from(Attachment).where(Attachment.task_id == Task.id).scalar_subquery()
+    items = (
+        select(func.count(ChecklistItem.id))
+        .join(Checklist, Checklist.id == ChecklistItem.checklist_id)
+        .where(Checklist.task_id == Task.id)
+    )
+    items_total = items.scalar_subquery()
+    items_done = items.where(ChecklistItem.resolved.is_(True)).scalar_subquery()
+    subtasks = (
+        select(func.count()).select_from(sub).where(sub.parent_id == Task.id, sub.archived_at.is_(None)).scalar_subquery()
+    )
+    prefix = (
+        select(Space.task_prefix).join(TaskList, TaskList.space_id == Space.id)
+        .where(TaskList.id == Task.list_id).scalar_subquery()
+    )
+    rows = db.execute(
+        select(Task.id, tracked, comments, attachments, items_total, items_done, subtasks, prefix).where(Task.id.in_(ids))
+    )
+    return {row[0]: tuple(row[1:]) for row in rows}
+
+
 def serialise_tasks(
     db: Session, tasks: Sequence[Task], levels: Dict[uuid.UUID, PermissionLevel]
 ) -> List[s.TaskOut]:
@@ -651,18 +687,11 @@ def serialise_tasks(
     ):
         tags.setdefault(task_id, []).append(tag)
 
-    tracked = tracked_totals(db, ids)
-    comment_counts = comment_service.counts(db, ids)
-    attachment_counts = extras.counts(db, ids)
-    checklist = extras.progress(db, ids)
+    numbers = _task_numbers(db, ids)
     field_values = customfields.values_for(db, ids)
     from app.services.work import links as link_service  # links imports this module
 
     link_counts = link_service.counts(db, ids)
-    prefixes = dict(db.execute(
-        select(TaskList.id, Space.task_prefix).join(Space, Space.id == TaskList.space_id)
-        .where(TaskList.id.in_({t.list_id for t in tasks}))
-    ).all())
     group_ids = {t.group_id for t in tasks if t.group_id}
     group_refs = {
         g.id: s.TaskGroupRef(id=g.id, name=g.name, color=g.color)
@@ -672,18 +701,12 @@ def serialise_tasks(
     from app.services.work import multilist
 
     extra_lists = multilist.extra_lists_for(db, ids)
-    subtask_counts = dict(
-        db.execute(
-            select(Task.parent_id, func.count())
-            .where(Task.parent_id.in_(ids), Task.archived_at.is_(None))
-            .group_by(Task.parent_id)
-        ).all()
-    )
 
     now = _now()
     out = []
     for task in tasks:
         status = statuses[task.status_id]
+        tracked, comments, attachments, items, items_done, subtasks, prefix = numbers.get(task.id, (0, 0, 0, 0, 0, 0, None))
         out.append(
             s.TaskOut(
                 id=task.id,
@@ -697,7 +720,7 @@ def serialise_tasks(
                 start_date=task.start_date,
                 due_date=task.due_date,
                 time_estimate_seconds=task.time_estimate_seconds,
-                time_tracked_seconds=tracked.get(task.id, 0),
+                time_tracked_seconds=int(tracked),
                 is_private=task.is_private,
                 orderindex=task.orderindex,
                 created_by=task.created_by,
@@ -710,19 +733,19 @@ def serialise_tasks(
                 group=group_refs.get(task.group_id) if task.group_id else None,
                 recurrence=s.Recurrence.model_validate(task.recurrence) if task.recurrence else None,
                 recurs_from_id=task.recurs_from_id,
-                custom_id=f"{prefixes.get(task.list_id) or 'T'}-{task.seq}" if task.seq else None,
+                custom_id=f"{prefix or 'T'}-{task.seq}" if task.seq else None,
                 type_id=task.type_id,
                 waiting_on_open=link_counts.get(task.id, {}).get("waiting", 0),
                 blocking_count=link_counts.get(task.id, {}).get("blocking", 0),
                 link_count=link_counts.get(task.id, {}).get("links", 0),
-                comment_count=comment_counts.get(task.id, 0),
-                attachment_count=attachment_counts.get(task.id, 0),
-                checklist_done=checklist.get(task.id, (0, 0))[0],
-                checklist_total=checklist.get(task.id, (0, 0))[1],
+                comment_count=comments,
+                attachment_count=attachments,
+                checklist_done=items_done,
+                checklist_total=items,
                 custom_fields=field_values.get(task.id, {}),
                 assignees=[s.UserOut.model_validate(u) for u in assignees.get(task.id, [])],
                 tags=[s.TagOut.model_validate(t) for t in tags.get(task.id, [])],
-                subtask_count=subtask_counts.get(task.id, 0),
+                subtask_count=subtasks,
                 permission_level=levels[task.id],
                 points=task.points,
                 extra_list_ids=extra_lists.get(task.id, []),

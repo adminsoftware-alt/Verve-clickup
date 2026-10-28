@@ -1,6 +1,6 @@
 {
-  "name": "Verve Workflow",
-  "short_name": "Verve Workflow",
+  "name": "Verveflow",
+  "short_name": "Verveflow",
   "description": "Verve's work, time and people in one place.",
   "start_url": "/my-tasks",
   "scope": "/",

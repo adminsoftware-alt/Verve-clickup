@@ -172,14 +172,32 @@ def compute(engine: Engine, cards: List[DashboardCard]) -> Dict[str, Any]:
         **_timers(engine, people, start_of_today),
         **_inbox(engine, who, today),
         **_blocked(engine, open_facts, start_of_today, row),
-        **_firm(engine, today, week_end),
+        # Birthdays, holidays and goals are the whole firm's news: the Company board's alone. A
+        # personal or Team board keeps to its own people.
+        **(_firm(engine, today, week_end) if who == "everyone"
+           else {"birthdays": [], "anniversaries": [], "holidays_this_week": [], "goals_behind": []}),
     }
     if several:
         out.update(_team(engine, open_facts, people, today, yesterday, week_start, week_end))
+    elif who == "me" and _led(engine):
+        # A Manager's own board still tells them about their people: who logged nothing, whose
+        # timesheet waits. Planned hours need the people's own tasks, so overload is left to
+        # the Team board.
+        out.update(_team(engine, [], _led(engine), today, yesterday, week_start, week_end))
+        out["overloaded"] = []
     else:
         out.update({"overloaded": [], "no_time_yesterday": [], "timesheets_waiting": [], "timesheets_missing": []})
     out.update(_yesterday(engine, config, loaded, people, yesterday))
     return out
+
+
+def _led(engine: Engine) -> Set[str]:
+    """The people a Manager may see the time of, without themselves. Empty for an Employee, and
+    for an Admin, who sees everyone and has the Company board for that."""
+    visible = engine.time_people()
+    if visible is None:
+        return set()
+    return visible - {engine.access.user_id}
 
 
 # --- your day ---------------------------------------------------------------------------------

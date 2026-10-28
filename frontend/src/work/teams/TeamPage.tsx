@@ -10,6 +10,7 @@ import { peopleApi, personName, type TeamLocation, type TeamOverview } from './p
 import { OrgChart } from './OrgChart';
 import { TeamBadge, useHub } from './TeamsHub';
 import { ask } from '../../components/ask';
+import { LinesSkeleton } from '../Skeleton';
 
 type Tab = 'overview' | 'work' | 'members' | 'chart';
 
@@ -72,7 +73,7 @@ export const TeamPage: React.FC = () => {
   }, [hierarchy]);
 
   if (error && !data) return <p className="m-6 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>;
-  if (!team || !data) return <p className="p-10 text-center text-sm text-gray-400">Loading…</p>;
+  if (!team || !data) return <p className="p-10 text-center text-sm text-gray-400"><LinesSkeleton /></p>;
   const leads = new Set(team.lead_ids);
   const open = data.tasks.filter((t) => t.status.group !== 'done' && t.status.group !== 'closed');
   const overdue = open.filter((t) => t.is_overdue).length;

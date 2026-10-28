@@ -10,6 +10,7 @@ import { ask } from '../../components/ask';
 import { collabApi, type ChecklistTemplate } from '../collabApi';
 import { useWork } from '../WorkContext';
 import { useEscapeToClose } from '../ui';
+import { LinesSkeleton } from '../Skeleton';
 
 /** Pick a saved checklist to add to this task. */
 export const TemplatePicker: React.FC<{
@@ -66,7 +67,7 @@ export const TemplatePicker: React.FC<{
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {error && <p className="mb-3 rounded bg-red-50 px-2 py-1 text-xs text-red-700">{error}</p>}
-          {templates === null && <p className="text-sm text-gray-400">Loading…</p>}
+          {templates === null && <p className="text-sm text-gray-400"><LinesSkeleton /></p>}
           {templates !== null && shown.length === 0 && (
             <p className="text-sm text-gray-500">
               {templates.length === 0
@@ -129,7 +130,7 @@ export const TemplateOverwrite: React.FC<{
           <p className="mt-0.5 text-xs text-gray-500">“{checklistName}” replaces the items in the template you choose.</p>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
-          {templates === null && <p className="px-2 text-sm text-gray-400">Loading…</p>}
+          {templates === null && <p className="px-2 text-sm text-gray-400"><LinesSkeleton /></p>}
           {templates?.length === 0 && <p className="px-2 text-sm text-gray-500">There are no saved templates yet.</p>}
           {(templates ?? []).map((t) => (
             <button key={t.id} type="button" onClick={() => onPick(t)}

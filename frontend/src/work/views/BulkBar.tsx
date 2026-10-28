@@ -1,11 +1,31 @@
 import React, { useMemo, useState } from 'react';
 import { Archive, CalendarDays, CircleDot, Diamond, Flag, MoveRight, Shapes, Tag as TagIcon, Timer, Trash2, UserPlus, X } from 'lucide-react';
 import { workApi, type BulkEdit, type BulkResult, type Status, type Task, type UserRef } from '../api';
-import { PRIORITIES, fromDateInput, parseDuration } from '../ui';
+import { NoMatch, PRIORITIES, SearchBox, fromDateInput, matchesSearch, parseDuration } from '../ui';
 import { useWritableLists } from '../task/TaskActions';
 import { useWork } from '../WorkContext';
 import { Popover } from './ViewControls';
 import { ask } from '../../components/ask';
+
+/** Who to add to or take off every selected task, searchable; Enter adds the first match. */
+const BulkPeople: React.FC<{ people: UserRef[]; onAdd: (p: UserRef) => void; onRemove: (p: UserRef) => void }> = ({ people, onAdd, onRemove }) => {
+  const [q, setQ] = useState('');
+  const shown = people.filter((p) => matchesSearch(q, p.display_name, p.email));
+  return (
+    <>
+      <SearchBox value={q} onChange={setQ} label="Search people" placeholder="Search people…" inset="lg"
+        onEnter={shown[0] ? () => onAdd(shown[0]) : undefined} />
+      {shown.map((p) => (
+        <div key={p.id} className="flex items-center gap-2 px-1 py-0.5 text-sm text-gray-700">
+          <span className="min-w-0 flex-1 truncate">{p.display_name || p.email}</span>
+          <button type="button" aria-label={`Add ${p.display_name || p.email}`} onClick={() => onAdd(p)} className="rounded px-1.5 text-xs text-brand-600 hover:bg-brand-50">Add</button>
+          <button type="button" aria-label={`Remove ${p.display_name || p.email}`} onClick={() => onRemove(p)} className="rounded px-1.5 text-xs text-gray-500 hover:bg-gray-100">Remove</button>
+        </div>
+      ))}
+      {shown.length === 0 && <NoMatch query={q} />}
+    </>
+  );
+};
 
 /**
  * ClickUp's bulk action toolbar: shown while tasks are selected. Each change is applied to
@@ -69,13 +89,11 @@ export const BulkBar: React.FC<{
         </Popover>
 
         <Popover label="Assignees" icon={<UserPlus size={14} />} text="Assignees" up dark width={260}>
-          {(close) => people.map((p) => (
-            <div key={p.id} className="flex items-center gap-2 px-1 py-0.5 text-sm text-gray-700">
-              <span className="min-w-0 flex-1 truncate">{p.display_name || p.email}</span>
-              <button type="button" aria-label={`Add ${p.display_name || p.email}`} onClick={() => { close(); run({ add_assignees: [p.id] }, 'Assigned'); }} className="rounded px-1.5 text-xs text-brand-600 hover:bg-brand-50">Add</button>
-              <button type="button" aria-label={`Remove ${p.display_name || p.email}`} onClick={() => { close(); run({ remove_assignees: [p.id] }, 'Updated'); }} className="rounded px-1.5 text-xs text-gray-500 hover:bg-gray-100">Remove</button>
-            </div>
-          ))}
+          {(close) => (
+            <BulkPeople people={people}
+              onAdd={(p) => { close(); run({ add_assignees: [p.id] }, 'Assigned'); }}
+              onRemove={(p) => { close(); run({ remove_assignees: [p.id] }, 'Updated'); }} />
+          )}
         </Popover>
 
         {/* The reason a type exists is that a lot of tasks share one, so this is where it is

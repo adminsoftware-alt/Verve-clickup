@@ -7,6 +7,7 @@ import { Avatar, AvatarStack, Portal } from '../ui';
 import { peopleApi, personName, type Person, type TeamFull } from './peopleApi';
 import { PersonPanel, accessOf } from './PersonDialogs';
 import { FEATURES } from '../../config/features';
+import { LinesSkeleton } from '../Skeleton';
 
 export interface Hub {
   ws: string; people: Person[]; teams: TeamFull[]; me: string; isAdmin: boolean; roles: Role[];
@@ -84,7 +85,7 @@ export const TeamsHub: React.FC = () => {
     openPerson: setOpen,
   }), [ws, people, teams, myId, isAdmin, roles, reload, refresh]);
   const person = people.find((p) => p.user.id === open);
-  if (!workspace) return <div className="p-10 text-center text-sm text-gray-500">Loading…</div>;
+  if (!workspace) return <div className="p-10 text-center text-sm text-gray-500"><LinesSkeleton /></div>;
   // Hiding the link is not the same as closing the door: this page is reachable by typing its
   // address, so it says no here too.
   if (!isManager) {

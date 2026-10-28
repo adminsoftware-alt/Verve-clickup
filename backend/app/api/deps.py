@@ -38,8 +38,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
     uid = decoded_token.get("uid")
     if uid:
         from app.services.admin_service import admin_service
-        user_db = admin_service.get_user(uid)
-        if user_db and getattr(user_db, "disabled", False):
+        if admin_service.is_disabled(uid):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User account is disabled",

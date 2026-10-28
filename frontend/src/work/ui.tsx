@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Flag, Search, X } from 'lucide-react';
+import { Check, ChevronDown, Flag, Search, X } from 'lucide-react';
 import { API_V2, type Status, type UserRef } from './api';
 
 // --- people ------------------------------------------------------------------
@@ -21,14 +21,16 @@ function colorFor(id: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-export const Avatar: React.FC<{ user: UserRef; size?: number }> = ({ user, size = 24 }) => (user.avatar ? (
+/** A person's photo, or their initials on their colour. `color` overrides that colour -- your own
+ *  avatar is drawn in the navy wherever it stands for you. */
+export const Avatar: React.FC<{ user: UserRef; size?: number; color?: string }> = ({ user, size = 24, color }) => (user.avatar ? (
   <img src={`${API_V2}/${user.avatar}`} alt="" title={user.display_name || user.email}
     className="inline-block shrink-0 rounded-full object-cover ring-2 ring-white" style={{ width: size, height: size }} />
 ) : (
   <span
     title={user.display_name || user.email}
     className="inline-flex items-center justify-center rounded-full font-semibold text-white ring-2 ring-white shrink-0"
-    style={{ width: size, height: size, fontSize: size * 0.4, backgroundColor: colorFor(user.id) }}
+    style={{ width: size, height: size, fontSize: size * 0.4, backgroundColor: color ?? colorFor(user.id) }}
   >
     {initials(user)}
   </span>
@@ -171,7 +173,16 @@ export const Portal: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
 // --- popover menu ------------------------------------------------------------
 
-export interface MenuItem { label: string; icon?: React.ReactNode; onClick: () => void; danger?: boolean }
+export interface MenuItem {
+  label: string; icon?: React.ReactNode; onClick: () => void; danger?: boolean;
+  /** Small grey text at the right of the row, e.g. the file type. */
+  hint?: string;
+  /** Rows sharing a section sit under its small heading; a new section starts with a rule.
+   *  In the compact tile look only the rule is drawn. */
+  section?: string;
+  /** The tile look: this row's own colour for its icon tile. */
+  tone?: string;
+}
 
 const MENU_WIDTH = 184;
 const MENU_ITEM_HEIGHT = 36;
@@ -187,7 +198,10 @@ export const Menu: React.FC<{
   width?: number | 'trigger';
   label?: string;
   onOpenChange?: (open: boolean) => void;
-}> = ({ trigger, items, align = 'left', label, onOpenChange, triggerClassName = 'inline-flex', width = MENU_WIDTH }) => {
+  /** The tool look: compact rows, each icon in a small tile of its own colour that fills in
+   *  under the pointer. */
+  tiles?: boolean;
+}> = ({ trigger, items, align = 'left', label, onOpenChange, triggerClassName = 'inline-flex', width = MENU_WIDTH, tiles = false }) => {
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const triggerRef = useRef<HTMLSpanElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -204,7 +218,9 @@ export const Menu: React.FC<{
     // A list that belongs to a form field lines up with the field; anything else keeps its own
     // width, because a toolbar button is not as wide as its longest menu entry.
     const w = width === 'trigger' ? Math.max(rect.width, 170) : width;
-    const height = items.length * MENU_ITEM_HEIGHT + 8;
+    const breaks = items.filter((it, i) => i > 0 && it.section !== items[i - 1].section).length;
+    const heads = items.filter((it, i) => it.section && it.section !== items[i - 1]?.section).length;
+    const height = items.length * (tiles ? 32 : MENU_ITEM_HEIGHT) + breaks * 9 + (tiles ? 0 : heads * 24) + 8;
     let left = align === 'right' ? rect.right - w : rect.left;
     left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
     const below = rect.bottom + 4;
@@ -253,23 +269,194 @@ export const Menu: React.FC<{
             style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
             className="z-[200] overflow-hidden rounded-xl border border-gray-200 bg-white p-1 shadow-xl ring-1 ring-black/[0.03]"
           >
-            {items.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                role="menuitem"
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(null); item.onClick(); }}
-                // The row is the hit area, inset from the edge so the highlight reads as a
-                // rounded row rather than a band across the whole popover.
-                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
-                  item.danger ? 'text-red-600 hover:bg-red-50' : 'text-gray-700 hover:bg-gray-100'}`}
-              >
-                {/* A minimum rather than a fixed width: a plain icon lines up with every other row,
-                    and a composite one -- a tick beside a status dot -- is not squeezed into 16px. */}
-                <span className="flex min-w-4 shrink-0 items-center text-gray-400">{item.icon}</span>
-                <span className="min-w-0 flex-1 truncate">{item.label}</span>
-              </button>
-            ))}
+            {items.map((item, i) => {
+              const newSection = i > 0 && item.section !== items[i - 1].section;
+              const head = item.section && item.section !== items[i - 1]?.section;
+              return (
+                <React.Fragment key={item.label}>
+                  {newSection && <div className="mx-1 my-1 h-px bg-gray-100" role="separator" />}
+                  {head && !tiles && <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-gray-400">{item.section}</div>}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(null); item.onClick(); }}
+                    // The row is the hit area, inset from the edge so the highlight reads as a
+                    // rounded row rather than a band across the whole popover.
+                    className={`group/mi flex w-full items-center rounded-lg text-left transition-colors ${tiles ? 'gap-2 px-1.5 py-1 text-[13px]' : 'gap-2.5 px-2.5 py-1.5 text-sm'} ${
+                      item.danger ? 'text-red-600 hover:bg-red-50' : tiles ? 'text-gray-800 hover:bg-gray-100' : 'text-gray-700 hover:bg-gray-100'}`}
+                  >
+                    {tiles ? (
+                      <span
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[color-mix(in_srgb,var(--mi)_13%,white)] text-[var(--mi)] transition-colors group-hover/mi:bg-[var(--mi)] group-hover/mi:text-white"
+                        style={{ '--mi': item.danger ? '#dc2626' : item.tone ?? '#234788' } as React.CSSProperties}
+                      >
+                        {item.icon}
+                      </span>
+                    ) : (
+                      // A minimum rather than a fixed width: a plain icon lines up with every other row,
+                      // and a composite one -- a tick beside a status dot -- is not squeezed into 16px.
+                      <span className="flex min-w-4 shrink-0 items-center text-gray-400">{item.icon}</span>
+                    )}
+                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                    {item.hint && (
+                      <span className="shrink-0 rounded border border-b-2 border-gray-200 bg-white px-1 text-[9.5px] font-semibold leading-4 tracking-wide text-gray-400">{item.hint}</span>
+                    )}
+                  </button>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </Portal>
+      )}
+    </>
+  );
+};
+
+// --- search in pickers -------------------------------------------------------
+
+/** Every word typed appears in one of the texts, so "har kan" finds "Harish Kandi". */
+export const matchesSearch = (query: string, ...texts: (string | null | undefined)[]): boolean => {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = texts.filter(Boolean).join(' ').toLowerCase();
+  return words.every((w) => hay.includes(w));
+};
+
+/**
+ * The search box at the top of a dropdown. It sticks while the list under it scrolls, and Enter
+ * picks the first match, so a name can be chosen without touching the mouse.
+ */
+export const SearchBox: React.FC<{
+  value: string;
+  onChange: (q: string) => void;
+  placeholder?: string;
+  label: string;
+  onEnter?: () => void;
+  /** The padding of the panel it sits in, so the box runs edge to edge: p-1 pickers, p-3 popovers. */
+  inset?: 'sm' | 'lg';
+}> = ({ value, onChange, placeholder = 'Search…', label, onEnter, inset = 'sm' }) => (
+  <label className={`sticky z-10 mb-1 flex items-center gap-1.5 border-b border-gray-100 bg-white px-2.5 py-1.5 ${
+    inset === 'lg' ? '-top-3 -mx-3 -mt-3' : '-top-1 -mx-1 -mt-1'}`}>
+    <Search size={13} className="shrink-0 text-gray-400" />
+    <input
+      autoFocus value={value} onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => { if (e.key === 'Enter' && onEnter) { e.preventDefault(); onEnter(); } }}
+      placeholder={placeholder} aria-label={label}
+      className="w-full border-0 bg-transparent p-0 text-[13px] text-gray-800 outline-none placeholder:text-gray-400 focus:ring-0"
+    />
+  </label>
+);
+
+/** What a picker says when the search leaves nothing. */
+export const NoMatch: React.FC<{ query: string }> = ({ query }) => (
+  <p className="px-2 py-3 text-center text-xs text-gray-400">Nothing matches “{query.trim()}”.</p>
+);
+
+export interface SelectOption {
+  value: string;
+  label: string;
+  /** A heading the option sits under, like an <optgroup>: "Teams", "People". */
+  group?: string;
+  /** Matched by the search but not shown, e.g. an email behind a name. */
+  hint?: string;
+}
+
+/**
+ * A <select> you can type into. A plain select of sixty names means scrolling to find one; this
+ * opens the same choices under a search box, and the arrow keys and Enter work as they do there.
+ * Options without a group come first, then each group under its heading in the order given.
+ */
+export const SearchSelect: React.FC<{
+  value: string;
+  onChange: (value: string) => void;
+  options: SelectOption[];
+  /** Ties the control to its purpose for screen readers: "Assign comment", "Person". */
+  label: string;
+  /** Shown on the button while nothing listed is chosen. */
+  placeholder?: string;
+  className?: string;
+  width?: number;
+  /** 'sm' for a control tucked into a toolbar line. */
+  size?: 'sm' | 'md';
+}> = ({ value, onChange, options, label, placeholder = 'Choose…', className = '', width = 260, size = 'md' }) => {
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
+  const [q, setQ] = useState('');
+  const [hi, setHi] = useState(0);
+  const button = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const shown = options.filter((o) => matchesSearch(q, o.label, o.hint, o.group));
+  const current = options.find((o) => o.value === value);
+
+  const close = () => { setPos(null); setQ(''); };
+  const choose = (o: SelectOption) => { onChange(o.value); close(); button.current?.focus(); };
+  const open = () => {
+    const r = button.current?.getBoundingClientRect();
+    if (!r) return;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    // Upwards when the bottom of the window is closer than the list would be tall.
+    setPos(r.bottom + 320 > window.innerHeight ? { bottom: window.innerHeight - r.top + 4, left } : { top: r.bottom + 4, left });
+    setHi(Math.max(0, options.findIndex((o) => o.value === value)));
+  };
+
+  useEffect(() => {
+    if (!pos) return;
+    const away = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!button.current?.contains(t) && !panel.current?.contains(t)) close();
+    };
+    // Capture, and marked handled, so Escape shuts this list and not the dialog it is in.
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
+    document.addEventListener('mousedown', away, true);
+    window.addEventListener('keydown', esc, true);
+    return () => { document.removeEventListener('mousedown', away, true); window.removeEventListener('keydown', esc, true); };
+  }, [pos]);
+
+  useEffect(() => { list.current?.querySelector(`[data-i="${hi}"]`)?.scrollIntoView({ block: 'nearest' }); }, [hi]);
+
+  // Ungrouped first, then the groups in the order they first appear.
+  const groups = [...new Set(shown.map((o) => o.group ?? ''))].sort((a, b) => (a ? 1 : 0) - (b ? 1 : 0));
+  const ordered = groups.flatMap((g) => shown.filter((o) => (o.group ?? '') === g));
+
+  return (
+    <>
+      <button ref={button} type="button" aria-label={label} aria-haspopup="listbox" aria-expanded={!!pos}
+        onClick={() => (pos ? close() : open())}
+        className={`flex min-w-0 items-center justify-between gap-1 border bg-white text-left ${
+          size === 'sm' ? 'rounded border-gray-200 px-1.5 py-0.5 text-xs' : 'rounded-md border-gray-300 px-2 py-1.5 text-sm'} ${className}`}>
+        <span className={`truncate ${current ? 'text-gray-800' : 'text-gray-500'}`}>{current?.label ?? placeholder}</span>
+        <ChevronDown size={13} className="shrink-0 text-gray-400" />
+      </button>
+      {pos && (
+        <Portal>
+          <div ref={panel} style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width }}
+            className="z-[170] overflow-hidden rounded-lg border border-gray-200 bg-white text-sm shadow-lg">
+            <label className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1.5">
+              <Search size={13} className="shrink-0 text-gray-400" />
+              <input autoFocus value={q} aria-label={`Search ${label.toLowerCase()}`} placeholder="Search…"
+                onChange={(e) => { setQ(e.target.value); setHi(0); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowDown') { e.preventDefault(); setHi((i) => Math.min(i + 1, ordered.length - 1)); }
+                  if (e.key === 'ArrowUp') { e.preventDefault(); setHi((i) => Math.max(i - 1, 0)); }
+                  if (e.key === 'Enter') { e.preventDefault(); if (ordered[hi]) choose(ordered[hi]); }
+                }}
+                className="w-full border-0 bg-transparent p-0 text-[13px] text-gray-800 outline-none placeholder:text-gray-400 focus:ring-0" />
+            </label>
+            <ul ref={list} role="listbox" aria-label={label} className="max-h-64 overflow-y-auto p-1">
+              {ordered.map((o, i) => (
+                <React.Fragment key={`${o.group ?? ''}:${o.value}`}>
+                  {o.group && o.group !== ordered[i - 1]?.group && (
+                    <li role="presentation" className="px-2 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{o.group}</li>
+                  )}
+                  <li data-i={i} role="option" aria-selected={o.value === value} onMouseEnter={() => setHi(i)} onClick={() => choose(o)}
+                    className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1 ${i === hi ? 'bg-gray-100' : ''}`}>
+                    <span className="min-w-0 flex-1 truncate text-gray-800">{o.label}</span>
+                    {o.value === value && <Check size={13} className="shrink-0 text-brand-600" />}
+                  </li>
+                </React.Fragment>
+              ))}
+              {ordered.length === 0 && <li><NoMatch query={q} /></li>}
+            </ul>
           </div>
         </Portal>
       )}

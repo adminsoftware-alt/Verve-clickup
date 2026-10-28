@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { BarChart3, Lock, Plus, Search, Share2, Sparkles, Users } from 'lucide-react';
 import { FEATURES } from '../../config/features';
+import { useTopBarSlot } from '../../components/topBarSlot';
+import { peek } from '../api';
 import { useWork } from '../WorkContext';
 import { Avatar } from '../ui';
 import { dashApi, type DashboardSummary } from './api';
@@ -18,9 +21,10 @@ export const DashboardsHub: React.FC = () => {
   const { workspace } = useWork();
   const { isAdmin, led, isGuest } = useLeadership();
   const navigate = useNavigate();
+  const topBarSlot = useTopBarSlot();
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'all';
-  const [items, setItems] = useState<DashboardSummary[] | null>(null);
+  const [items, setItems] = useState<DashboardSummary[] | null>(() => (workspace ? peek(() => dashApi.list(workspace.id)) ?? null : null));
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [creating, setCreating] = useState(false);
@@ -82,6 +86,14 @@ export const DashboardsHub: React.FC = () => {
   const canSeePeople = !isGuest && (isAdmin || led.length > 0);
   const peopleView = canSeePeople && tab === 'people';
   const switchCls = (on: boolean) => `flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors ${on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`;
+  const title = (
+    <>
+      <h1 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
+        <BarChart3 size={18} className="shrink-0" /> {peopleView ? 'People’s dashboards' : teamsOnly ? 'Team Dashboards' : 'Dashboards'}
+      </h1>
+      {!peopleView && <span className="ml-2 text-sm text-gray-400">{visible.length}</span>}
+    </>
+  );
   return (
     <div className="flex h-full min-h-0 bg-white">
       {/* A whole column of chrome to hold three or four words. With this many boards the panel
@@ -89,10 +101,8 @@ export const DashboardsHub: React.FC = () => {
           above the table as chips and the table gets the width. */}
       <main className="min-w-0 flex-1 overflow-auto px-6 py-4">
         <div className="mb-4 flex flex-wrap items-center gap-3">
-          <h1 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
-            <BarChart3 size={18} /> {peopleView ? 'People’s dashboards' : teamsOnly ? 'Team Dashboards' : 'Dashboards'}
-          </h1>
-          {!peopleView && <span className="text-sm text-gray-400">{visible.length}</span>}
+          {/* The title and the count go up into the top bar; on a phone they stay here. */}
+          {topBarSlot ? createPortal(title, topBarSlot) : title}
           {canSeePeople && (
             <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-0.5" role="tablist" aria-label="Dashboards or people">
               <button type="button" role="tab" aria-selected={!peopleView} onClick={() => setParams({})} className={switchCls(!peopleView)}>

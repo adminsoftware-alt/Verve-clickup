@@ -19,23 +19,27 @@ const PREVIOUS: Partial<Record<string, string>> = {
   yesterday: 'Yesterday', last_week: 'Last week', last_month: 'Last month',
 };
 
-type Tone = 'blue' | 'orange' | 'red' | 'violet' | 'pink';
+type Tone = 'blue' | 'orange' | 'red' | 'violet' | 'green' | 'pink';
 
 // The meaning is carried by the icon tile and, for overdue, by the figure itself; the card stays
 // white like every other card, so a row of them reads as one calm band rather than five colours.
 const TONES: Record<Tone, { tile: string; value: string }> = {
-  blue: { tile: '#3B82F6', value: 'text-gray-900' },
-  orange: { tile: '#F97316', value: 'text-gray-900' },
-  red: { tile: '#EF4444', value: 'text-rose-600' },
-  violet: { tile: '#8B5CF6', value: 'text-gray-900' },
-  pink: { tile: '#EC4899', value: 'text-gray-900' },
+  // "Cool ocean" (chosen 2026-10-26): one cool family, where only Overdue warms up and Done is
+  // a light green. "orange" is the due-soon tone, so it is cyan here.
+  blue: { tile: '#2563EB', value: 'text-gray-900' },
+  orange: { tile: '#0891B2', value: 'text-gray-900' },
+  red: { tile: '#E11D48', value: 'text-rose-600' },
+  violet: { tile: '#4F46E5', value: 'text-gray-900' },
+  green: { tile: '#22C55E', value: 'text-green-600' },
+  pink: { tile: '#7C3AED', value: 'text-gray-900' },
 };
 
 /** What a stat card means, read from the filters it was built with rather than from its name. */
 export function statLook(card: Card): { tone: Tone; Icon: React.ElementType } {
   const f = card.config.filters ?? {};
   if (f.due === 'overdue') return { tone: 'red', Icon: AlertCircle };
-  if (f.done) return { tone: 'violet', Icon: CheckCircle2 };
+  // Done is green, the colour people read as finished.
+  if (f.done) return { tone: 'green', Icon: CheckCircle2 };
   if (f.due) return { tone: 'orange', Icon: CalendarDays };
   if (f.assignees?.includes('none')) return { tone: 'pink', Icon: Users };
   if (card.config.measure && card.config.measure !== 'tasks') return { tone: 'blue', Icon: Clock };
@@ -75,7 +79,7 @@ export const StatCard: React.FC<{
   const value = data && !data.error && !data.no_access ? d?.value : null;
 
   return (
-    <div className="ui-card ui-card-hover group relative flex w-full items-center gap-3 px-4 py-3.5">
+    <div className={`stat-card ui-card ui-card-hover group relative flex w-full items-center gap-3 px-4 py-3.5`} style={{ '--tile': skin.tile } as React.CSSProperties}>
       {/* The filter sits above the tile rather than inside it: the tile itself is the button
           that opens the tasks, and a button inside a button is not a thing. It is always on
           show -- hidden until hover, it was a control nobody knew was there, and a card could
@@ -84,10 +88,9 @@ export const StatCard: React.FC<{
       <button
         type="button"
         onClick={onDrill}
-        title="Show these tasks"
         className="flex w-full items-center gap-3 text-left"
       >
-      <span className="tile-3d h-11 w-11 rounded-xl" style={{ '--tile': skin.tile } as React.CSSProperties}>
+      <span className="tile-3d h-11 w-11 rounded-xl">
         <Icon size={20} />
       </span>
       <span className="min-w-0 flex-1">
@@ -97,7 +100,7 @@ export const StatCard: React.FC<{
         </span>
         <span className="block truncate text-[11px] text-gray-400">{statScope(card)}</span>
       </span>
-        <ChevronRight size={16} className="shrink-0 text-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-500" />
+        <ChevronRight size={16} className="shrink-0 text-gray-300 transition-colors group-hover:text-gray-500" />
       </button>
     </div>
   );
@@ -121,10 +124,9 @@ export const PeriodBar: React.FC<{
   ];
 
   return (
-    // A heading for the row on the left and its one control on the right, so the control has a
-    // line to belong to instead of standing alone above the tiles.
-    <div className="mb-2.5 flex flex-wrap items-center gap-2">
-      <h2 className="ui-eyebrow mr-auto">At a glance</h2>
+    // The row's one control, on the right above the tiles. It had an "At a glance" heading on the
+    // left; the tiles say what they are.
+    <div className="mb-2.5 flex flex-wrap items-center justify-end gap-2">
       {preset === 'custom' && value?.start && value?.end && (
         <span className="no-print text-xs text-gray-500">{value.start} to {value.end}</span>
       )}

@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useTopBarSlot } from '../../components/topBarSlot';
 import { FEATURES } from '../../config/features';
 import { FavoriteStar } from '../Favorites';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -7,11 +9,11 @@ import {
   FileSpreadsheet, FilterX, FolderKanban, Gauge, Globe, GripVertical, Hash, History, ImageDown, LayoutDashboard, LineChart, ListChecks, Mail, MessageSquare,
   MoreHorizontal, Pencil, PieChart as PieChartIcon, Plus, Printer, RefreshCw, RotateCcw, Scale, Share2, StickyNote, Target, Trash2, Undo2, Users, Zap,
 } from 'lucide-react';
+import { peek } from '../api';
 import { useWork } from '../WorkContext';
 import { TaskPanel } from '../TaskPanel';
 import { Menu, NameDialog } from '../ui';
 import { Check, ChevronDown } from 'lucide-react';
-import { useNow } from '../RunningTimer';
 import { dashApi, type Card, type CardData, type Dashboard, type Filters, type Insights, type Period } from './api';
 import { InsightsPanel } from './InsightsPanel';
 import { CardBody } from './cards';
@@ -20,9 +22,19 @@ import { ANY_TIME, CardFilterMenu } from './CardFilters';
 import { WorkloadPanel, workloadFinding } from './WorkloadPanel';
 import { CardEditor } from './CardEditor';
 import { DrillDialog, Modal, ReportsDialog, RepointDialog, ShareDashboardDialog, useLeadership } from './dialogs';
-import { FiltersEditor, useFilterSummary } from './pickers';
+import { FiltersEditor } from './pickers';
 import { cardRows, chartIn, exportCardCsv, exportCardPng } from './exportCard';
 import { ask } from '../../components/ask';
+
+/** What this board showed last time, drawn at once while the fresh copy loads. */
+const lastSeen = (id: string) => {
+  const rows = peek(() => dashApi.data(id));
+  return {
+    dash: peek(() => dashApi.get(id)) ?? null,
+    data: rows ? Object.fromEntries(rows.map((r) => [r.card_id, r])) : {},
+    insights: peek(() => dashApi.insights(id)) ?? null,
+  };
+};
 
 const ROW_PX = 110;
 const GAP_PX = 12;
@@ -52,12 +64,101 @@ function narrowed(card: Card): boolean {
   return plainFilters(base) !== plainFilters(card.config.filters);
 }
 
-function ago(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  return `${Math.floor(s / 3600)} h ago`;
-}
+
+/** The download mark drawn in two parts, so on hover the arrow can drop into the tray. */
+const DownloadIcon: React.FC = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <g className="dl-arrow">
+      <path d="M12 3v12" />
+      <path d="m7 10 5 5 5-5" />
+    </g>
+  </svg>
+);
+
+/** How long "Up to date" stays before the button offers to refresh again. */
+const DONE_MS = 2500;
+
+/**
+ * "Refresh now" as a pill. While the cards are read again its arrow turns ("Refreshing…"); when
+ * they are back a tick in a green circle says "Up to date" for a moment, then it is ready again.
+ */
+const RefreshButton: React.FC<{ onRefresh: () => unknown }> = ({ onRefresh }) => {
+  const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const click = async () => {
+    if (state === 'busy') return;
+    window.clearTimeout(timer.current);
+    setState('busy');
+    try { await onRefresh(); } finally {
+      setState('done');
+      timer.current = window.setTimeout(() => setState('idle'), DONE_MS);
+    }
+  };
+  const done = state === 'done';
+  return (
+    <button type="button" onClick={click} aria-busy={state === 'busy'}
+      className={`group/fresh flex items-center gap-1.5 rounded-full py-1 pl-1.5 pr-3 text-xs font-semibold ring-1 transition-colors duration-300 ${done
+        ? 'bg-green-50 text-green-700 ring-green-200'
+        : 'bg-gray-50 text-gray-700 ring-gray-200 hover:bg-white hover:text-brand-700 hover:ring-brand-200'}`}>
+      <span className="relative flex h-[18px] w-[18px] items-center justify-center">
+        {done ? (
+          <span key="done" className="fresh-tick flex h-[18px] w-[18px] items-center justify-center rounded-full bg-green-600 text-white">
+            <Check size={11} strokeWidth={3} />
+          </span>
+        ) : (
+          <RefreshCw size={13} strokeWidth={2.25}
+            className={`text-brand-600 transition-transform duration-300 ${state === 'busy' ? 'motion-safe:animate-spin' : 'motion-safe:group-hover/fresh:rotate-90'}`} />
+        )}
+      </span>
+      <span key={state} className="fresh-label whitespace-nowrap" aria-live="polite">
+        {state === 'busy' ? 'Refreshing…' : done ? 'Up to date' : 'Refresh now'}
+      </span>
+    </button>
+  );
+};
+
+/** A card's own refresh: the arrows turn while it reloads, then a small green tick. */
+const CardRefresh: React.FC<{ onRefresh: () => Promise<unknown>; busy?: boolean }> = ({ onRefresh, busy = false }) => {
+  const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  // The card is being reloaded from elsewhere (a filter or period was just changed): turn, then tick.
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (busy) { window.clearTimeout(timer.current); setState('busy'); }
+    else if (wasBusy.current) {
+      setState('done');
+      timer.current = window.setTimeout(() => setState('idle'), 1600);
+    }
+    wasBusy.current = busy;
+  }, [busy]);
+  const click = async () => {
+    if (state === 'busy') return;
+    window.clearTimeout(timer.current);
+    setState('busy');
+    // At least one full turn, so a fast reload still shows that something happened.
+    try { await Promise.all([onRefresh(), new Promise((r) => setTimeout(r, 700))]); } finally {
+      setState('done');
+      timer.current = window.setTimeout(() => setState('idle'), 1600);
+    }
+  };
+  // The tick takes the icon's exact place, so the Filter button and the rest of the header never move.
+  return (
+    <span className="relative flex">
+      {state === 'done' ? (
+        <span className="flex h-[21px] w-[21px] items-center justify-center">
+          <span className="fresh-tick flex h-3.5 w-3.5 items-center justify-center rounded-full bg-green-600 text-white"><Check size={9} strokeWidth={3.5} /></span>
+        </span>
+      ) : (
+        <button type="button" aria-label="Refresh card" aria-busy={state === 'busy'} onClick={click} className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
+          <RefreshCw size={13} className={state === 'busy' ? 'card-refresh-spin text-[#234788]' : ''} />
+        </button>
+      )}
+    </span>
+  );
+};
 
 const RELATION_NOTE: Record<string, string> = {
   my_team: 'A Dashboard of someone in your Team — view only.',
@@ -70,8 +171,10 @@ const RELATION_NOTE: Record<string, string> = {
  * where deleting it goes back to the standard view summary.
  */
 const TIME_CARDS = ['timesheet', 'time_report', 'capacity', 'variance', 'completed', 'worked_on'];
-/** Cards with tasks behind them, so a click anywhere on the card lists those tasks. */
-const DRILLABLE = ['calculation', 'pie', 'bar', 'line', 'task_list', 'portfolio', 'behind', 'completed', 'capacity', 'variance', 'plan'];
+/** Cards with tasks behind them, so a click anywhere on the card lists those tasks. Charts are
+ *  not among them: their bars and slices open the tasks, and the white card around them stays
+ *  still -- a click beside a bar opening every task in the chart surprised people. */
+const DRILLABLE = ['calculation', 'task_list', 'portfolio', 'behind', 'completed', 'capacity', 'variance', 'plan'];
 /** Hours cards have no task list behind them; a click on one opens the Timesheet instead. */
 const OPENS_TIMESHEET = ['time_report', 'timesheet', 'worked_on'];
 const isClickable = (card: Card) => DRILLABLE.includes(card.type) || OPENS_TIMESHEET.includes(card.type);
@@ -92,7 +195,7 @@ function cardLook(card: Card): { Icon: React.ElementType; tile: string } {
     case 'timesheet': return { Icon: CalendarClock, tile: '#6366F1' };
     case 'portfolio': return { Icon: FolderKanban, tile: '#64748B' };
     case 'behind': return { Icon: AlertTriangle, tile: '#EF4444' };
-    case 'completed': return { Icon: CheckCircle2, tile: '#8B5CF6' };
+    case 'completed': return { Icon: CheckCircle2, tile: '#16A34A' };
     case 'notes': return { Icon: StickyNote, tile: '#F59E0B' };
     case 'embed': return { Icon: Globe, tile: '#64748B' };
     case 'discussion': return { Icon: MessageSquare, tile: '#EC4899' };
@@ -183,12 +286,12 @@ export const DashboardPage: React.FC<{
   const navigate = useNavigate();
   const { refresh: refreshTree } = useWork();
   const { isGuest, isAdmin, led } = useLeadership();
-  const filterSummary = useFilterSummary();
+  /** The "Filter all cards" button, so F can open it. */
+  const boardFilter = useRef<HTMLSpanElement>(null);
 
-  const [dash, setDash] = useState<Dashboard | null>(null);
-  const [data, setData] = useState<Record<string, CardData>>({});
-  const [loadedAt, setLoadedAt] = useState(0);
-  const [insights, setInsights] = useState<Insights | null>(null);
+  const [dash, setDash] = useState<Dashboard | null>(() => lastSeen(id).dash);
+  const [data, setData] = useState<Record<string, CardData>>(() => lastSeen(id).data);
+  const [insights, setInsights] = useState<Insights | null>(() => lastSeen(id).insights);
   const [insightsError, setInsightsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -199,9 +302,9 @@ export const DashboardPage: React.FC<{
     | { type: 'expand'; cardId: string } | null
   >(null);
   const [openTask, setOpenTask] = useState<string | null>(null);
+  const topBarSlot = useTopBarSlot();
   const [dragging, setDragging] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
-  const now = useNow(true, 30_000);
 
   const canEdit = dash?.your_level === 'edit' || dash?.your_level === 'full';
   const canDelete = dash?.your_level === 'full';
@@ -226,19 +329,22 @@ export const DashboardPage: React.FC<{
         // Something was re-scoped mid-flight: keep what we already hold for those cards.
         return Object.fromEntries(rows.map((r) => [r.card_id, prev[r.card_id] ?? r]));
       });
-      setLoadedAt(Date.now());
     } catch (e) { setError((e as Error).message); }
   }, [id]);
 
   const load = useCallback(async () => {
     try {
       setError(null);
-      setDash(await dashApi.get(id));
-      await loadData();
+      // The board and its cards' data don't depend on each other, so both are asked for at once.
+      await Promise.all([dashApi.get(id).then(setDash), loadData()]);
     } catch (e) { setError((e as Error).message); }
   }, [id, loadData]);
 
-  useEffect(() => { setDash(null); setData({}); setEditMode(false); setUndo([]); load(); }, [load]);
+  useEffect(() => {
+    const last = lastSeen(id);
+    setDash(last.dash); setData(last.data); setInsights(last.insights);
+    setEditMode(false); setUndo([]); load();
+  }, [id, load]);
   useEffect(() => {
     if (!dash?.auto_refresh) return;
     const timer = setInterval(loadData, AUTO_REFRESH_MS);
@@ -323,8 +429,21 @@ export const DashboardPage: React.FC<{
 
   // --- actions ------------------------------------------------------------------------------
 
+  // Cards being saved and re-read after a filter or period change: their refresh arrows turn
+  // until the new figures are in, so a slow reload never looks like nothing happened.
+  /** The last save queued for each card, and the cards as most recently saved, for setCardFilters. */
+  const filterSaves = useRef(new Map<string, Promise<unknown>>());
+  const latestCards = useRef<Card[]>([]);
+  latestCards.current = dash?.cards ?? latestCards.current;
+  const [busyCards, setBusyCards] = useState<ReadonlySet<string>>(() => new Set());
+  const markBusy = (cardId: string) => setBusyCards((prev) => new Set(prev).add(cardId));
+  const reloadOne = async (cardId: string) => {
+    try { return await dashApi.cardData(id, cardId); } finally {
+      setBusyCards((prev) => { const next = new Set(prev); next.delete(cardId); return next; });
+    }
+  };
   const act = async (action: () => Promise<unknown>) => {
-    try { setError(null); await action(); } catch (e) { setError((e as Error).message); }
+    try { setError(null); await action(); } catch (e) { setError((e as Error).message); setBusyCards(new Set()); }
   };
   const removeCard = async (card: Card) => await ask.confirm({ danger: true, title: `Remove the “${card.title}” card?` }) && act(async () => {
     await dashApi.removeCard(id, card.id);
@@ -348,13 +467,13 @@ export const DashboardPage: React.FC<{
     const isChart = card.type === 'pie' || card.type === 'bar' || card.type === 'line';
     return [
       ...(canEdit ? [
-        { label: 'Edit card', icon: <Pencil size={14} />, onClick: () => setDialog({ type: 'card', card }) },
-        { label: 'Duplicate card', icon: <Copy size={14} />, onClick: () => duplicateCard(card) },
+        { section: 'Card', tone: '#7C3AED', label: 'Edit card', icon: <Pencil size={13} />, onClick: () => setDialog({ type: 'card', card }) },
+        { section: 'Card', tone: '#0284C7', label: 'Duplicate card', icon: <Copy size={13} />, onClick: () => duplicateCard(card) },
       ] : []),
-      ...(hasRows ? [{ label: 'Export as CSV', icon: <FileSpreadsheet size={14} />, onClick: () => exportCard(card, 'csv') }] : []),
-      ...(isChart && hasRows ? [{ label: 'Download image (PNG)', icon: <ImageDown size={14} />, onClick: () => exportCard(card, 'png') }] : []),
+      ...(hasRows ? [{ section: 'Export', tone: '#D97706', label: 'Export data', hint: 'CSV', icon: <FileSpreadsheet size={13} />, onClick: () => exportCard(card, 'csv') }] : []),
+      ...(isChart && hasRows ? [{ section: 'Export', tone: '#DB2777', label: 'Download image', hint: 'PNG', icon: <ImageDown size={13} />, onClick: () => exportCard(card, 'png') }] : []),
       // Deleting a card is admin-only (the server says the same); everyone else doesn't see it.
-      ...(canEdit && isAdmin ? [{ label: 'Delete card', icon: <Trash2 size={14} />, danger: true, onClick: () => removeCard(card) }] : []),
+      ...(canEdit && isAdmin ? [{ section: '', label: 'Delete card', icon: <Trash2 size={13} />, danger: true, onClick: () => removeCard(card) }] : []),
     ];
   };
   const saveFilters = (filters: Filters) => act(async () => { setDash(await dashApi.update(id, { filters })); setDialog(null); await loadData(); });
@@ -367,7 +486,26 @@ export const DashboardPage: React.FC<{
     await loadData();
   });
   /** Refresh starts the board over: every filter off, every card read again. */
-  const refresh = () => (canEdit && filtered ? clearAllFilters() : loadData());
+  // Refresh only reads the cards again; filters stay. It used to clear them too when the board was
+  // filtered, said only in a hover hint -- "Clear all filters" beside it is the way to do that.
+  const refresh = () => loadData();
+
+  // R reads every card again (filters stay: a stray key should not undo someone's filtering);
+  // F opens "Filter all cards". Not while typing, in a dialog or menu, or inside a List's view.
+  useEffect(() => {
+    if (embedded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return;
+      if (dialog || openTask || document.querySelector('[role="dialog"], [role="menu"]')) return;
+      const k = e.key.toLowerCase();
+      if (k === 'r') { e.preventDefault(); loadData(); }
+      else if (k === 'f' && canEdit) { e.preventDefault(); boardFilter.current?.querySelector('button')?.click(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   /** Every card's numbers in one workbook, a sheet each -- the same rows as "Export as CSV". */
   const downloadAll = () => act(async () => {
@@ -433,7 +571,7 @@ export const DashboardPage: React.FC<{
         const title = /^(Due|Done)\b/.test(card.title) ? `${word} ${label}` : card.title;
         const saved = await dashApi.updateCard(id, card.id, { title, config: { ...card.config, period, filters } });
         setDash((prev) => (prev ? { ...prev, cards: prev.cards.map((c) => (c.id === saved.id ? saved : c)) } : prev));
-        const fresh = await dashApi.cardData(id, card.id);
+        const fresh = await reloadOne(card.id);
         setData((prev) => ({ ...prev, [card.id]: fresh }));
       }
     });
@@ -451,9 +589,10 @@ export const DashboardPage: React.FC<{
       if (choice === ANY_TIME) delete filters.due;
       else filters.due = (window ? 'period' : choice) as Filters['due'];
       const config = { ...card.config, filters, ...(window ? { period: { preset: choice as Period['preset'] } } : {}) };
+      markBusy(card.id);
       const saved = await dashApi.updateCard(id, card.id, { config });
       setDash((prev) => (prev ? { ...prev, cards: prev.cards.map((c) => (c.id === saved.id ? saved : c)) } : prev));
-      const fresh = await dashApi.cardData(id, card.id);
+      const fresh = await reloadOne(card.id);
       setData((prev) => ({ ...prev, [card.id]: fresh }));
     });
   };
@@ -461,23 +600,40 @@ export const DashboardPage: React.FC<{
   /** Save a period straight onto a card, for controls that pick an exact range. */
   const setCardPeriod = (card: Card, period: Period) => {
     edits.current += 1;
-    act(async () => {
-      const saved = await dashApi.updateCard(id, card.id, { config: { ...card.config, period } });
+    // Queued with the card's filter saves, so quick clicks on the week arrows land in order.
+    const before = filterSaves.current.get(card.id) ?? Promise.resolve();
+    const run = before.then(() => act(async () => {
+      // No spinning here: stepping a week is not a filter, and the card's own dates already move.
+      const latest = latestCards.current.find((c) => c.id === card.id) ?? card;
+      const saved = await dashApi.updateCard(id, card.id, { config: { ...latest.config, period } });
+      latestCards.current = latestCards.current.map((c) => (c.id === saved.id ? saved : c));
       setDash((prev) => (prev ? { ...prev, cards: prev.cards.map((c) => (c.id === saved.id ? saved : c)) } : prev));
-      const fresh = await dashApi.cardData(id, card.id);
+      const fresh = await reloadOne(card.id);
       setData((prev) => ({ ...prev, [card.id]: fresh }));
-    });
+    }));
+    filterSaves.current.set(card.id, run);
   };
 
-  /** Filter one card from its own header, rather than through the editor. */
+  /**
+   * Filter one card from its own header, rather than through the editor.
+   *
+   * Saves of one card go one after another, each on top of what the one before saved. On a slow
+   * connection a tick and the untick after it used to be in flight together, and when the tick's
+   * save landed last the box came back ticked.
+   */
   const setCardFilters = (card: Card, filters: Filters) => {
     edits.current += 1;
-    act(async () => {
-      const saved = await dashApi.updateCard(id, card.id, { config: { ...card.config, filters } });
+    const before = filterSaves.current.get(card.id) ?? Promise.resolve();
+    const run = before.then(() => act(async () => {
+      markBusy(card.id);
+      const latest = latestCards.current.find((c) => c.id === card.id) ?? card;
+      const saved = await dashApi.updateCard(id, card.id, { config: { ...latest.config, filters } });
+      latestCards.current = latestCards.current.map((c) => (c.id === saved.id ? saved : c));
       setDash((prev) => (prev ? { ...prev, cards: prev.cards.map((c) => (c.id === saved.id ? saved : c)) } : prev));
-      const fresh = await dashApi.cardData(id, card.id);
+      const fresh = await reloadOne(card.id);
       setData((prev) => ({ ...prev, [card.id]: fresh }));
-    });
+    }));
+    filterSaves.current.set(card.id, run);
   };
 
   /**
@@ -519,14 +675,14 @@ export const DashboardPage: React.FC<{
     if (preset === 'custom') { setDialog({ type: 'card', card }); return; }
     edits.current += 1;
     act(async () => {
+      markBusy(card.id);
       const saved = await dashApi.updateCard(id, card.id, { config: { ...card.config, period: { preset } } });
       setDash((prev) => (prev ? { ...prev, cards: prev.cards.map((c) => (c.id === saved.id ? saved : c)) } : prev));
-      const fresh = await dashApi.cardData(id, card.id);
+      const fresh = await reloadOne(card.id);
       setData((prev) => ({ ...prev, [card.id]: fresh }));
     });
   };
 
-  const summary = useMemo(() => (dash ? filterSummary(dash.filters) : []), [dash, filterSummary]);
 
   if (!dash) {
     return error
@@ -573,34 +729,39 @@ export const DashboardPage: React.FC<{
           Printed {new Date().toLocaleString(undefined, { day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
         </p>
       </div>
-      {(embedded || heading !== false) && (
-      <header className="no-print border-b border-gray-200 bg-white px-6 py-3">
-        <nav className="flex flex-wrap items-center gap-1.5 text-sm text-gray-500">
-          {embedded ? (
-            <h2 className="truncate text-base font-semibold text-gray-900">{dash.name}</h2>
-          ) : heading === false ? null : heading ? (
-            <>
-              <h1 className="truncate text-lg font-semibold text-gray-900">{heading}</h1>
-              {FEATURES.dashboardHomeSubtitle && (
-                <>
-                  <span className="text-gray-300">·</span>
-                  <Link to={`/dashboards/${id}`} className="no-print text-gray-500 no-underline hover:text-gray-800">{dash.name}</Link>
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              <Link to="/dashboards" className="no-print text-gray-500 no-underline hover:text-gray-800">Dashboards</Link>
-              <ChevronRight size={14} className="no-print text-gray-300" />
-              <h1 className="min-w-0 truncate text-lg font-semibold text-gray-900">{dash.name}</h1>
-              <FavoriteStar kind="dashboard" id={id} size={14} />
-            </>
-          )}
-          {dash.team && <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700"><Users size={12} /> {dash.team.name}</span>}
-          {dash.owner && dash.relation !== 'mine' && <span className="ml-1 hidden shrink-0 whitespace-nowrap text-xs text-gray-400 sm:inline">by {dash.owner.display_name || dash.owner.email}</span>}
-        </nav>
-      </header>
-      )}
+      {/* The title goes up into the top bar; embedded in a location, or on a phone, it keeps
+          its own row here. */}
+      {(embedded || heading !== false) && (() => {
+        const title = (
+          <nav className="flex flex-wrap items-center gap-1.5 text-sm text-gray-500">
+            {embedded ? (
+              <h2 className="truncate text-base font-semibold text-gray-900">{dash.name}</h2>
+            ) : heading === false ? null : heading ? (
+              <>
+                <h1 className="truncate text-lg font-semibold text-gray-900">{heading}</h1>
+                {FEATURES.dashboardHomeSubtitle && (
+                  <>
+                    <span className="text-gray-300">·</span>
+                    <Link to={`/dashboards/${id}`} className="no-print text-gray-500 no-underline hover:text-gray-800">{dash.name}</Link>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <Link to="/dashboards" className="no-print text-gray-500 no-underline hover:text-gray-800">Dashboards</Link>
+                <ChevronRight size={14} className="no-print text-gray-300" />
+                <h1 className="min-w-0 truncate text-lg font-semibold text-gray-900">{dash.name}</h1>
+                <FavoriteStar kind="dashboard" id={id} size={14} />
+              </>
+            )}
+            {dash.team && <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700"><Users size={12} /> {dash.team.name}</span>}
+            {dash.owner && dash.relation !== 'mine' && <span className="ml-1 hidden shrink-0 whitespace-nowrap text-xs text-gray-400 sm:inline">by {dash.owner.display_name || dash.owner.email}</span>}
+          </nav>
+        );
+        return topBarSlot && !embedded
+          ? createPortal(title, topBarSlot)
+          : <header className="no-print border-b border-gray-200 bg-white px-6 py-3">{title}</header>;
+      })()}
 
       <main className="dash-3d min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-8 sm:py-6">
         {/* The quote first, where it is the first thing read; it is not dashboard content, so
@@ -609,64 +770,59 @@ export const DashboardPage: React.FC<{
 
         {/* Everything that acts on the whole board, in one card: what it is filtered by on the
             left, where filters are read; what you can do with it on the right. */}
-        <div className="ui-card no-print mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs">
-            {/* Someone who cannot change the board gets no filter controls, so the strip says
-                when it was read instead of leaving its left half empty. */}
-            {!canEdit && (
-              <span className="px-1 text-gray-500" title={dash.auto_refresh ? 'Refreshes every 30 minutes' : 'Auto refresh is off'}>
-                Refreshed {loadedAt ? ago(now - loadedAt) : '…'}
-              </span>
-            )}
+        {/* Two small floating toolbars, not one bar across the page: filters on the left, the
+            board's own actions on the right, each only as wide as what it holds. */}
+        <div className="no-print mb-6 flex flex-wrap items-center gap-x-3 gap-y-2">
+          {(canEdit || (!viewing && RELATION_NOTE[dash.relation])) && (
+          <div className="dash-pill flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
             {canEdit && <>
             {/* One filter over the whole board, in the same two-step panel the cards use. It is
                 set on the Dashboard and applied on top of whatever each card already filters by. */}
-            <CardFilterMenu
-              value={dash.filters ?? {}}
-              disabled={!canEdit}
-              triggerLabel="Filter all cards"
-              title="Filters for every card"
-              onApply={saveFilters}
-            />
-            {summary.length > 0 && (
-              <span className="text-gray-500" title="Applied to every card on this Dashboard">{summary.join(' · ')}</span>
-            )}
+            <span ref={boardFilter} className="contents">
+              <CardFilterMenu
+                value={dash.filters ?? {}}
+                disabled={!canEdit}
+                triggerLabel="Filter all cards"
+                title="Filters for every card (F)"
+                onApply={saveFilters}
+              />
+            </span>
             {/* aria-disabled rather than disabled: a disabled button gets no hover in most
                 browsers, so "No filters added" was never seen when it was most needed. */}
-            <span className="group relative">
+            {/* The pair to "Filter all cards", the same size. With nothing to clear it is an empty
+                dashed slot; with filters on it turns rose, so it reads as "undo all that". */}
+            {/* Its hint is the app's own hover label (components/Tooltips.tsx), like every other one. */}
+            <span className="relative">
               <button type="button" onClick={() => filtered && clearAllFilters()} aria-disabled={!filtered}
                 aria-label={filtered ? 'Clear all filters' : 'Clear all filters (no filters added)'}
-                className={`flex items-center gap-1 rounded-md px-2 py-1 font-medium transition-colors ${filtered
-                  ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-200 hover:bg-brand-100'
-                  : 'cursor-not-allowed text-gray-400'}`}>
+                title={filtered ? 'Removes the board’s filters and each card’s' : 'No filters to clear'}
+                className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-medium transition-colors ${filtered
+                  ? 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100'
+                  : 'cursor-default border-dashed border-gray-300 bg-transparent text-gray-400'}`}>
                 <FilterX size={13} /> Clear all filters
               </button>
-              <span role="tooltip"
-                className="pointer-events-none absolute left-1/2 top-full z-30 mt-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow transition-opacity group-hover:opacity-100">
-                {filtered ? 'Take off every filter: the board’s and each card’s' : 'No filters added'}
-              </span>
             </span>
             </>}
-            {!viewing && RELATION_NOTE[dash.relation] && <span className="text-gray-400">{RELATION_NOTE[dash.relation]}</span>}
+            {!viewing && RELATION_NOTE[dash.relation] && <span className="px-1 text-gray-400">{RELATION_NOTE[dash.relation]}</span>}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {canEdit && (
-              <span className="mr-1 hidden text-xs text-gray-400 sm:inline" title={dash.auto_refresh ? 'Refreshes every 30 minutes' : 'Auto refresh is off'}>
-                Refreshed {loadedAt ? ago(now - loadedAt) : '…'}
-              </span>
-            )}
-            <button type="button" title={canEdit ? 'Refresh and clear all filters' : 'Refresh'} aria-label="Refresh" onClick={refresh} className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"><RefreshCw size={15} /></button>
-            {/* One "Save" for both ways of taking the board away: a workbook of every card's numbers,
-                or the board itself as a PDF through the browser's print dialog. */}
-            <Menu
-              align="right"
-              label="Save this Dashboard"
-              items={[
-                { label: 'Download Excel', icon: <FileSpreadsheet size={14} />, onClick: downloadAll },
-                { label: 'Print / save as PDF', icon: <Printer size={14} />, onClick: () => { setEditMode(false); setTimeout(() => window.print(), 50); } },
-              ]}
-              trigger={<span title="Save" className="flex rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"><Download size={15} /></span>}
-            />
+          )}
+          <span className="flex-1" />
+          <div className="dash-pill flex shrink-0 items-center gap-1">
+            <RefreshButton onRefresh={refresh} />
+            <span className="dash-tools flex items-center">
+              <span className="mx-1 h-4 w-px bg-gray-200" />
+              {/* One "Save" for both ways of taking the board away: a workbook of every card's numbers,
+                  or the board itself as a PDF through the browser's print dialog. */}
+              <Menu
+                align="right"
+                label="Save this Dashboard"
+                items={[
+                  { label: 'Download Excel', icon: <FileSpreadsheet size={14} />, onClick: downloadAll },
+                  { label: 'Print / save as PDF', icon: <Printer size={14} />, onClick: () => { setEditMode(false); setTimeout(() => window.print(), 50); } },
+                ]}
+                trigger={<span title="Download" className="dash-dl flex rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-brand-700"><DownloadIcon /></span>}
+              />
+            </span>
             {canEdit && (FEATURES.dashboardEditButton || editMode) && (
               <button
                 type="button"
@@ -679,7 +835,7 @@ export const DashboardPage: React.FC<{
             )}
             {FEATURES.dashboardEmailReports && !isGuest && <button type="button" onClick={() => setDialog({ type: 'reports' })} className="flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><Mail size={14} /> Email reports</button>}
             {/* Sharing is an admin's decision (the server refuses anyone else). */}
-            {isAdmin && <button type="button" onClick={() => setDialog({ type: 'share' })} className="ml-1 flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-[var(--ui-shadow-xs)] transition-colors hover:border-gray-300 hover:bg-gray-50"><Share2 size={14} /> Share</button>}
+            {isAdmin && <button type="button" onClick={() => setDialog({ type: 'share' })} className="ml-1 flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white shadow-(--ui-shadow-xs) transition-colors hover:bg-brand-700"><Share2 size={14} /> Share</button>}
             {/* Your own board is not something you rename, re-point or delete, so it carries no
                 actions menu. Dashboards opened from the Hub keep theirs. */}
             {!isGuest && heading === undefined && FEATURES.dashboardActionsMenu && (
@@ -772,7 +928,6 @@ export const DashboardPage: React.FC<{
                   if (OPENS_TIMESHEET.includes(card.type)) navigate('/timesheets');
                   else setDialog({ type: 'drill', cardId: card.id, title: card.title });
                 }}
-                title={editMode || !isClickable(card) ? undefined : OPENS_TIMESHEET.includes(card.type) ? 'Open the Timesheet' : 'Show these tasks'}
                 className={`ui-card dash-card group relative flex min-w-0 flex-col ${!editMode && isClickable(card) ? 'is-clickable' : ''} ${dragging === card.id ? 'opacity-50' : ''} ${editMode ? '!border-dashed !border-brand-200' : ''}`}
                 style={{ gridColumn: `span ${card.width} / span ${card.width}`, gridRow: `span ${card.height} / span ${card.height}` }}
               >
@@ -822,6 +977,9 @@ export const DashboardPage: React.FC<{
                       disabled={!canEdit}
                       hideDue={CAN_DROP_PERIOD.includes(card.type)}
                       peopleOnly={PEOPLE_ONLY_FILTERS.includes(card.type)}
+                      // The server says so with the card's figures; until fresh figures are in (the
+                      // page starts from the last ones it saw), go by the role: no Admin and no Team led.
+                      noPeople={data[card.id]?.data?.sees_only_self ?? (!isAdmin && led.length === 0)}
                       time={cardTime(card)}
                       onApply={(filters) => setCardFilters(card, filters)}
                     />
@@ -833,14 +991,16 @@ export const DashboardPage: React.FC<{
                   {!!data[card.id]?.hidden_sources && (
                     <span className="text-[10px] text-amber-600" title="Some locations on this card are not shared with you and are left out">partial</span>
                   )}
-                  <span className="reveal-on-hover no-print flex items-center gap-0.5">
-                    <button type="button" title="Refresh card" onClick={() => refreshCard(card.id)} className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><RefreshCw size={13} /></button>
+                  <span className="no-print flex items-center gap-0.5">
+                    <CardRefresh busy={busyCards.has(card.id)} onRefresh={() => refreshCard(card.id)} />
                     {FEATURES.dashboardCardFullScreen && (
                       <button type="button" title="Full screen" onClick={() => setDialog({ type: 'expand', cardId: card.id })} className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Expand size={13} /></button>
                     )}
                     {cardMenu(card).length > 0 && (
                       <Menu
                         align="right"
+                        tiles
+                        width={188}
                         label={`Actions for ${card.title}`}
                         items={cardMenu(card)}
                         trigger={<span className="flex rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700">{canEdit ? <MoreHorizontal size={14} /> : <Download size={13} />}</span>}
@@ -874,6 +1034,7 @@ export const DashboardPage: React.FC<{
             // Names on a Team or Company board open that person's own board, for those who may.
             onOpenPerson={isAdmin || led.length > 0 ? (uid) => navigate(`/dashboards/people/${encodeURIComponent(uid)}`) : undefined}
             extra={workloadCards.map((c) => workloadFinding(data[c.id])).filter((x): x is NonNullable<typeof x> => !!x)}
+            onChanged={loadData}
           />
           </>
         )}
@@ -928,7 +1089,7 @@ const FiltersDialog: React.FC<{ value: Filters; teamDashboard: boolean; onClose:
   return (
     <Modal label="Dashboard filters" title="Dashboard filters" onClose={onClose} width="w-[36rem]"
       footer={<>
-        <button type="button" onClick={() => setFilters({})} className="mr-auto rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Clear all</button>
+        <button type="button" onClick={() => setFilters({})} className="filter-clear mr-auto">Clear all</button>
         <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
         <button type="button" onClick={() => onSave(filters)} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">Apply</button>
       </>}>

@@ -6,14 +6,13 @@ import type { PresenceStatus } from '../services/presenceService';
 
 const statusColors = PRESENCE_COLORS;
 // Everything but Offline, which is what you are when you are not signed in, not a choice.
-const statuses = (Object.keys(PRESENCE_COLORS) as PresenceStatus[]).filter((s) => s !== 'Offline');
+export const statuses = (Object.keys(PRESENCE_COLORS) as PresenceStatus[]).filter((s) => s !== 'Offline');
 
-export const StatusSelector: React.FC<{ align?: 'left' | 'right' }> = ({ align = 'right' }) => {
+/** Your own status, kept in step with the presence store, and a way to change it. Used here and
+ *  in the account menu, so both always show the same thing. */
+export const useMyStatus = (): [PresenceStatus, (status: PresenceStatus) => Promise<void>] => {
   const { user } = useAuth();
   const [currentStatus, setCurrentStatus] = useState<PresenceStatus>('Available');
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     if (!user) return;
     // We subscribe to all presences, but only care about the current user
@@ -27,6 +26,17 @@ export const StatusSelector: React.FC<{ align?: 'left' | 'right' }> = ({ align =
       if (unsubscribe) unsubscribe();
     };
   }, [user]);
+  const change = async (status: PresenceStatus) => {
+    setCurrentStatus(status);
+    await presenceService.updatePresence({ currentStatus: status });
+  };
+  return [currentStatus, change];
+};
+
+export const StatusSelector: React.FC<{ align?: 'left' | 'right' }> = ({ align = 'right' }) => {
+  const [currentStatus, setStatus] = useMyStatus();
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -39,9 +49,8 @@ export const StatusSelector: React.FC<{ align?: 'left' | 'right' }> = ({ align =
   }, []);
 
   const handleStatusChange = async (status: PresenceStatus) => {
-    setCurrentStatus(status);
     setIsOpen(false);
-    await presenceService.updatePresence({ currentStatus: status });
+    await setStatus(status);
   };
 
   return (

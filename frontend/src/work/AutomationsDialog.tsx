@@ -5,6 +5,7 @@ import { useWork } from './WorkContext';
 import { Modal } from './dashboards/dialogs';
 import { planningApi, type Automation, type AutomationAction, type AutomationIn, type AutomationTrigger } from './planningApi';
 import { ask } from '../components/ask';
+import { LinesSkeleton } from './Skeleton';
 
 const PRIORITIES: [number, string][] = [[1, 'Urgent'], [2, 'High'], [3, 'Normal'], [4, 'Low']];
 const field = 'rounded-md border border-gray-200 px-2 py-1.5 text-sm focus:border-brand-400 focus:outline-none';
@@ -92,7 +93,7 @@ export const AutomationsDialog: React.FC<{ kind: LocationKind; id: string; name:
     <Modal label="Automations" title={<span className="flex items-center gap-2"><Zap size={16} className="text-amber-500" /> Automations · {name}</span>} onClose={onClose} width="w-[40rem]">
       <p className="mb-3 text-xs text-gray-500">Rules run on every task in this {where}{kind !== 'list' ? ' and everything inside it' : ''}. Changes they make show in the task's activity as “Automation”.</p>
       <ul className="mb-4 space-y-1.5" aria-label="Rules">
-        {rules === null ? <li className="text-sm text-gray-400">Loading…</li> : rules.length === 0 ? <li className="text-sm text-gray-400">No Automations yet.</li> : rules.map((r) => (
+        {rules === null ? <li className="text-sm text-gray-400"><LinesSkeleton /></li> : rules.length === 0 ? <li className="text-sm text-gray-400">No Automations yet.</li> : rules.map((r) => (
           <li key={r.id} className="flex items-center gap-2 rounded-md border border-gray-200 px-2.5 py-1.5 text-sm">
             <Zap size={14} className={r.active ? 'text-amber-500' : 'text-gray-300'} />
             <div className="min-w-0 flex-1">

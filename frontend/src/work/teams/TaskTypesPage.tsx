@@ -13,6 +13,7 @@ import { ask } from '../../components/ask';
 import { notify } from '../../components/notify';
 import { workApi, type TaskType } from '../api';
 import { useHub } from './TeamsHub';
+import { WordSkeleton } from '../Skeleton';
 
 const COLORS = ['#6366f1', '#7c3aed', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#64748b'];
 const input = 'w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:border-brand-500 focus:outline-none';
@@ -147,7 +148,7 @@ export const TaskTypesPage: React.FC = () => {
       <div className="rounded-xl border border-gray-200 bg-white">
         <div className="flex items-center justify-between border-b border-gray-100 px-4 py-2.5">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-            {types ? `${types.length + 1} types` : 'Loading…'}
+            {types ? `${types.length + 1} types` : <WordSkeleton className="w-40" />}
           </span>
           {isAdmin && !editing && (
             <button type="button" onClick={() => setEditing({ ...EMPTY })} className="flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-brand-600 hover:bg-brand-50">

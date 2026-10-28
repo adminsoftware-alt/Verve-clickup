@@ -17,6 +17,17 @@ async def lifespan(app: FastAPI):
     from app.services.work.dashboards import reports
 
     reports.start_scheduler()
+    # Connect to the database in the background while the server starts taking requests.
+    import threading
+    from app.db.session import warm_pool
+
+    def _warm():
+        try:
+            warm_pool()
+        except Exception:
+            pass  # no database configured, or unreachable: requests report that themselves
+
+    threading.Thread(target=_warm, daemon=True).start()
     yield
     reports.stop_scheduler()
 

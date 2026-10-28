@@ -17,6 +17,7 @@ import { RunningCosts } from './RunningCosts';
 import { WorkingHoursSection } from './WorkingHours';
 import { ask } from '../../components/ask';
 import { FEATURES } from '../../config/features';
+import { LinesSkeleton } from '../Skeleton';
 
 const card = 'rounded-xl border border-gray-200 bg-white p-5';
 const input = 'rounded-md border border-gray-300 px-2 py-1.5 text-sm';
@@ -347,7 +348,7 @@ const BlockedSection: React.FC<{ ws: string }> = ({ ws }) => {
         </div>
         {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-        {rows === null ? <p className="mt-4 text-sm text-gray-400">Loading…</p>
+        {rows === null ? <p className="mt-4 text-sm text-gray-400"><LinesSkeleton /></p>
           : rows.length === 0 ? <p className="mt-4 text-sm text-gray-500">Nobody is blocked. Offboarding someone offers to block them at the same time.</p> : (
             <ul className="mt-4 divide-y divide-gray-100 rounded-lg border border-gray-200">
               {rows.map((row) => (
@@ -603,7 +604,7 @@ const AuditSection: React.FC<{ ws: string }> = ({ ws }) => {
             className={`rounded-full border px-2.5 py-0.5 text-xs ${filter === v ? 'border-brand-400 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{l}</button>
         ))}
       </div>
-      {events === null ? <p className="text-sm text-gray-400">Loading…</p> : events.length === 0 ? <p className="text-sm text-gray-400">Nothing recorded yet.</p> : (
+      {events === null ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : events.length === 0 ? <p className="text-sm text-gray-400">Nothing recorded yet.</p> : (
         <ul className="divide-y divide-gray-100" aria-label="Audit events">
           {events.map((e) => (
             <li key={e.id} className="flex items-start gap-2.5 py-2 text-sm">

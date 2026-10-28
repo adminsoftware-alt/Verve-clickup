@@ -95,11 +95,16 @@ const Picker: React.FC<{
 const inputClass =
   'h-7 w-full rounded-md border border-transparent bg-transparent px-2 text-sm text-gray-800 hover:border-gray-200 hover:bg-gray-50 focus:border-brand-400 focus:bg-white focus:outline-none';
 
-export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChanged: () => void; onOpen: (id: string) => void }> = ({
+export const TaskPanel: React.FC<{
+  taskId: string; onClose: () => void; onChanged: () => void; onOpen: (id: string) => void;
+  /** Open at this comment, as an Inbox item about it does. */
+  focusCommentId?: string | null;
+}> = ({
   taskId,
   onClose,
   onChanged,
   onOpen,
+  focusCommentId,
 }) => {
   const { members, hierarchy, taskTypes, refresh: refreshWork } = useWork();
   const isWorkspaceAdmin = hierarchy?.role === 'owner' || hierarchy?.role === 'admin';
@@ -176,7 +181,7 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
 
   return (
     <Portal>
-    <div className={`fixed inset-0 z-[90] flex bg-black/20 ${SHELL[layout].backdrop}`} onMouseDown={onClose}>
+    <div className={`ui-clean fixed inset-0 z-[90] flex bg-black/20 ${SHELL[layout].backdrop}`} onMouseDown={onClose}>
       <aside
         ref={panelRef}
         role="dialog"
@@ -521,13 +526,13 @@ export const TaskPanel: React.FC<{ taskId: string; onClose: () => void; onChange
                   while the task is being read, not after scrolling past everything else. */}
               {!sideBySide && (
                 <div className="mt-5 h-[26rem] overflow-hidden rounded-lg border border-gray-200">
-                  <TaskFeed taskId={task.id} canComment={task.permission_level !== 'view'} refreshKey={feedKey} onChanged={onChanged} />
+                  <TaskFeed taskId={task.id} canComment={task.permission_level !== 'view'} refreshKey={feedKey} onChanged={onChanged} focusCommentId={focusCommentId} />
                 </div>
               )}
             </div>
             {sideBySide && (
               <aside aria-label="Activity" className="hidden w-[24rem] shrink-0 border-l border-gray-200 lg:block xl:w-[26rem]">
-                <TaskFeed taskId={task.id} canComment={task.permission_level !== 'view'} refreshKey={feedKey} onChanged={onChanged} />
+                <TaskFeed taskId={task.id} canComment={task.permission_level !== 'view'} refreshKey={feedKey} onChanged={onChanged} focusCommentId={focusCommentId} />
               </aside>
             )}
             </div>
