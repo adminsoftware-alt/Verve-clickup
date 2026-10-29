@@ -29,7 +29,7 @@ export const GroupsDialog: React.FC<{
         <div role="dialog" aria-label="Task groups" onMouseDown={(e) => e.stopPropagation()} className="flex max-h-[85vh] w-[30rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white shadow-xl">
           <header className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
             <h3 className="font-semibold text-gray-900">Task groups</h3>
-            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+            <button aria-label="Close" type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
           </header>
           <div className="overflow-y-auto px-5 py-4">
             <p className="mb-3 text-xs text-gray-500">
@@ -64,11 +64,11 @@ export const GroupsDialog: React.FC<{
                           className="min-w-0 flex-1 rounded border border-transparent px-1 py-0.5 text-sm hover:border-gray-200 focus:border-brand-400 focus:outline-none"
                         />
                       ) : <span className="min-w-0 flex-1 truncate text-sm text-gray-800">{g.name}</span>}
-                      <span className="flex shrink-0 items-center gap-1 text-xs text-gray-400" title={`Defined on this ${WHERE[g.location]}${own ? '' : ' above'}`}>
+                      <span className="flex shrink-0 items-center gap-1 text-xs text-gray-400" aria-label={`Defined on this ${WHERE[g.location]}${own ? '' : ' above'}`}>
                         {g.location === 'list' ? <ListIcon size={12} /> : <Folder size={12} />} {own ? 'here' : `from ${WHERE[g.location]}`}
                       </span>
                       {own && canEdit && (
-                        <button type="button" title={`Delete ${g.name}`} onClick={async () => await ask.confirm({ danger: true, title: `Delete the “${g.name}” group? Its tasks are kept, just ungrouped.` }) && run(() => workApi.deleteGroup(g.id))} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600">
+                        <button type="button" aria-label={`Delete ${g.name}`} onClick={async () => await ask.confirm({ danger: true, title: `Delete the “${g.name}” group? Its tasks are kept, just ungrouped.` }) && run(() => workApi.deleteGroup(g.id))} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600">
                           <Trash2 size={14} />
                         </button>
                       )}

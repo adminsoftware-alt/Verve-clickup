@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Users } from 'lucide-react';
 import { useMe, useWork } from '../WorkContext';
-import { workApi, type LocationKind, type Workload, type WorkloadRow } from '../api';
-import { Avatar, StatusDot, formatDue, startOfDay } from '../ui';
+import { workApi, type LocationKind, type TaskSummary, type Workload, type WorkloadRow } from '../api';
+import { DuePicker, StatusPicker, useTaskDraft } from '../task/InlineFields';
+import { Avatar, StatusDot, startOfDay } from '../ui';
 import { LinesSkeleton } from '../Skeleton';
 
 const DAY_MS = 86_400_000;
@@ -49,11 +50,13 @@ export const WorkloadView: React.FC<{
   const [data, setData] = useState<Workload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  // Bumped when a task is changed from the lists below, so the hours above follow it.
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     setError(null);
     workApi.workload(kind, id, isoDate(start), days, teamId || undefined).then(setData).catch((e) => setError(e.message));
-  }, [kind, id, start, days, teamId, refreshKey]);
+  }, [kind, id, start, days, teamId, refreshKey, reload]);
 
   const dates = useMemo(() => (data?.days ?? []).map((d) => new Date(`${d}T00:00:00`)), [data]);
   const today = isoDate(new Date());
@@ -136,7 +139,7 @@ export const WorkloadView: React.FC<{
                       return (
                         <div
                           key={i}
-                          title={row.user ? `${formatHours(value) || '0h'} scheduled of ${formatHours(cap) || '0h'} capacity` : `${formatHours(value)} unassigned`}
+                          aria-label={row.user ? `${formatHours(value) || '0h'} scheduled of ${formatHours(cap) || '0h'} capacity` : `${formatHours(value)} unassigned`}
                           className={`m-0.5 flex items-center justify-center rounded text-xs font-medium ${row.user ? tone(value, cap) : value ? 'bg-gray-100 text-gray-600' : 'bg-gray-50 text-gray-300'}`}
                         >
                           {formatHours(value) || (row.user && cap === 0 ? '' : '–')}
@@ -175,18 +178,25 @@ export const WorkloadView: React.FC<{
                 </header>
                 {items.length === 0 ? (
                   <div className="px-3 py-4 text-center text-xs text-gray-400">Nothing here</div>
-                ) : items.map((t) => (
-                  <button key={t.id} type="button" onClick={() => onOpenTask(t.id)} className="flex w-full items-center gap-2 border-b border-gray-50 px-3 py-1.5 text-left text-sm hover:bg-gray-50">
-                    <StatusDot status={t.status} size={10} />
-                    <span className="min-w-0 flex-1 truncate text-gray-700">{t.name}</span>
-                    <span className="shrink-0 text-xs text-gray-400">{formatDue(t.due_date)}</span>
-                  </button>
-                ))}
+                ) : items.map((t) => <SummaryRow key={t.id} task={t} onOpen={() => onOpenTask(t.id)} onChanged={() => setReload((n) => n + 1)} />)}
               </section>
             ))}
           </div>
         </>
       )}
+    </div>
+  );
+};
+
+/** A task waiting for a date or an estimate. Status and due date change here; the server says
+ *  no, under the row, to anyone who may not change it. */
+const SummaryRow: React.FC<{ task: TaskSummary; onOpen: () => void; onChanged: () => void }> = ({ task, onOpen, onChanged }) => {
+  const [t, save] = useTaskDraft(task, onChanged);
+  return (
+    <div className="flex items-center gap-2 border-b border-gray-50 px-3 py-1 text-sm hover:bg-gray-50">
+      <StatusPicker task={t} size={10} onSave={save} />
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 truncate text-left text-gray-700">{t.name}</button>
+      <DuePicker task={t} onSave={save} />
     </div>
   );
 };

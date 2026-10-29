@@ -1,6 +1,7 @@
 """Dashboards, cards, sharing and scheduled email reports."""
 
 import uuid
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -89,6 +90,18 @@ def people_with_boards(workspace_id: uuid.UUID, tz: str = Tz, user: User = Depen
     return people_boards.people(db, Access.for_workspace(db, user.id, workspace_id), tz)
 
 
+@router.get("/workspaces/{workspace_id}/teams/figures", response_model=Dict[str, Dict[str, int]])
+def team_figures(workspace_id: uuid.UUID, tz: str = Tz, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Every Team's open and late tasks and this week's planned hours against capacity, by team id (admins)."""
+    return people_boards.team_figures(db, Access.for_workspace(db, user.id, workspace_id), tz)
+
+
+@router.get("/workspaces/{workspace_id}/dashboards/people/week", response_model=Dict[str, Dict[str, int]])
+def people_week(workspace_id: uuid.UUID, tz: str = Tz, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """This week's hours (planned, capacity, logged, in seconds) for the same people, by user id."""
+    return people_boards.week(db, Access.for_workspace(db, user.id, workspace_id), tz)
+
+
 @router.get("/workspaces/{workspace_id}/people/{user_id}/dashboard", response_model=d.DashboardOut)
 def person_board(workspace_id: uuid.UUID, user_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Someone's own Dashboard as they see it, read-only; made now if they have never opened the app."""
@@ -152,6 +165,56 @@ def dashboard_data(dashboard_id: uuid.UUID, tz: str = Tz, user: User = Depends(c
     opened = _open(db, user, dashboard_id)
     engine = _engine(db, opened, tz)
     return engine.compute_all(service.cards_of(db, dashboard_id))
+
+
+def _lensed(db: Session, opened: OpenedDashboard, tz: str, lens: d.ViewLens):
+    """The engine and the cards as one viewer has filtered them for themselves, without saving.
+
+    Only filters and windows can be changed this way, never where a card reads from, and the board
+    keeps its own scope, so nobody sees more through it than the saved board would show them."""
+    saved = d.Filters.model_validate(opened.dashboard.filters or {})
+    engine = Engine(db, opened.access, _zone(tz), lens.filters if lens.filters is not None else saved,
+                    scope=standard.scope_of(opened.dashboard), me=standard.me_of(opened.dashboard))
+
+    def card(row):
+        change = lens.cards.get(row.id)
+        if not change:
+            return row
+        config = dict(row.config or {})
+        if change.filters is not None:
+            config["filters"] = change.filters.model_dump(mode="json", exclude_none=True)
+        if change.period is not None:
+            config["period"] = change.period.model_dump(mode="json", exclude_none=True)
+        return SimpleNamespace(id=row.id, type=row.type, title=row.title, config=config)
+
+    return engine, card
+
+
+@router.post("/dashboards/{dashboard_id}/view-data", response_model=List[d.CardData])
+def dashboard_view_data(
+    dashboard_id: uuid.UUID, lens: d.ViewLens, tz: str = Tz,
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+):
+    """Every card's data (or the cards asked for) with the viewer's own unsaved filters on top."""
+    opened = _open(db, user, dashboard_id)
+    engine, card = _lensed(db, opened, tz, lens)
+    rows = service.cards_of(db, dashboard_id)
+    if lens.card_ids:
+        wanted = set(lens.card_ids)
+        rows = [r for r in rows if r.id in wanted]
+    return engine.compute_all([card(r) for r in rows])
+
+
+@router.post("/dashboards/{dashboard_id}/cards/{card_id}/view-tasks", response_model=s.TaskPage)
+def card_view_tasks(
+    dashboard_id: uuid.UUID, card_id: uuid.UUID, lens: d.ViewLens, tz: str = Tz,
+    segment: Optional[str] = Query(None, description="A segment key from the card's data; omit for all"),
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+):
+    """Drill-down under the viewer's own unsaved filters."""
+    opened = _open(db, user, dashboard_id)
+    engine, card = _lensed(db, opened, tz, lens)
+    return engine.drill(card(service.get_card(db, opened, card_id)), segment)
 
 
 # --- cards ------------------------------------------------------------------------------

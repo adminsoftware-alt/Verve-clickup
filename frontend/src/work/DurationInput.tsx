@@ -54,6 +54,13 @@ export function readingsOf(raw: string): Reading[] {
   return seconds ? [{ text: formatDuration(seconds), seconds }] : [];
 }
 
+/** "2 hours", "45 minutes", "1 hour 30 minutes". */
+function inWords(seconds: number) {
+  const h = Math.floor(seconds / 3600), m = Math.round((seconds % 3600) / 60);
+  const part = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+  return [h && part(h, 'hour'), m && part(m, 'minute')].filter(Boolean).join(' ') || '0 minutes';
+}
+
 export const DurationInput: React.FC<{
   /** What it currently holds, as seconds. */
   value: number | null;
@@ -134,7 +141,8 @@ export const DurationInput: React.FC<{
                 className="flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left text-sm text-gray-800 hover:bg-gray-50"
               >
                 <span className="font-medium">{r.text}</span>
-                <span className="text-[11px] text-gray-400">{formatDuration(r.seconds)}</span>
+                {/* Said in words, so "2" reads as two hours or two minutes, not "2h" twice. */}
+                <span className="text-[11px] text-gray-400">{inWords(r.seconds)}</span>
               </button>
             </li>
           ))}

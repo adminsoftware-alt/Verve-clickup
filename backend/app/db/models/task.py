@@ -81,7 +81,7 @@ class Task(TimestampMixin, Base):
     recurrence_next_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
     # The earlier occurrence this task was created from.
     recurs_from_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
-    # Sprint points (the Sprint Points ClickApp).
+    # Sprint points, for sprint reports.
     points: Mapped[Optional[float]] = mapped_column(Float)
 
 

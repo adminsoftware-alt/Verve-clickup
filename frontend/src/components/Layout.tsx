@@ -39,7 +39,7 @@ const PageWaiting: React.FC<{ padded?: boolean }> = ({ padded }) => (
 export const Layout: React.FC = () => {
   const { hasRole, user } = useAuth();  // signing out moved into the profile menu
   const location = useLocation();
-  const isLocationPage = /^\/($|(s|f|l)\/|my-tasks|dashboards|timesheets|inbox|reminders|people|all-tasks|forms|planner|leave|billing|team-week|compliance|all-spaces|goals)/.test(location.pathname);
+  const isLocationPage = /^\/($|(s|f|l)\/|my-tasks|dashboards|timesheets|inbox|reminders|people|all-tasks|forms|planner|leave|billing|team-week|compliance|goals)/.test(location.pathname);
   const { timers, stopTimer, getLiveElapsedSeconds, focusSession, stopFocus } = useTimer();
   const { notifications, unreadCount, markAsRead, markAllAsRead, clearAll } = useNotifications();
   
@@ -220,7 +220,7 @@ export const Layout: React.FC = () => {
             came off: on a phone the bottom tabs replace the sidebar, the sidebar
             already lists where you've been, and the shortcuts are in the search box itself. */}
         <header
-          className="app-topbar glass-panel no-print z-[5] grid h-14 shrink-0 grid-cols-[minmax(7rem,1fr)_minmax(0,1fr)_max-content] items-center gap-2 px-3 sm:h-16 sm:gap-4 sm:px-6"
+          className="app-topbar glass-panel no-print z-[5] grid h-14 shrink-0 grid-cols-[minmax(7rem,1fr)_minmax(0,26rem)_minmax(max-content,1fr)] items-center gap-2 px-3 sm:h-16 sm:gap-4 sm:px-6"
         >
           {/* The firm's own logo, then the page's title portalled in after a thin rule. The logo
               already names the workspace, so the bar no longer spells it out a second time. */}
@@ -232,9 +232,10 @@ export const Layout: React.FC = () => {
             <div ref={setTitleSlot} className="topbar-title flex min-w-0 flex-1 items-center" />
           </div>
 
-          {/* The search takes up to 30rem and gives way first when the bar is narrow: the right-hand
-              column never shrinks below the bell and your name, so nothing runs over them. */}
-          <div className="mx-auto flex w-full min-w-0 max-w-[30rem] justify-center">
+          {/* The search sits in the middle and stays there: the two sides share what is left
+              equally, so a timer starting on the right no longer pushes it across. It gives way
+              only when the bar is too narrow for the bell, the timer and your name. */}
+          <div className="flex w-full min-w-0 justify-center">
             <SearchButton />
           </div>
 
@@ -243,12 +244,12 @@ export const Layout: React.FC = () => {
             
             {/* Multiplayer Avatar Stack -- desktop only: a phone header is 390px wide. */}
             {onlineUsers.length > 0 && !phone && (
-              <div style={{ display: 'flex', alignItems: 'center', marginRight: '8px', paddingRight: '16px', borderRight: '1px solid var(--color-border)' }} title={`${onlineUsers.length} online`}>
+              <div style={{ display: 'flex', alignItems: 'center', marginRight: '8px', paddingRight: '16px', borderRight: '1px solid var(--color-border)' }} aria-label={`${onlineUsers.length} online`}>
                 <div style={{ display: 'flex', flexDirection: 'row-reverse' }}>
                   {onlineUsers.slice(0, 5).map((user, i) => (
                     <div 
                       key={user.userId} 
-                      title={`${user.name} (${user.currentStatus})`}
+                      aria-label={`${user.name} (${user.currentStatus})`}
                       style={{ 
                         width: '28px', height: '28px', borderRadius: '50%', 
                         backgroundColor: user.avatarColor || '#234788', 
@@ -308,7 +309,7 @@ export const Layout: React.FC = () => {
                 </span>
                 <button 
                   onClick={stopFocus}
-                  title="Quit Focus session"
+                  aria-label="Quit Focus session"
                   style={{ 
                     background: 'none', 
                     border: 'none', 
@@ -344,7 +345,7 @@ export const Layout: React.FC = () => {
                     cursor: 'pointer',
                     outline: 'none'
                   }}
-                  title="View Active Timers"
+                  aria-label="View Active Timers"
                 >
                   <span style={{ 
                     width: '6px', 
@@ -405,7 +406,7 @@ export const Layout: React.FC = () => {
                                   overflow: 'hidden', 
                                   textOverflow: 'ellipsis' 
                                 }}
-                                title={timer.taskTitle}
+                                aria-label={timer.taskTitle}
                               >
                                 {timer.taskTitle}
                               </span>
@@ -443,9 +444,11 @@ export const Layout: React.FC = () => {
               </div>
             )}
 
-            {/* The running timer takes its own place in the bar: floating, it sat on top of the
-                search. The search gives way a little instead. */}
-            <RunningTimerChip />
+            {/* The running timer's place is kept whether a timer runs or not: a fixed slot, so the
+                right side is the same width either way and the search never moves. */}
+            <div className="flex shrink-0 justify-end sm:w-[8.5rem] 2xl:w-[19rem]">
+              <RunningTimerChip />
+            </div>
 
             {FEATURES.legacyNotifications ? (
             <div style={{ position: 'relative' }} ref={notificationsRef}>

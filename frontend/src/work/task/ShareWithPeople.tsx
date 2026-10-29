@@ -59,7 +59,7 @@ export const ShareWithPeople: React.FC<{
         >
           <div className="mb-1 flex items-start justify-between gap-3">
             <h3 className="flex items-center gap-2 text-base font-semibold text-gray-900"><Users size={17} /> Share this task</h3>
-            <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            <button type="button" aria-label="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </div>
           <p className="mb-3 truncate text-xs text-gray-500">{taskName}</p>
 

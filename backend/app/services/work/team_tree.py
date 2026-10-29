@@ -8,15 +8,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Team, TeamMember
+from app.db.session import memo
 
 MAX_DEPTH = 4
 
 
 def _parents(db: Session, workspace_id: Optional[uuid.UUID] = None) -> Dict[uuid.UUID, Optional[uuid.UUID]]:
-    q = select(Team.id, Team.parent_team_id)
-    if workspace_id is not None:
-        q = q.where(Team.workspace_id == workspace_id)
-    return dict(db.execute(q).all())
+    # One permission check often needs the tree several times; read it once per request.
+    remembered = memo(db)
+    key = ("team_parents", workspace_id)
+    if key not in remembered:
+        q = select(Team.id, Team.parent_team_id)
+        if workspace_id is not None:
+            q = q.where(Team.workspace_id == workspace_id)
+        remembered[key] = dict(db.execute(q).all())
+    return remembered[key]
 
 
 def descendants(db: Session, team_ids: Iterable[uuid.UUID]) -> Set[uuid.UUID]:

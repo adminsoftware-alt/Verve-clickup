@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Archive, CalendarClock, CalendarDays, CalendarRange, CircleDot, Download, FileSpreadsheet, FileText, Diamond, Flag, MoveRight, Shapes, Tag as TagIcon, Timer, Trash2, UserPlus, X } from 'lucide-react';
 import { workApi, type BulkEdit, type BulkResult, type Status, type Task, type UserRef } from '../api';
 import { NoMatch, PRIORITIES, SearchBox, fromDateInput, matchesSearch, parseDuration } from '../ui';
+import { PeopleTeamsSwitch, useAssignTeams, type PickMode } from '../task/PeopleTeams';
 import { useWritableLists } from '../task/TaskActions';
 import { useWork } from '../WorkContext';
 import { Popover } from './ViewControls';
@@ -10,21 +11,35 @@ import { planningApi } from '../planningApi';
 import { exportTasks, taskRows } from './exportTasks';
 
 /** Who to add to or take off every selected task, searchable; Enter adds the first match. */
-const BulkPeople: React.FC<{ people: UserRef[]; onAdd: (p: UserRef) => void; onRemove: (p: UserRef) => void }> = ({ people, onAdd, onRemove }) => {
+const BulkPeople: React.FC<{ people: UserRef[]; onAdd: (ids: string[], who: string) => void; onRemove: (ids: string[]) => void }> = ({ people, onAdd, onRemove }) => {
   const [q, setQ] = useState('');
+  // People one at a time, or a whole Team: everyone in it is added to (or taken off) every task.
+  const [mode, setMode] = useState<PickMode>('people');
+  const teams = useAssignTeams(mode === 'teams' ? q : '');
   const shown = people.filter((p) => matchesSearch(q, p.display_name, p.email));
+  const row = (key: string, name: React.ReactNode, ids: string[], who: string) => (
+    <div key={key} className="flex items-center gap-2 px-1 py-0.5 text-sm text-gray-700">
+      <span className="min-w-0 flex-1 truncate">{name}</span>
+      <button type="button" aria-label={`Add ${who}`} onClick={() => onAdd(ids, who)} className="rounded px-1.5 text-xs text-brand-600 hover:bg-brand-50">Add</button>
+      <button type="button" aria-label={`Remove ${who}`} onClick={() => onRemove(ids)} className="rounded px-1.5 text-xs text-gray-500 hover:bg-gray-100">Remove</button>
+    </div>
+  );
   return (
     <>
-      <SearchBox value={q} onChange={setQ} label="Search people" placeholder="Search people…" inset="lg"
-        onEnter={shown[0] ? () => onAdd(shown[0]) : undefined} />
-      {shown.map((p) => (
-        <div key={p.id} className="flex items-center gap-2 px-1 py-0.5 text-sm text-gray-700">
-          <span className="min-w-0 flex-1 truncate">{p.display_name || p.email}</span>
-          <button type="button" aria-label={`Add ${p.display_name || p.email}`} onClick={() => onAdd(p)} className="rounded px-1.5 text-xs text-brand-600 hover:bg-brand-50">Add</button>
-          <button type="button" aria-label={`Remove ${p.display_name || p.email}`} onClick={() => onRemove(p)} className="rounded px-1.5 text-xs text-gray-500 hover:bg-gray-100">Remove</button>
-        </div>
-      ))}
-      {shown.length === 0 && <NoMatch query={q} />}
+      <div className="mb-1.5"><PeopleTeamsSwitch mode={mode} onChange={setMode} /></div>
+      <SearchBox value={q} onChange={setQ} label={mode === 'people' ? 'Search people' : 'Search Teams'} placeholder={mode === 'people' ? 'Search people…' : 'Search Teams…'} inset="lg"
+        onEnter={mode === 'people' && shown[0] ? () => onAdd([shown[0].id], shown[0].display_name || shown[0].email) : undefined} />
+      {mode === 'people' ? (
+        <>
+          {shown.map((p) => row(p.id, p.display_name || p.email, [p.id], p.display_name || p.email))}
+          {shown.length === 0 && <NoMatch query={q} />}
+        </>
+      ) : (
+        <>
+          {teams.map((t) => row(t.id, <>{t.name} <span className="text-xs text-gray-400">{t.members.length}</span></>, t.members.map((u) => u.id), t.name))}
+          {teams.length === 0 && <p className="px-1 py-2 text-xs text-gray-400">No Teams to pick from.</p>}
+        </>
+      )}
     </>
   );
 };
@@ -120,8 +135,8 @@ export const BulkBar: React.FC<{
         <Popover label="Assignees" icon={<UserPlus size={14} />} text="Assignees" up dark width={260}>
           {(close) => (
             <BulkPeople people={people}
-              onAdd={(p) => { close(); run({ add_assignees: [p.id] }, 'Assigned'); }}
-              onRemove={(p) => { close(); run({ remove_assignees: [p.id] }, 'Updated'); }} />
+              onAdd={(ids) => { close(); run({ add_assignees: ids }, 'Assigned'); }}
+              onRemove={(ids) => { close(); run({ remove_assignees: ids }, 'Updated'); }} />
           )}
         </Popover>
 

@@ -7,6 +7,7 @@ check what the tools hand the model -- the part that decides who sees what -- wi
 import json
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import pytest
 
 from app.core.config import settings
@@ -81,3 +82,16 @@ def test_an_employee_only_hears_about_their_own_time(api, workspace, folderless_
     # Someone outside their view isn't even found, let alone their hours.
     refused = ask(api, workspace, "member", "admin's hours?")
     assert "total_hours" not in refused and "see" in refused["error"]
+
+
+def test_a_failing_ai_service_is_explained_plainly(api, workspace, monkeypatch):
+    monkeypatch.setattr(settings, "AI_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "AI_MODEL", "gone-model")
+
+    def gone(*args, **kwargs):
+        return httpx.Response(404, json={"error": {"message": "This model is unavailable for free. Use this slug instead"}})
+
+    monkeypatch.setattr(ai_assistant.httpx, "post", gone)
+    r = api.post(f"/workspaces/{workspace['id']}/assistant/ask", "member", {"question": "how many people?"})
+    # The provider's own wording goes to the log; the person asking hears what still works.
+    assert r.status_code == 503 and r.json()["detail"] == ai_assistant.DOWN

@@ -282,6 +282,23 @@ class DashboardOut(DashboardSummary):
     cards: List[CardOut]
 
 
+class CardLens(BaseModel):
+    """One card as a viewer has narrowed it for themselves: only its filters and its window."""
+
+    filters: Optional[Filters] = None
+    period: Optional[Period] = None
+
+
+class ViewLens(BaseModel):
+    """Filters someone with view-only access has set for themselves. They are applied to what that
+    person is shown and never saved, so the board's owner keeps the board as they left it."""
+
+    filters: Optional[Filters] = None
+    cards: Dict[uuid.UUID, CardLens] = Field(default_factory=dict)
+    # Only these cards' data, when one card was changed; every card when empty.
+    card_ids: List[uuid.UUID] = Field(default_factory=list)
+
+
 class CardData(BaseModel):
     card_id: uuid.UUID
     type: CardType

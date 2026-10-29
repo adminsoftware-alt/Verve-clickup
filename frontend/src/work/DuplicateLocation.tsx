@@ -9,7 +9,6 @@ import React, { useMemo, useState } from 'react';
 
 import { ALL_PARTS, PART_LABELS, type CopyParts } from './task/CopyParts';
 import { PeoplePicker } from './PeoplePicker';
-import { FEATURES } from '../config/features';
 import { useWork } from './WorkContext';
 import { Portal } from './ui';
 
@@ -36,14 +35,9 @@ export interface DuplicateRequest extends Record<string, unknown> {
 const TASK_PARTS = PART_LABELS.filter((r) => r.key !== 'subtasks');
 
 /** Everything the place itself carries, as against the tasks inside it. */
-const PLACE_PARTS: { key: 'statuses' | 'views' | 'automations'; label: string; hint: string }[] = [
+const PLACE_PARTS: { key: 'statuses' | 'views'; label: string; hint: string }[] = [
   { key: 'statuses', label: 'Its own statuses', hint: 'Only where it overrides the ones above it.' },
   { key: 'views', label: 'Saved views', hint: 'The groupings, filters and columns people settled on.' },
-  // Automations are off the menus, so there is nothing here to tick. Copies still carry any
-  // rule that exists, which is why the request still sends the flag.
-  ...(FEATURES.automations
-    ? [{ key: 'automations' as const, label: 'Automations', hint: 'The rules that run on this place.' }]
-    : []),
 ];
 
 export const DuplicateLocation: React.FC<{
@@ -58,7 +52,7 @@ export const DuplicateLocation: React.FC<{
   const [newName, setNewName] = useState(`${name} (copy)`);
   const [mode, setMode] = useState<'everything' | 'tasks' | 'custom'>('everything');
   const [parts, setParts] = useState<CopyParts>(ALL_PARTS);
-  const [place, setPlace] = useState({ statuses: true, views: true, automations: true });
+  const [place, setPlace] = useState({ statuses: true, views: true });
   const [tasks, setTasks] = useState(true);
   const [archived, setArchived] = useState(false);
   const [where, setWhere] = useState<string>('');
@@ -95,7 +89,7 @@ export const DuplicateLocation: React.FC<{
         include_archived: mode === 'custom' ? archived : false,
         statuses: mode === 'custom' ? place.statuses : mode === 'everything',
         views: mode === 'custom' ? place.views : mode === 'everything',
-        automations: mode === 'custom' ? place.automations : mode === 'everything',
+        automations: mode === 'everything',
         parts: mode === 'custom' ? parts : ALL_PARTS,
         share_with: audience === 'people' ? people : [],
         share_level: level,
@@ -124,7 +118,7 @@ export const DuplicateLocation: React.FC<{
         >
           <div className="mb-3 flex items-start justify-between gap-3">
             <h3 className="flex items-center gap-2 text-base font-semibold text-gray-900"><Copy size={17} /> Duplicate {LABEL[kind]}</h3>
-            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            <button aria-label="Close" type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
@@ -188,7 +182,7 @@ export const DuplicateLocation: React.FC<{
 
             {mode === 'everything' && (
               <p className="mt-2 text-xs text-gray-500">
-                {kind === 'space' ? 'Statuses, tags, ClickApps, custom fields, Folders and Lists' : 'Statuses, task groups, saved views, automations'}
+                {kind === 'space' ? 'Statuses, tags, custom fields, Folders and Lists' : 'Statuses, task groups, saved views'}
                 {kind === 'folder' ? ', its Lists' : ''} and every live task inside, with its dates, people,
                 tags, checklists, attachments and relationships. Time already logged and the
                 conversation are not copied — the copy is new work.
@@ -196,7 +190,7 @@ export const DuplicateLocation: React.FC<{
             )}
             {mode === 'tasks' && (
               <p className="mt-2 text-xs text-gray-500">
-                The tasks and nothing else: no saved views, no automations, no status set of its own.
+                The tasks and nothing else: no saved views, no status set of its own.
               </p>
             )}
 

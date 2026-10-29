@@ -52,6 +52,14 @@ def import_people(workspace_id: uuid.UUID, data: s.PersonImportIn, user: User = 
 # --- offboarding and access ----------------------------------------------------------------------------------
 
 
+@router.post("/workspaces/{workspace_id}/people/hand-over", response_model=s.HandOverResult)
+def hand_over(workspace_id: uuid.UUID, data: s.HandOverIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Move people's open tasks to someone else (admins: anyone; Managers: within their team)."""
+    out = people_admin.hand_over(db, _access(db, user, workspace_id), data)
+    db.commit()
+    return out
+
+
 @router.get("/workspaces/{workspace_id}/people/{user_id}/offboard", response_model=s.OffboardPreview)
 def offboard_preview(workspace_id: uuid.UUID, user_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     return people_admin.offboard_preview(db, _access(db, user, workspace_id), user_id)

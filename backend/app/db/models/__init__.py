@@ -27,11 +27,8 @@ from app.db.models.planning import Automation, CalendarFeed, LineupItem, TimeBlo
 from app.db.models.share import Share
 from app.db.models.spaces_extra import (
     ChatMessage,
-    HiddenSpace,
     InboundEmail,
     PublicLink,
-    SidebarSection,
-    SpaceJoinRequest,
     TaskListLink,
     ViewContent,
 )
@@ -53,6 +50,8 @@ from app.db.models.timesheet import (
 )
 from app.db.models.view import View
 
+from app.db.models.review import MonthlyReview
+
 __all__ = [
     "CalendarConnection",
     "CalendarSyncItem",
@@ -60,11 +59,8 @@ __all__ = [
     "GoalCheckIn",
     "GoalTarget",
     "ChatMessage",
-    "HiddenSpace",
     "InboundEmail",
     "PublicLink",
-    "SidebarSection",
-    "SpaceJoinRequest",
     "ListAssignee",
     "TaskListLink",
     "ViewContent",
@@ -131,6 +127,7 @@ __all__ = [
     "TimesheetRow",
     "TimesheetSettings",
     "TimesheetSubmission",
+    "MonthlyReview",
     "User",
     "View",
     "ViewType",

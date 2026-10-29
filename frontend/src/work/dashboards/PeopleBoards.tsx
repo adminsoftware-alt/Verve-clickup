@@ -6,13 +6,14 @@
 // going back to the grid.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Eye, Search, Users, X } from 'lucide-react';
+import { ArrowLeft, ArrowUpDown, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Eye, Search, Users, X } from 'lucide-react';
 
 import { useWork } from '../WorkContext';
 import { Avatar, Portal } from '../ui';
 import { dashApi, type Dashboard, type PersonBoard } from './api';
 import { DashboardPage } from './DashboardPage';
 import { WordSkeleton } from '../Skeleton';
+import { WeekBar } from '../teams/TeamBulk';
 
 const nameOf = (p: PersonBoard) => p.user.display_name || p.user.email;
 
@@ -20,13 +21,13 @@ type Sort = 'name' | 'overdue' | 'open' | 'today';
 type Show = 'all' | 'overdue' | 'today';
 
 const SORTS: [Sort, string][] = [['name', 'Name'], ['overdue', 'Most overdue'], ['open', 'Most open'], ['today', 'Due today']];
-const SHOWS: [Show, string][] = [['all', 'Everyone'], ['overdue', 'Only people with overdue work'], ['today', 'Only people with work due today']];
+const SHOWS: [Show, string][] = [['all', 'Everyone'], ['overdue', 'With overdue work'], ['today', 'With work due today']];
 
 /** How someone is doing, in one calm word -- coloured only when it needs attention. */
-function standing(p: PersonBoard): { label: string; cls: string } {
-  if (p.overdue >= 3) return { label: `${p.overdue} overdue`, cls: 'bg-rose-50 text-rose-700 ring-rose-100' };
-  if (p.overdue > 0) return { label: `${p.overdue} overdue`, cls: 'bg-amber-50 text-amber-700 ring-amber-100' };
-  return { label: 'On track', cls: 'bg-emerald-50 text-emerald-700 ring-emerald-100' };
+function standing(p: PersonBoard): { label: string; dot: string; text: string } {
+  if (p.overdue >= 3) return { label: 'Needs attention', dot: 'bg-rose-500', text: 'text-rose-700' };
+  if (p.overdue > 0) return { label: 'A little behind', dot: 'bg-amber-500', text: 'text-amber-700' };
+  return { label: 'On track', dot: 'bg-[#234788]', text: 'text-[#234788]' };
 }
 
 function usePeople() {
@@ -36,8 +37,15 @@ function usePeople() {
   useEffect(() => {
     if (!workspace) return;
     let live = true;
+    // The cards first; this week's hours fill in when they arrive, which takes longer to work out.
     dashApi.people(workspace.id)
-      .then((rows) => { if (live) setPeople(rows); })
+      .then((rows) => {
+        if (!live) return;
+        setPeople(rows);
+        dashApi.peopleWeek(workspace.id)
+          .then((week) => { if (live) setPeople((prev) => prev && prev.map((p) => ({ ...p, ...week[p.user.id] }))); })
+          .catch(() => undefined);
+      })
       .catch((e) => { if (live) setError((e as Error).message); });
     return () => { live = false; };
   }, [workspace]);
@@ -66,7 +74,7 @@ const PeopleFilter: React.FC<{
   const panel = useRef<HTMLDivElement>(null);
   const open = box !== null;
   const count = (sort !== 'name' ? 1 : 0) + (show !== 'all' ? 1 : 0) + (team ? 1 : 0);
-  const WIDTH = 264;
+  const WIDTH = 288;
 
   useEffect(() => {
     if (!open) return;
@@ -83,52 +91,75 @@ const PeopleFilter: React.FC<{
     setBox({ top: r.bottom + 6, left: Math.max(8, Math.min(r.right - WIDTH, window.innerWidth - WIDTH - 8)) });
   };
 
-  const row = (on: boolean, label: string, pick: () => void) => (
-    <button key={label} type="button" role="menuitemradio" aria-checked={on} onClick={pick}
-      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-gray-50 ${on ? 'font-medium text-gray-900' : 'text-gray-600'}`}>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {on && <Check size={14} className="shrink-0 text-teal-600" />}
-    </button>
+  /** A section's name beside a small tile of its colour, as in the other Filter menus. */
+  const heading = (text: string, Icon: React.ElementType, tone: string) => (
+    <p className="flex items-center gap-2 pb-2 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-gray-500">
+      <span className="flex h-5 w-5 items-center justify-center rounded-md" style={{ backgroundColor: `color-mix(in srgb, ${tone} 12%, white)`, color: tone }}><Icon size={11} strokeWidth={2.25} /></span>
+      {text}
+    </p>
   );
-  const heading = (text: string) => (
-    <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">{text}</p>
+  /** One choice as a chip: navy and filled when it is the one in use. */
+  const chip = (on: boolean, label: string, pick: () => void) => (
+    <button key={label} type="button" role="menuitemradio" aria-checked={on} onClick={pick}
+      className={`truncate rounded-lg border px-2.5 py-1.5 text-[12.5px] font-medium transition-colors ${on
+        ? 'border-[#234788] bg-[#234788] text-white'
+        : 'border-[#E4E8F0] bg-white text-gray-700 hover:border-[#B9C7E2] hover:text-[#142B57]'}`}>
+      {label}
+    </button>
   );
 
   return (
     <>
       <button ref={button} type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open}
-        className={`flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm shadow-sm ${
-          count ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}>
+        data-active={count ? '' : undefined}
+        className="cf-pill relative flex h-9 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium">
         Filter
-        {count > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-semibold leading-none text-white">{count}</span>}
-        <ChevronDown size={13} className={`transition-transform ${open ? 'rotate-180' : ''} ${count ? 'text-teal-500' : 'text-gray-400'}`} />
+        {count > 0 && <span className="cf-pill-count flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none">{count}</span>}
+        <ChevronDown size={13} className={`cf-pill-caret transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {box && (
         <Portal>
           <div ref={panel} role="menu" aria-label="Filter people"
             style={{ position: 'fixed', top: box.top, left: box.left, width: WIDTH }}
-            className="admin-pop z-[130] max-h-[70vh] overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-2xl">
-            {heading('Sort by')}
-            {SORTS.map(([v, l]) => row(sort === v, l, () => onSort(v)))}
-            <div className="my-1 border-t border-gray-100" />
-            {heading('Show')}
-            {SHOWS.map(([v, l]) => row(show === v, l, () => onShow(v)))}
+            className="admin-pop z-[130] max-h-[75vh] overflow-y-auto rounded-xl border border-[#D9E1EF] bg-white shadow-[0_18px_40px_-12px_rgba(16,24,40,0.3)]">
+            {/* What is set, and the one click that takes it all off. */}
+            <div className="flex items-center gap-2 border-b border-[#EEF1F5] px-4 py-2.5">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">Filters</span>
+              {count > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-[#234788] px-1 text-[10px] font-bold leading-none text-white">{count}</span>}
+              {count > 0 && <button type="button" onClick={onReset} className="filter-clear ml-auto">Clear all</button>}
+            </div>
+
+            <section className="border-b border-[#EEF1F5] px-4 py-3">
+              {heading('Sort by', ArrowUpDown, '#234788')}
+              <div className="grid grid-cols-2 gap-1.5">{SORTS.map(([v, l]) => chip(sort === v, l, () => onSort(v)))}</div>
+            </section>
+
+            <section className={`px-4 py-3 ${teams.length ? 'border-b border-[#EEF1F5]' : ''}`}>
+              {heading('Show', Eye, '#D97706')}
+              <div className="space-y-0.5" role="radiogroup" aria-label="Show">
+                {SHOWS.map(([v, l]) => {
+                  const on = show === v;
+                  return (
+                    <button key={v} type="button" role="menuitemradio" aria-checked={on} onClick={() => onShow(v)}
+                      className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors ${on ? 'bg-[#F3F6FB] font-semibold text-[#142B57]' : 'text-gray-700 hover:bg-gray-50'}`}>
+                      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${on ? 'border-[#234788]' : 'border-gray-300'}`}>
+                        {on && <span className="h-2 w-2 rounded-full bg-[#234788]" />}
+                      </span>
+                      {l}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
             {teams.length > 0 && (
-              <>
-                <div className="my-1 border-t border-gray-100" />
-                {heading('Team')}
-                {row(!team, 'All teams', () => onTeam(''))}
-                {teams.map((t) => row(team === t, t, () => onTeam(t)))}
-              </>
-            )}
-            {count > 0 && (
-              <>
-                <div className="my-1 border-t border-gray-100" />
-                <button type="button" role="menuitem" onClick={onReset}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-gray-500 hover:bg-gray-50 hover:text-gray-800">
-                  <X size={13} /> Reset
-                </button>
-              </>
+              <section className="px-4 py-3">
+                {heading('Team', Users, '#7C3AED')}
+                <div className="flex flex-wrap gap-1.5">
+                  {chip(!team, 'All teams', () => onTeam(''))}
+                  {teams.map((t) => chip(team === t, t, () => onTeam(t)))}
+                </div>
+              </section>
             )}
           </div>
         </Portal>
@@ -185,7 +216,7 @@ export const PeopleBoards: React.FC = () => {
 
       {!people ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {Array.from({ length: 8 }, (_, i) => <div key={i} className="skeleton h-[168px] rounded-2xl" />)}
+          {Array.from({ length: 8 }, (_, i) => <div key={i} className="skeleton h-[150px] rounded-xl" />)}
         </div>
       ) : shown.length === 0 ? (
         <div className="mx-auto mt-16 max-w-sm text-center">
@@ -201,32 +232,46 @@ export const PeopleBoards: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => navigate(`/dashboards/people/${encodeURIComponent(p.user.id)}`)}
-                  className="group flex h-full w-full flex-col rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-[border-color,box-shadow] duration-150 hover:border-brand-200 hover:shadow-md focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/15"
+                  className="group/card flex h-full w-full flex-col rounded-xl border border-[#E4E8F0] bg-white text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-colors duration-150 hover:border-[#B9C7E2] focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/15"
                 >
-                  <div className="flex items-start gap-3">
-                    <span className="rounded-full ring-2 ring-white shadow-sm"><Avatar user={p.user} size={40} /></span>
+                  {/* Who they are, and the way in. */}
+                  <div className="flex items-center gap-2.5 px-4 pt-3.5">
+                    <Avatar user={p.user} size={34} />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-gray-900">{nameOf(p)}</p>
-                      <p className="truncate text-xs text-gray-500">{p.designation || p.department || 'No designation'}</p>
+                      <p className="truncate font-display text-[14.5px] font-bold leading-tight tracking-[-0.01em] text-[#142B57]">{nameOf(p)}</p>
+                      <p className="truncate text-[12px] leading-tight text-gray-500">{p.designation || p.department || 'No designation'}</p>
                     </div>
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${tag.cls}`}>{tag.label}</span>
+                    <span className="flex shrink-0 items-center gap-0.5 self-start text-[12px] font-semibold text-[#234788]">
+                      Open board
+                      <ArrowUpRight size={14} className="transition-transform duration-200 group-hover/card:-translate-y-0.5 group-hover/card:translate-x-0.5" />
+                    </span>
                   </div>
 
-                  <dl className="mt-4 grid grid-cols-3 divide-x divide-gray-100 rounded-xl bg-gray-50/80 py-2 text-center">
-                    {([['Open', p.open, 'text-gray-900'], ['Overdue', p.overdue, p.overdue ? 'text-rose-600' : 'text-gray-900'], ['Today', p.due_today, 'text-gray-900']] as const).map(([label, value, cls]) => (
-                      <div key={label}>
-                        <dt className="text-[10px] font-medium uppercase tracking-wider text-gray-400">{label}</dt>
-                        <dd className={`text-lg font-semibold tabular-nums ${cls}`}>{value}</dd>
+                  {/* The three figures in one slim row between fine rules. */}
+                  <dl className="mx-4 mt-3 grid grid-cols-3 border-y border-[#EEF1F5] py-2 text-center">
+                    {([['Open', p.open, 'text-[#142B57]'], ['Overdue', p.overdue, p.overdue ? 'text-rose-600' : 'text-[#142B57]'], ['Due today', p.due_today, 'text-[#142B57]']] as const).map(([label, value, cls], i) => (
+                      <div key={label} className={`flex items-baseline justify-center gap-1.5 ${i ? 'border-l border-[#EEF1F5]' : ''}`}>
+                        <dd className={`font-display text-[18px] font-bold leading-none tabular-nums ${cls}`}>{value}</dd>
+                        <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-gray-400">{label}</dt>
                       </div>
                     ))}
                   </dl>
 
-                  <div className="mt-3 flex min-h-[22px] items-center gap-1.5">
-                    {p.teams.slice(0, 2).map((t) => <span key={t} className="truncate rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{t}</span>)}
-                    {p.teams.length > 2 && <span className="text-[11px] text-gray-400">+{p.teams.length - 2}</span>}
-                    {p.pending && <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">Not signed in yet</span>}
-                    <span className="ml-auto flex items-center gap-0.5 text-xs font-medium text-gray-400 transition-colors group-hover:text-brand-700">
-                      View <ArrowUpRight size={13} />
+                  {/* This week's hours, only for people with working hours set. */}
+                  {(p.capacity ?? 0) > 0 && (
+                    <div className="px-4 pt-2.5">
+                      <WeekBar planned={p.planned ?? 0} capacity={p.capacity ?? 0} />
+                    </div>
+                  )}
+
+                  {/* How they are doing, in one word, and their Teams. */}
+                  <div className="mt-auto flex items-center gap-1.5 px-4 pb-3 pt-2.5">
+                    <span className={`flex min-w-0 items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] ${tag.text}`}>
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tag.dot}`} aria-hidden /> <span className="truncate">{tag.label}</span>
+                    </span>
+                    <span className="ml-auto flex shrink-0 items-center gap-1">
+                      {p.teams.slice(0, 2).map((t) => <span key={t} className="rounded-md border border-[#DCE3EF] bg-[#F5F8FD] px-1.5 py-px text-[11px] font-medium text-[#234788]">{t}</span>)}
+                      {p.teams.length > 2 && <span className="text-[11px] text-gray-400">+{p.teams.length - 2}</span>}
                     </span>
                   </div>
                 </button>
@@ -347,15 +392,15 @@ export const PersonDashboardPage: React.FC = () => {
             {[person?.designation, person?.teams.join(', ')].filter(Boolean).join(' · ') || 'Their own view of their work'}
           </p>
         </div>
-        <span className="flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600" title="You see what they see. Nothing you do here changes their board.">
+        <span className="flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600" aria-label="You see what they see. Nothing you do here changes their board.">
           <Eye size={12} /> View only
         </span>
         <div className="ml-auto flex items-center gap-1.5">
-          <button type="button" disabled={!prev} onClick={() => prev && go(prev.user.id)} title={prev ? `Previous: ${nameOf(prev)}` : undefined} aria-label="Previous person"
+          <button type="button" disabled={!prev} onClick={() => prev && go(prev.user.id)} aria-label="Previous person"
             className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:shadow-none">
             <ChevronLeft size={16} />
           </button>
-          <button type="button" disabled={!next} onClick={() => next && go(next.user.id)} title={next ? `Next: ${nameOf(next)}` : undefined} aria-label="Next person"
+          <button type="button" disabled={!next} onClick={() => next && go(next.user.id)} aria-label="Next person"
             className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 shadow-sm hover:bg-gray-50 disabled:opacity-40 disabled:shadow-none">
             <ChevronRight size={16} />
           </button>
@@ -370,7 +415,7 @@ export const PersonDashboardPage: React.FC = () => {
             <Link to="/dashboards?tab=people" className="mt-3 inline-block text-sm font-medium text-brand-600">Back to People</Link>
           </div>
         ) : board ? (
-          <DashboardPage key={board.id} dashboardId={board.id} heading={false} viewing />
+          <DashboardPage key={board.id} dashboardId={board.id} heading={false} viewing personId={userId} />
         ) : (
           <div className="grid grid-cols-12 gap-4 p-6" role="status" aria-label="Loading their Dashboard">
             {[12, 3, 3, 3, 3, 12, 6, 6].map((span, i) => (

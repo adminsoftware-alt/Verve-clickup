@@ -56,16 +56,9 @@ class Space(LocationMixin, Base):
     personal_owner_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE")
     )
-    # ClickApps: which optional features this Space uses, {name: on}. A missing name means its default.
-    clickapps: Mapped[Dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"), nullable=False, default=dict)
-    # A private Space that still shows on the All Spaces page, so people can ask to join it.
-    discoverable: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False, default=False)
     # ClickUp's "Default permission": what members get in this Space unless something is shared
     # with them. NULL is full edit, as every Space had before this setting existed.
     default_permission: Mapped[Optional[PermissionLevel]] = mapped_column(enum_type(PermissionLevel, "space_default_permission"))
-    # ClickUp's "Default views": view types every new Folder and List here starts with, after the
-    # required ones. NULL or empty: just the required views.
-    default_views: Mapped[Optional[List[str]]] = mapped_column(JSONB)
 
     __table_args__ = (
         Index(

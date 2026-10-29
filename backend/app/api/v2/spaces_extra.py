@@ -1,6 +1,5 @@
-"""Phase D routes: All Spaces and join requests, sidebar sections, duplicating Spaces, ClickApps,
-public links, tasks in several Lists, time in status, sprints, Email-to-List, and the content of the
-Doc, Whiteboard, Mind map, Chat and Embed views."""
+"""Phase D routes: duplicating Spaces, public links, tasks in several Lists, time in status, sprints,
+Email-to-List, and the content of the Doc, Whiteboard, Mind map, Chat and Embed views."""
 
 import hmac
 import uuid
@@ -36,49 +35,6 @@ router = APIRouter()
 VIEW, FULL = PermissionLevel.view, PermissionLevel.full
 
 
-# --- ClickApps ----------------------------------------------------------------------------------
-
-
-@router.get("/clickapps")
-def clickapp_catalogue():
-    return [{"name": k, "label": space_admin.CLICKAPP_LABELS[k], "default": v} for k, v in space_admin.CLICKAPPS.items()]
-
-
-# --- All Spaces -----------------------------------------------------------------------------------
-
-
-@router.get("/workspaces/{workspace_id}/all-spaces", response_model=List[sp.BrowseSpace])
-def all_spaces(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return space_admin.browse(db, Access.for_workspace(db, user.id, workspace_id))
-
-
-@router.put("/workspaces/{workspace_id}/all-spaces/{space_id}/joined", status_code=status.HTTP_204_NO_CONTENT)
-def join_space(workspace_id: uuid.UUID, space_id: uuid.UUID, joined: bool = Query(True),
-               user: User = Depends(current_user), db: Session = Depends(get_db)):
-    space_admin.set_joined(db, Access.for_workspace(db, user.id, workspace_id), space_id, joined)
-    db.commit()
-
-
-@router.post("/workspaces/{workspace_id}/all-spaces/{space_id}/request", status_code=status.HTTP_201_CREATED)
-def request_to_join(workspace_id: uuid.UUID, space_id: uuid.UUID, data: sp.JoinIn,
-                    user: User = Depends(current_user), db: Session = Depends(get_db)):
-    row = space_admin.request_join(db, Access.for_workspace(db, user.id, workspace_id), space_id, data.message)
-    db.commit()
-    return {"id": str(row.id), "status": row.status}
-
-
-@router.get("/workspaces/{workspace_id}/join-requests", response_model=List[sp.JoinRequestOut])
-def join_requests(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return space_admin.join_requests(db, Access.for_workspace(db, user.id, workspace_id))
-
-
-@router.post("/workspaces/{workspace_id}/join-requests/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
-def decide_join(workspace_id: uuid.UUID, request_id: uuid.UUID, data: sp.JoinDecision,
-                user: User = Depends(current_user), db: Session = Depends(get_db)):
-    space_admin.decide(db, Access.for_workspace(db, user.id, workspace_id), request_id, data.approve, data.level)
-    db.commit()
-
-
 @router.post("/spaces/{space_id}/duplicate", response_model=s.SpaceOut, status_code=status.HTTP_201_CREATED)
 def duplicate_space(space_id: uuid.UUID, data: sp.SpaceDuplicate, user: User = Depends(current_user), db: Session = Depends(get_db)):
     opened = open_space(db, user.id, space_id, VIEW)
@@ -86,35 +42,6 @@ def duplicate_space(space_id: uuid.UUID, data: sp.SpaceDuplicate, user: User = D
     copying.hand_to_people(db, opened, LocationKind.space, space, data.share_with, data.share_level)
     db.commit()
     return hierarchy.space_out(space, FULL)
-
-
-# --- sidebar sections -----------------------------------------------------------------------------
-
-
-@router.get("/workspaces/{workspace_id}/sidebar-sections", response_model=List[s.SidebarSectionOut])
-def sidebar_sections(workspace_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return space_admin.sections(db, Access.for_workspace(db, user.id, workspace_id))
-
-
-@router.post("/workspaces/{workspace_id}/sidebar-sections", response_model=s.SidebarSectionOut, status_code=status.HTTP_201_CREATED)
-def add_section(workspace_id: uuid.UUID, data: sp.SectionIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    row = space_admin.create_section(db, Access.for_workspace(db, user.id, workspace_id), data)
-    db.commit()
-    return space_admin.section_out(row)
-
-
-@router.patch("/workspaces/{workspace_id}/sidebar-sections/{section_id}", response_model=s.SidebarSectionOut)
-def update_section(workspace_id: uuid.UUID, section_id: uuid.UUID, data: sp.SectionUpdate,
-                   user: User = Depends(current_user), db: Session = Depends(get_db)):
-    row = space_admin.update_section(db, Access.for_workspace(db, user.id, workspace_id), section_id, data)
-    db.commit()
-    return space_admin.section_out(row)
-
-
-@router.delete("/workspaces/{workspace_id}/sidebar-sections/{section_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_section(workspace_id: uuid.UUID, section_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    space_admin.delete_section(db, Access.for_workspace(db, user.id, workspace_id), section_id)
-    db.commit()
 
 
 # --- public links ---------------------------------------------------------------------------------

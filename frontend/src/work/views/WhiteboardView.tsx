@@ -163,7 +163,7 @@ export const WhiteboardView: React.FC<{ viewId: string; canEdit: boolean; listId
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-wrap items-center gap-1 border-b border-gray-100 px-6 py-1.5" role="toolbar" aria-label="Whiteboard tools">
         {canEdit && TOOLS.map((t) => (
-          <button key={t.tool} type="button" title={t.label} aria-label={t.label} aria-pressed={tool === t.tool} onClick={() => setTool(t.tool)}
+          <button key={t.tool} type="button" aria-label={t.label} aria-pressed={tool === t.tool} onClick={() => setTool(t.tool)}
             className={`rounded p-1.5 ${tool === t.tool ? 'bg-brand-100 text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`}>{t.icon}</button>
         ))}
         {sel && canEdit && (
@@ -176,7 +176,7 @@ export const WhiteboardView: React.FC<{ viewId: string; canEdit: boolean; listId
             {(sel.kind === 'sticky' || sel.kind === 'text') && !sel.taskId && (
               <button type="button" onClick={() => toTask(sel)} className="ml-2 flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50"><CheckSquare size={12} /> Make it a task</button>
             )}
-            <button type="button" aria-label="Delete item" title="Delete (Del)" onClick={() => remove(sel.id)} className="ml-1 rounded p-1 text-gray-500 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button>
+            <button type="button" aria-label="Delete item" onClick={() => remove(sel.id)} className="ml-1 rounded p-1 text-gray-500 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button>
           </>
         )}
         <span className="ml-auto text-xs text-gray-400" role="status">{status}</span>

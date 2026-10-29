@@ -206,22 +206,15 @@ export interface FolderNode {
   /** A Sprint Folder: its Lists are sprints. */
   is_sprint?: boolean;
 }
-export type ClickApp = 'priorities' | 'tags' | 'time_tracking' | 'time_estimates' | 'custom_task_ids' | 'multiple_assignees'
-  | 'sprint_points' | 'multiple_lists' | 'email_to_list' | 'custom_fields';
 export interface SpaceNode {
   id: string; name: string; color: string | null; icon: string | null; is_private: boolean; archived: boolean;
   orderindex: number; permission_level: Level; folders: FolderNode[]; lists: ListNode[];
-  /** Left by you: kept out of your sidebar (find it on the All Spaces page). */
-  hidden?: boolean;
-  clickapps?: Partial<Record<ClickApp, boolean>>;
 }
-export interface SidebarSection { id: string; name: string; orderindex: number; space_ids: string[]; collapsed: boolean }
 export interface Hierarchy {
   workspace_id: string; role: Role; spaces: SpaceNode[];
   shared_with_me: { folders: FolderNode[]; lists: ListNode[]; tasks: { id: string; name: string; list_id: string; permission_level: Level }[] };
   /** The caller's own Personal List, once they have opened it. Never shown as a Space. */
   personal_list: ListNode | null;
-  sections?: SidebarSection[];
 }
 
 export interface Status { id: string; name: string; color: string; group: StatusGroup; orderindex: number }
@@ -426,7 +419,7 @@ export const workApi = {
   createSpace: (workspaceId: string, space: {
     name: string; description?: string; color?: string; icon?: string; is_private?: boolean;
     default_permission?: 'view' | 'comment' | 'edit' | 'full';
-    statuses?: { name: string; color: string; group: StatusGroup }[]; views?: ViewType[]; clickapps?: Record<string, boolean>;
+    statuses?: { name: string; color: string; group: StatusGroup }[];
   }) => request<{ id: string }>('POST', `/workspaces/${workspaceId}/spaces`, space),
   /** An admin's own picture as a Space's icon (PNG, JPG or WebP, up to 1 MB). */
   setSpaceIcon: (workspaceId: string, spaceId: string, file: File) => {

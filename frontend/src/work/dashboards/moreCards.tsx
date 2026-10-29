@@ -16,7 +16,7 @@ export const BatteryCard: React.FC<{ total: number; done: number; percent: numbe
       <div className="relative h-12 flex-1 overflow-hidden rounded-lg border-2 border-gray-300 bg-gray-50" role="meter" aria-label="Done" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
         <div className="flex h-full">
           {segments.map((sg) => (
-            <button key={sg.key} type="button" title={`${sg.label}: ${sg.value}`} onClick={() => onDrill(sg.key, sg.label)}
+            <button key={sg.key} type="button" aria-label={`${sg.label}: ${sg.value}`} onClick={() => onDrill(sg.key, sg.label)}
               style={{ width: `${total ? (100 * sg.value) / total : 0}%`, backgroundColor: sg.color }} className="h-full hover:opacity-80" />
           ))}
         </div>
@@ -80,14 +80,14 @@ export const CapacityCard: React.FC<{
     }
     return {
       text: `${hours(remaining_seconds)} of the ${hours(capacity_seconds)} in this period ${who.re} still free.`,
-      tone: 'bg-emerald-50 text-emerald-800',
+      tone: 'bg-[#EEF2F8] text-[#1C3A70]',
     };
   })();
   const tiles: [string, number, string][] = [
     ['Capacity', capacity_seconds, 'text-gray-900'],
     ['Planned', planned_seconds, over ? 'text-red-600' : 'text-gray-900'],
     ['Logged', logged_seconds, 'text-gray-900'],
-    ['Left to fill', remaining_seconds, 'text-emerald-700'],
+    ['Left to fill', remaining_seconds, 'text-[#234788]'],
   ];
   return (
     <div className="flex h-full flex-col justify-center gap-3 px-1">
@@ -97,7 +97,7 @@ export const CapacityCard: React.FC<{
             key={label}
             type="button"
             onClick={() => onDrill?.(undefined, `${label} — the work behind it`)}
-            title={onDrill ? 'Show the tasks these hours cover' : undefined}
+            aria-label={onDrill ? 'Show the tasks these hours cover' : undefined}
             className="rounded-lg bg-gray-50 px-3 py-2 text-left hover:bg-gray-100 disabled:cursor-default"
             disabled={!onDrill}
           >
@@ -276,7 +276,7 @@ export const VarianceCard: React.FC<{
               {shown.map((t) => {
                 const kind = shapeOf(t);
                 const pill = kind === 'over' ? 'bg-red-50 text-red-700'
-                  : kind === 'under' ? 'bg-green-50 text-green-700'
+                  : kind === 'under' ? 'bg-[#EEF2F8] text-[#1C3A70]'
                   : kind === 'exact' ? 'bg-[#EEF2F8] text-[#234788]'
                   : 'text-gray-400 ring-1 ring-inset ring-dashed ring-gray-200';
                 const priority = t.priority ? PRIORITY_LOOK[t.priority] : undefined;
@@ -338,7 +338,7 @@ const gapWords = (s: VarianceSummary) => {
   const pct = s.expected_seconds ? ` · ${Math.round(Math.abs(s.used - 1) * 100)}%` : '';
   return s.total > 0
     ? { text: `longer than estimated${pct}`, tone: 'text-red-600', short: `+${s.hours(s.total)}` }
-    : { text: `quicker than estimated${pct}`, tone: 'text-green-700', short: `−${s.hours(-s.total)}` };
+    : { text: `quicker than estimated${pct}`, tone: 'text-[#234788]', short: `−${s.hours(-s.total)}` };
 };
 
 /** How long the waves move each time the box comes into view before the water settles. */
@@ -468,7 +468,7 @@ export const GoalCard: React.FC<{ goals: GoalLite[] }> = ({ goals }) => {
         <li key={g.id}>
           <Link to={`/goals/${g.id}`} className="flex items-center gap-2 text-sm font-medium text-gray-800 no-underline hover:text-brand-700">
             <Target size={14} style={{ color: g.color }} /> <span className="min-w-0 flex-1 truncate">{g.name}</span>
-            {g.on_track !== null && <span className={`rounded-full px-1.5 text-[10px] ${g.on_track ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>{g.on_track ? 'On track' : 'Behind'}</span>}
+            {g.on_track !== null && <span className={`rounded-full px-1.5 text-[10px] ${g.on_track ? 'bg-[#EEF2F8] text-[#1C3A70]' : 'bg-amber-50 text-amber-800'}`}>{g.on_track ? 'On track' : 'Behind'}</span>}
             <span className="w-10 text-right text-xs text-gray-600">{Math.round(g.progress)}%</span>
           </Link>
           <div className="mt-1 h-2 overflow-hidden rounded-full bg-gray-100"><div className="h-full rounded-full" style={{ width: `${g.progress}%`, backgroundColor: g.color }} /></div>

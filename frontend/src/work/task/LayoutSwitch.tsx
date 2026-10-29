@@ -69,7 +69,7 @@ export const LayoutSwitch: React.FC<{ value: PanelLayout; onChange: (l: PanelLay
     <span ref={wrap} className="relative" onMouseDown={(e) => e.stopPropagation()}>
       <button
         type="button"
-        title="Switch layout"
+
         aria-label="Switch layout"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -91,7 +91,7 @@ export const LayoutSwitch: React.FC<{ value: PanelLayout; onChange: (l: PanelLay
                 type="button"
                 role="menuitemradio"
                 aria-checked={on}
-                title={o.hint}
+                aria-label={o.hint}
                 onClick={() => { onChange(o.value); setOpen(false); }}
                 className={`w-[5.5rem] rounded-lg p-2 text-center transition-colors ${on ? 'bg-brand-50 ring-1 ring-brand-300' : 'hover:bg-gray-50'}`}
               >

@@ -148,12 +148,10 @@ def create_task(
     list_id: uuid.UUID, data: s.TaskCreate, user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
     opened_list = open_list(db, user.id, list_id, VIEW)
-    # Typing a name and pressing Enter has to make a task. Refusing until five fields are
-    # filled turned the quickest way to capture work into the slowest, and work that cannot be
-    # captured in one breath gets written on paper instead. What is still missing is said on the
-    # row, in red, where it can be fixed in place -- see _check_details, which is still here and
-    # still describes the rule.
-    task = tasks.create_task(db, opened_list, data)
+    # A task somebody types in carries who, when and how big from the start (the firm's call,
+    # 2026-10-29): half-described tasks left the Dashboards guessing. The app's quick-add rows
+    # open the New task dialog with what was typed rather than posting a bare name.
+    task = tasks.create_task(db, opened_list, data, require_details=True)
     db.commit()
     return tasks.task_detail(db, open_task(db, user.id, task.id, VIEW))
 

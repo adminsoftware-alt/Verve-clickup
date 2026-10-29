@@ -98,22 +98,21 @@ def test_people_load_shows_what_is_already_booked_into_someones_days(api, worksp
     assert rows["admin"]["planned_total"] == 0
 
 
-def test_a_name_alone_is_enough_to_make_a_task(api, folderless_list):
-    """Capturing work has to take one line, or it gets written down somewhere we cannot see it.
+def test_a_typed_task_needs_its_details(api, folderless_list, monkeypatch):
+    """Who, when and how big are asked for before a task exists, not chased afterwards.
 
-    Who, when and how big still matter, and the List view says so on the row itself -- in red,
-    in the cells that are empty, where they can be filled in. What it no longer does is refuse
-    to record the work until all five are answered.
+    The rest of the suite creates bare tasks with the rule switched off (conftest); this test
+    switches it back on, as it is in the app.
     """
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "REQUIRE_TASK_DETAILS", True)
     now = datetime.now(timezone.utc)
     url = f"/lists/{folderless_list['id']}/tasks"
 
-    bare = ok(api.post(url, "owner", {"name": "Ring the auditor back"}), 201)
-    assert bare["name"] == "Ring the auditor back"
-    # Exactly the five the List view will mark, so the row can say what is still wanted.
-    assert bare["assignees"] == [] and bare["priority"] is None
-    assert bare["start_date"] is None and bare["due_date"] is None
-    assert bare["time_estimate_seconds"] is None
+    bare = api.post(url, "owner", {"name": "Ring the auditor back"})
+    assert bare.status_code == 400
+    for word in ("assignee", "start date", "due date", "estimate", "priority"):
+        assert word in bare.json()["detail"]
 
     full = ok(api.post(url, "owner", {
         "name": "Planned", "assignees": ["owner"], "start_date": iso(now), "due_date": iso(now),
@@ -126,11 +125,7 @@ def test_a_name_alone_is_enough_to_make_a_task(api, folderless_list):
 
 
 def test_the_planning_rule_still_says_what_a_task_is_missing():
-    """The rule itself is intact and still names each gap; nothing on the API asks for it.
-
-    It is kept because the wording is the specification of what the red cells mean, and because
-    a workspace that wants creation gated can have it back by passing require_details again.
-    """
+    """The rule names each gap, so the New task dialog and the API say the same thing."""
     from app.services.work.tasks import _check_details
     from app.schemas import work as s
     from app.services.work.errors import Invalid

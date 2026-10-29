@@ -90,7 +90,7 @@ export const TeamPage: React.FC = () => {
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-xl font-semibold text-gray-900">
             {team.name}
-            {isAdmin && <button aria-label="Rename team" type="button" title="Rename team" onClick={async () => { const n = await ask.prompt('Team name', team.name); if (n && n.trim() !== team.name) run(() => peopleApi.updateTeam(id, { name: n.trim() })); }} className="text-gray-300 hover:text-gray-600"><Pencil size={14} /></button>}
+            {isAdmin && <button aria-label="Rename team" type="button" onClick={async () => { const n = await ask.prompt('Team name', team.name); if (n && n.trim() !== team.name) run(() => peopleApi.updateTeam(id, { name: n.trim() })); }} className="text-gray-300 hover:text-gray-600"><Pencil size={14} /></button>}
           </h2>
           <p className="text-sm text-gray-500">{team.handle ? `@${team.handle} · ` : ''}{team.members.length} member{team.members.length === 1 ? '' : 's'}
             {(team.all_member_ids?.length ?? 0) > team.members.length && ` · ${team.all_member_ids!.length} counting sub-teams`}</p>
@@ -114,7 +114,7 @@ export const TeamPage: React.FC = () => {
         <span className="ml-auto flex gap-2">
           {isAdmin && <button type="button" onClick={() => setAdding(true)} className="flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"><Plus size={14} /> Add member</button>}
           {isAdmin && (
-            <button type="button" title="Delete team" onClick={async () => { if (await ask.confirm({ danger: true, title: `Delete the team “${team.name}”? Its members stay in the workspace; things shared with the team lose that sharing.` })) run(() => peopleApi.deleteTeam(id)).then(() => navigate('/people/teams')); }}
+            <button type="button" aria-label="Delete team" onClick={async () => { if (await ask.confirm({ danger: true, title: `Delete the team “${team.name}”? Its members stay in the workspace; things shared with the team lose that sharing.` })) run(() => peopleApi.deleteTeam(id)).then(() => navigate('/people/teams')); }}
               className="rounded-md border border-gray-200 p-1.5 text-gray-400 hover:text-red-600"><Trash2 size={15} /></button>
           )}
         </span>
@@ -191,7 +191,7 @@ export const TeamPage: React.FC = () => {
                     <li key={l.id} className="group flex items-center gap-2 text-sm">
                       {l.kind === 'space' ? <span className="h-4 w-4 rounded bg-brand-500" /> : l.kind === 'folder' ? <Folder size={15} className="text-gray-400" /> : <ListIcon size={15} className="text-gray-400" />}
                       <Link to={`/${l.kind === 'space' ? 's' : l.kind === 'folder' ? 'f' : 'l'}/${l.id}`} className="min-w-0 flex-1 truncate text-brand-700 no-underline hover:underline">{locName(l) ?? 'A place you can\'t open'}</Link>
-                      {canDescribe && <button aria-label="Unpin" type="button" title="Unpin" onClick={() => run(() => peopleApi.updateTeam(id, { locations: team.locations.filter((x) => x.id !== l.id) }))} className="text-gray-300 opacity-0 hover:text-red-600 group-hover:opacity-100"><X size={13} /></button>}
+                      {canDescribe && <button aria-label="Unpin" type="button" onClick={() => run(() => peopleApi.updateTeam(id, { locations: team.locations.filter((x) => x.id !== l.id) }))} className="text-gray-300 opacity-0 hover:text-red-600 group-hover:opacity-100"><X size={13} /></button>}
                     </li>
                   ))}
                 </ul>
@@ -230,7 +230,7 @@ export const TeamPage: React.FC = () => {
                         onChange={(e) => setMembers(memberIds, e.target.checked ? [...team.lead_ids, u.id] : team.lead_ids.filter((x) => x !== u.id))} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {isAdmin && <button aria-label={`Remove ${personName(u)} from the team`} type="button" title={`Remove ${personName(u)} from the team`} onClick={() => setMembers(memberIds.filter((x) => x !== u.id), team.lead_ids.filter((x) => x !== u.id))} className="text-gray-300 hover:text-red-600"><X size={15} /></button>}
+                      {isAdmin && <button aria-label={`Remove ${personName(u)} from the team`} type="button" onClick={() => setMembers(memberIds.filter((x) => x !== u.id), team.lead_ids.filter((x) => x !== u.id))} className="text-gray-300 hover:text-red-600"><X size={15} /></button>}
                     </td>
                   </tr>
                 );

@@ -115,7 +115,7 @@ const DayPicker: React.FC<{ day: string; onPick: (day: string) => void }> = ({ d
               key={d.toISOString()}
               type="button"
               disabled={ahead}
-              title={ahead ? 'Time can only be logged for work already done' : undefined}
+              aria-label={ahead ? 'Time can only be logged for work already done' : undefined}
               onClick={() => onPick(isoDay(d))}
               className={`h-7 rounded-md text-[13px] tabular-nums transition-colors ${
                 ahead ? 'cursor-not-allowed text-gray-200'
@@ -394,7 +394,7 @@ export const TrackTime: React.FC<{
               <button
                 type="button"
                 onClick={() => stop().then(() => { load(); onChanged(); })}
-                title="Stop the timer"
+                aria-label="Stop the timer"
                 className="flex h-10 shrink-0 items-center gap-2 rounded-lg bg-red-50 px-3 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100"
               >
                 <Square size={12} fill="currentColor" />
@@ -404,7 +404,7 @@ export const TrackTime: React.FC<{
               <button
                 type="button"
                 onClick={() => start(taskId).then(() => { load(); onChanged(); })}
-                title="Start a timer"
+
                 aria-label="Start a timer"
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white shadow-sm transition-colors hover:bg-brand-700"
               >

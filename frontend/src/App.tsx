@@ -52,7 +52,6 @@ const PreviewPage = lazy(() => import('./work/dashboards/PreviewPage').then((m) 
 const TimesheetsPage = lazy(() => import('./work/timesheets/TimesheetsPage').then((m) => ({ default: m.TimesheetsPage })));
 const PublicPage = lazy(() => import('./work/PublicPage').then((m) => ({ default: m.PublicPage })));
 const SpacesPage = lazy(() => import('./work/SpacesPage').then((m) => ({ default: m.SpacesPage })));
-const AllSpacesPage = lazy(() => import('./work/AllSpacesPage').then((m) => ({ default: m.AllSpacesPage })));
 const GoalsPage = lazy(() => import('./work/goals/GoalsPage').then((m) => ({ default: m.GoalsPage })));
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -136,7 +135,6 @@ const AppContent: React.FC = () => {
         <Route path="planner" element={<PlannerPage />} />
         <Route path="team-week" element={<TeamWeekPage />} />
         <Route path="compliance" element={<CompliancePage />} />
-        <Route path="all-spaces" element={<AllSpacesPage />} />
         <Route path="goals" element={<GoalsPage />} />
         <Route path="goals/:id" element={<GoalsPage />} />
         <Route path="forms/:viewId" element={<FormPage />} />

@@ -20,11 +20,17 @@ export interface ImportRow {
   email: string; name?: string; role?: string; designation?: string; department?: string; manager_email?: string; teams?: string;
   phone?: string; employee_code?: string; date_of_joining?: string; date_of_birth?: string; marriage_anniversary?: string; location?: string;
   level?: number; employment_type?: string; emergency_contact_name?: string; emergency_contact_phone?: string;
+  /** The whole address as the app keeps it, built from the workbook's address columns. */
+  address?: string;
 }
 export interface ImportTeam { name: string; parent?: string; description?: string }
 export interface ImportResult {
   dry_run: boolean; added: number; updated: number; errors: number; email_problem: string | null;
   teams_created: string[]; team_problems: string[];
+  /** False when nothing was saved: a check, or a file that still had problems. */
+  saved?: boolean;
+  /** Rows that would go in but with something not found (a Team, a manager). */
+  warnings?: number;
   rows: { row: number; email: string; outcome: 'added' | 'updated' | 'unchanged' | 'error'; problems: string[] }[];
 }
 export interface OffboardPreview {
@@ -110,8 +116,14 @@ export const peopleApi = {
   deleteTeam: (id: string) => request('DELETE', `/teams/${id}`),
   overview: (id: string) => request<TeamOverview>('GET', `/teams/${id}/overview`),
 
-  importPeople: (ws: string, body: { rows: ImportRow[]; teams?: ImportTeam[]; dry_run: boolean; send_invites?: boolean; start_joiner_checklist?: boolean; update_existing?: boolean }) =>
+  importPeople: (ws: string, body: { rows: ImportRow[]; teams?: ImportTeam[]; dry_run: boolean; send_invites?: boolean; start_joiner_checklist?: boolean; update_existing?: boolean; all_or_nothing?: boolean }) =>
     request<ImportResult>('POST', `/workspaces/${ws}/people/import`, body),
+  /** Every Team's open and late tasks and this week's planned hours against capacity, by team id (admins). */
+  teamFigures: (ws: string) =>
+    request<Record<string, { open: number; overdue: number; planned: number; capacity: number }>>('GET', `/workspaces/${ws}/teams/figures`, undefined, { tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
+  /** Move the open tasks of some people to one other person (Managers: within their team). */
+  handOver: (ws: string, fromIds: string[], toId: string) =>
+    request<{ moved: number; skipped: { id: string; name: string; reason: string }[] }>('POST', `/workspaces/${ws}/people/hand-over`, { from_ids: fromIds, to_id: toId }),
   offboardPreview: (ws: string, userId: string) => request<OffboardPreview>('GET', `/workspaces/${ws}/people/${encodeURIComponent(userId)}/offboard`),
   costs: (ws: string) => request<CostSummary>('GET', `/workspaces/${ws}/costs`),
   costSuggestions: (ws: string) => request<CostSuggestion[]>('GET', `/workspaces/${ws}/costs/suggestions`),

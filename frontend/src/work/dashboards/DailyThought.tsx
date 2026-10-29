@@ -8,7 +8,8 @@
 // looking at their Dashboards at the same time are reading the same line. That is what makes it
 // something to mention to each other rather than a private fortune cookie.
 //
-// Beside the greeting, this week as a row of days, Monday to Sunday, with today filled in navy.
+// A navy band: the greeting, this week as a row of days (today filled white, a dot under days
+// with time logged), and the quote in white.
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Compass, Eye, Feather, Flame, Footprints, Gem, Hammer, Hourglass, Layers, Leaf, Lightbulb, Mountain, Quote, Ruler,
@@ -17,6 +18,7 @@ import {
 
 import { useWork } from '../WorkContext';
 import { isoDay, sheetApi, type Timesheet } from '../timesheets/api';
+import { MonthCalendar } from './MonthCalendar';
 
 interface Thought {
   words: string;
@@ -73,16 +75,43 @@ const THOUGHTS: Thought[] = [
 const dayNumber = (d: Date) =>
   Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86_400_000);
 
-/** "Good evening," quietly, then the name in bold navy: the name is the warm part. */
-const Hello: React.FC<{ greeting: string }> = ({ greeting }) => {
+/** Today, set as type alone: the weekday in spaced capitals, the day very large, a hairline, then
+ *  the month and year. A click opens your own month in a calendar right here. */
+const DateBlock: React.FC<{ today: Date }> = ({ today }) => (
+  <span className="flex flex-col items-center text-center">
+    <span className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[#A9C1E8]">{today.toLocaleDateString(undefined, { weekday: 'long' })}</span>
+    <span className="mt-1 font-display text-[56px] font-bold leading-none tracking-[-0.04em] text-white tabular-nums">{today.getDate()}</span>
+    <span className="my-2 block h-px w-10 bg-white/30" aria-hidden />
+    <span className="text-[12px] font-medium tracking-wide text-white/70">{today.toLocaleDateString(undefined, { month: 'long' })} {today.getFullYear()}</span>
+  </span>
+);
+
+/** "Good afternoon, Harsh" split into its two halves; a greeting without a name is all greeting. */
+const split = (greeting: string) => {
   const cut = greeting.indexOf(', ');
-  if (cut < 0) return <p className="text-xl font-bold text-[#234788]">{greeting}</p>;
-  return (
-    <p className="text-[15px] text-gray-500">
-      {greeting.slice(0, cut)}, <span className="text-xl font-bold text-[#234788]">{greeting.slice(cut + 2)}</span>
-    </p>
-  );
+  return cut < 0 ? { hello: greeting, name: '' } : { hello: greeting.slice(0, cut), name: greeting.slice(cut + 2) };
 };
+type Day = { d: string; works: boolean; logged: number };
+
+/** The week as seven small circles: today filled navy, working days pale, a dot under days with time logged. */
+const WeekDots: React.FC<{ days: Day[]; todayIso: string; dark?: boolean }> = ({ days, todayIso, dark }) => (
+  <div className="flex gap-1.5" aria-label="This week">
+    {days.map(({ d, works, logged }) => {
+      const today = d === todayIso;
+      return (
+        <span key={d} className="flex flex-col items-center gap-1">
+          <span aria-label={`${d}${today ? ', today' : ''}${logged ? ', time logged' : ''}`} aria-current={today ? 'date' : undefined}
+            className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold ${today
+              ? (dark ? 'bg-white text-[#142B57]' : 'bg-[#234788] text-white')
+              : works ? (dark ? 'bg-white/10 text-white/80' : 'bg-[#EEF2F8] text-[#6B7FA8]') : (dark ? 'text-white/30' : 'text-gray-300')}`}>
+            {new Date(d + 'T00:00').toLocaleDateString(undefined, { weekday: 'narrow' })}
+          </span>
+          <span className={`h-1 w-1 rounded-full ${logged ? (dark ? 'bg-sky-300' : 'bg-[#234788]') : 'bg-transparent'}`} aria-hidden />
+        </span>
+      );
+    })}
+  </div>
+);
 
 export const DailyThought: React.FC<{
   /** "Good morning, Harish" — kept, because being greeted by name is the warm part. */
@@ -108,45 +137,60 @@ export const DailyThought: React.FC<{
   const todayIso = isoDay(today);
   // Monday to Sunday, whatever day the timesheet week starts on.
   const mondayFirst = (d: string) => (new Date(d + 'T00:00').getDay() + 6) % 7;
-  const days = week
-    ? week.days.map((d, i) => ({ d, works: (week.capacity_per_day[i] ?? 0) > 0 })).sort((a, b) => mondayFirst(a.d) - mondayFirst(b.d))
+  const days: Day[] = week
+    ? week.days.map((d, i) => ({ d, works: (week.capacity_per_day[i] ?? 0) > 0, logged: week.tracked_per_day?.[i] ?? 0 }))
+      .sort((a, b) => mondayFirst(a.d) - mondayFirst(b.d))
     : [];
+  const { hello, name } = split(greeting);
+  const [calendarAt, setCalendarAt] = useState<DOMRect | null>(null);
+  const date = today.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  const Icon = thought.Icon;
+
+  // The greeting as a quiet label over the name, set large in the display face. No pictures: the
+  // name is the warm part, and it is enough. The date has a page of its own, beside it.
+  const greet = (
+    <div>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#A9C1E8]">{hello}</p>
+      <p className="mt-1 font-display text-[30px] font-bold leading-none tracking-[-0.02em] text-white">{name || hello}</p>
+      {/* A phone has no room for the date column, so the date sits here instead and opens the same calendar. */}
+      <button type="button" data-calendar-trigger aria-haspopup="dialog" aria-expanded={!!calendarAt}
+        onClick={(e) => setCalendarAt(calendarAt ? null : e.currentTarget.getBoundingClientRect())}
+        className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-white/10 px-2 py-1 text-[12px] font-medium text-white/80 sm:hidden">
+        {date}
+      </button>
+    </div>
+  );
+
+  // Today, in a column of its own on the left of the band, a shade lighter than the navy. The whole
+  // column opens your month, in place, under the date.
+  const calendar = (
+    <button type="button" data-calendar-trigger aria-label={`Today, ${date}. Show my calendar`} aria-haspopup="dialog" aria-expanded={!!calendarAt}
+      onClick={(e) => setCalendarAt(calendarAt ? null : e.currentTarget.getBoundingClientRect())}
+      className={`flex w-40 shrink-0 cursor-pointer items-center justify-center border-r border-white/10 px-4 py-5 transition-colors max-sm:hidden ${calendarAt ? 'bg-white/[0.12]' : 'bg-white/[0.05] hover:bg-white/[0.1]'}`}>
+      <DateBlock today={today} />
+    </button>
+  );
 
   return (
-    <section
-      aria-label="Thought of the day"
-      className="relative mb-4 overflow-hidden rounded-2xl bg-gradient-to-r from-white via-white to-[#EEF2F8] px-6 py-5 pl-7 ring-1 ring-[#DCE3EE]"
-    >
-      <span className="absolute inset-y-0 left-0 w-1 bg-[#234788]" aria-hidden />
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Hello greeting={greeting} />
-        <div className="flex gap-1.5" aria-label="This week">
-          {days.map(({ d, works }) => (
-            <span
-              key={d}
-              aria-label={`${d}${d === todayIso ? ', today' : ''}`}
-              aria-current={d === todayIso ? 'date' : undefined}
-              className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold ${
-                d === todayIso ? 'bg-[#234788] text-white'
-                  : works ? 'bg-[#EEF2F8] text-[#6B7FA8]' : 'text-gray-300'}`}
-            >
-              {new Date(d + 'T00:00').toLocaleDateString(undefined, { weekday: 'narrow' })}
-            </span>
-          ))}
+    <>
+      <section aria-label="Thought of the day" className="relative mb-4 flex overflow-hidden rounded-2xl bg-[#1E3D78] text-white">
+        {calendar}
+        {calendarAt && <MonthCalendar anchor={calendarAt} onClose={() => setCalendarAt(null)} />}
+        <div className="relative min-w-0 flex-1 px-7 py-6">
+          <Quote size={150} strokeWidth={1} className="pointer-events-none absolute -right-4 -top-6 text-white/[0.06]" aria-hidden />
+          <div className="relative flex flex-wrap items-center justify-between gap-3">
+            {greet}
+            <WeekDots days={days} todayIso={todayIso} dark />
+          </div>
+          <figure className="relative mt-5 max-w-4xl">
+            <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-200/80">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-white/10 text-white"><Icon size={13} /></span> Thought of the day
+            </p>
+            <blockquote className="mt-3 text-xl font-semibold leading-snug tracking-tight sm:text-[27px]">“{thought.words}”</blockquote>
+            <figcaption className="mt-2.5 flex items-center gap-2 text-sm font-medium text-white/60"><span className="h-px w-8 bg-white/30" aria-hidden /> {thought.who}</figcaption>
+          </figure>
         </div>
-      </div>
-      <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#EEF2F8] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[#234788]">
-        Thought of the day
-      </span>
-      <figure className="relative mt-3 max-w-4xl pr-16">
-        <blockquote className="text-xl font-semibold leading-snug tracking-tight text-[#142B57] sm:text-[26px]">
-          “{thought.words}”
-        </blockquote>
-        <figcaption className="mt-2 flex items-center gap-2 text-sm font-medium text-gray-500">
-          <span className="h-px w-6 bg-gray-300" aria-hidden /> {thought.who}
-        </figcaption>
-      </figure>
-      <Quote size={64} strokeWidth={1.25} className="pointer-events-none absolute bottom-3 right-5 text-[#234788]/10" aria-hidden />
-    </section>
+      </section>
+    </>
   );
 };

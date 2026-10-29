@@ -41,7 +41,7 @@ export const FavoriteStar: React.FC<{ kind: FavoriteKind; id: string; className?
   const { isFavorite, toggle } = useFavorites();
   const on = isFavorite(kind, id);
   return (
-    <button type="button" aria-pressed={on} title={on ? 'Remove from Favourites' : 'Add to Favourites'} aria-label={on ? 'Remove from Favourites' : 'Add to Favourites'}
+    <button type="button" aria-pressed={on} aria-label={on ? 'Remove from Favourites' : 'Add to Favourites'}
       onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(kind, id); }}
       className={`${className ?? ''} rounded p-1 ${on ? 'text-amber-500' : 'text-gray-300 hover:text-amber-500'}`}>
       <Star size={size} fill={on ? 'currentColor' : 'none'} />
@@ -97,7 +97,7 @@ export const FavoritesNav: React.FC = () => {
             className={`group flex items-center gap-2 rounded-lg py-1 pl-6 pr-1 text-sm ${active ? 'bg-brand-50 text-brand-700' : 'text-gray-700 hover:bg-black/5'}`}>
             {iconOf(f)}
             <Link to={href} className="min-w-0 flex-1 truncate text-inherit no-underline">{f.name}</Link>
-            <button aria-label="Remove from Favourites" type="button" title="Remove from Favourites" onClick={() => toggle(f.kind, f.target_id)} className="rounded p-0.5 text-gray-300 opacity-0 hover:text-gray-600 group-hover:opacity-100"><X size={12} /></button>
+            <button aria-label="Remove from Favourites" type="button" onClick={() => toggle(f.kind, f.target_id)} className="rounded p-0.5 text-gray-300 opacity-0 hover:text-gray-600 group-hover:opacity-100"><X size={12} /></button>
           </div>
         );
       })}

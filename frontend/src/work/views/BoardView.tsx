@@ -8,6 +8,7 @@ import { TypeIcon } from '../LocationSettings';
 import { RowMenu } from './RowMenu';
 import { useUnreadTasks } from './useUnreadTasks';
 import { statusForStep, type Step } from './progress';
+import { DuePicker, PriorityPicker } from '../task/InlineFields';
 import { notify } from '../../components/notify';
 
 /** Today plus `days`, as YYYY-MM-DD in this browser's own time zone. */
@@ -222,6 +223,28 @@ export const BoardView: React.FC<{
         {/* The same order on every card: people, when, how urgent, then the counts. */}
         <div className="mt-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 pl-6 text-xs text-gray-500">
           {task.assignees.length > 0 && <AvatarStack users={task.assignees} max={3} />}
+          {editable(task) ? (
+            // Due date and priority change right on the card; a late task keeps its one-click
+            // reschedule beside the date.
+            <>
+              <DuePicker task={task} onSave={(input, opt) => save(task, input, opt as Partial<Task>)} />
+              {task.is_overdue && !done && (
+                <span onClick={(e) => e.stopPropagation()} className="-ml-2 inline-flex">
+                  <Menu
+                    label={`Reschedule ${task.name}`}
+                    triggerClassName="inline-flex"
+                    items={[
+                      { label: 'Today', icon: <CalendarClock size={14} />, onClick: () => reschedule(task, 0) },
+                      { label: 'Tomorrow', icon: <CalendarClock size={14} />, onClick: () => reschedule(task, 1) },
+                      { label: 'Next Monday', icon: <CalendarClock size={14} />, onClick: () => reschedule(task, ((8 - new Date().getDay()) % 7) || 7) },
+                    ]}
+                    trigger={<span aria-label="Reschedule" className="flex rounded-md p-0.5 text-red-500 hover:bg-red-50"><CalendarClock size={13} /></span>}
+                  />
+                </span>
+              )}
+              <PriorityPicker task={task} withLabel={!!task.priority && task.priority <= 2} onSave={(input, opt) => save(task, input, opt as Partial<Task>)} />
+            </>
+          ) : (<>
           {task.due_date && (task.is_overdue && !done ? (
             <span className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
               <span className="rounded-full border border-[#FECDCA] bg-[#FEF3F2] px-2 py-px font-medium text-[#B42318]">{formatDue(task.due_date)}</span>
@@ -245,6 +268,7 @@ export const BoardView: React.FC<{
               <PriorityFlag priority={task.priority} withLabel={false} />{PRIORITIES[task.priority].label}
             </span>
           )}
+          </>)}
           {task.subtask_count > 0 && <span className="inline-flex items-center gap-0.5"><GitBranch size={12} />{task.subtask_count}</span>}
           {!!task.checklist_total && <span className="inline-flex items-center gap-0.5"><CheckSquare size={12} />{task.checklist_done}/{task.checklist_total}</span>}
           {!!task.comment_count && <span className="inline-flex items-center gap-0.5"><MessageSquare size={12} />{task.comment_count}</span>}
@@ -320,6 +344,7 @@ export const BoardView: React.FC<{
           at={cardMenu.at}
           statuses={statuses ?? listStatuses[cardMenu.task.list_id] ?? [cardMenu.task.status]}
           canEdit={editable(cardMenu.task)}
+          siblings={tasks}
           onOpen={() => onOpenTask(cardMenu.task.id)}
           onStatus={(st) => save(cardMenu.task, { status_id: st.id }, { status: st })}
           onChanged={() => onChanged?.()}

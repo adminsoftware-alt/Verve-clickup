@@ -164,7 +164,7 @@ export const CalendarView: React.FC<{
                   </span>
                   {/* How busy the day is, before any of it is read. */}
                   {items.length > 0 && (
-                    <span className="h-1 flex-1 overflow-hidden rounded-full bg-gray-100" title={`${items.length} task${items.length === 1 ? '' : 's'}`}>
+                    <span className="h-1 flex-1 overflow-hidden rounded-full bg-gray-100" aria-label={`${items.length} task${items.length === 1 ? '' : 's'}`}>
                       <span
                         className={`block h-full rounded-full ${
                           late ? 'bg-red-500' : items.length >= busiest * 0.7 ? 'bg-orange-400' : 'bg-teal-400'}`}
@@ -194,7 +194,7 @@ export const CalendarView: React.FC<{
                         draggable={t.permission_level === 'edit' || t.permission_level === 'full'}
                         onDragStart={(e) => e.dataTransfer.setData('text/task-id', t.id)}
                         onClick={() => onOpenTask(t.id)}
-                        title={`${t.name}${t.status ? ` — ${t.status.name}` : ''}`}
+                        aria-label={`${t.name}${t.status ? ` — ${t.status.name}` : ''}`}
                         className={`relative w-full overflow-hidden rounded-md border py-1 pl-2 pr-1.5 text-left shadow-[0_1px_1px_rgba(0,0,0,0.03)] transition-shadow hover:shadow-md ${
                           t.is_overdue ? 'border-red-300 bg-red-100/80'
                             : done ? 'border-gray-200 bg-gray-50'

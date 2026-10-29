@@ -1,12 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Archive, ArchiveRestore, Bell, Copy, Eye, EyeOff, GitMerge, LayoutTemplate, Link2, ListPlus, MoreHorizontal, MoveRight, Star, Trash2, Users, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Bell, Copy, Eye, EyeOff, GitMerge, Link2, ListPlus, MoreHorizontal, MoveRight, Star, Trash2, Users, X } from 'lucide-react';
 import { ShareWithPeople } from './ShareWithPeople';
 import { spacesApi } from '../spacesApi';
 import { FEATURES } from '../../config/features';
 import { PeoplePicker } from '../PeoplePicker';
 import { ALL_PARTS, PART_LABELS, type CopyParts } from './CopyParts';
 import { notify } from '../../components/notify';
-import { SaveTemplateDialog } from '../templates/Templates';
 import { MergeDialog } from './TaskLinks';
 import { ListPicker } from './ListPicker';
 import { useFavorites } from '../Favorites';
@@ -21,7 +20,7 @@ const Dialog: React.FC<{ title: string; onClose: () => void; children: React.Rea
       <div role="dialog" aria-label={title} onMouseDown={(e) => e.stopPropagation()} className="w-[26rem] max-w-[calc(100vw-2rem)] rounded-xl bg-white p-5 shadow-xl">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-semibold text-gray-900">{title}</h3>
-          <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+          <button type="button" aria-label="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
         </div>
         {children}
       </div>
@@ -274,7 +273,7 @@ export const TaskActions: React.FC<{
   task: TaskDetail; onChanged: () => void; onReload: () => void; onOpen: (id: string) => void; onDeleted: () => void;
 }> = ({ task, onChanged, onReload, onOpen, onDeleted }) => {
   const [watch, setWatch] = useState<{ watchers: { id: string; email: string; display_name: string | null }[]; watching: boolean } | null>(null);
-  const [dialog, setDialog] = useState<'move' | 'duplicate' | 'remind' | 'template' | 'merge' | 'share' | 'add-list' | null>(null);
+  const [dialog, setDialog] = useState<'move' | 'duplicate' | 'remind' | 'merge' | 'share' | 'add-list' | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const favorites = useFavorites();
   const me = useMe();
@@ -292,18 +291,18 @@ export const TaskActions: React.FC<{
       {note && <span className="mr-1 text-xs text-emerald-700">{note}</span>}
       {FEATURES.taskWatchers && (
         <>
-          <button type="button" onClick={toggleWatch} title={watch?.watching ? 'Stop watching' : 'Watch this task'}
+          <button type="button" onClick={toggleWatch} aria-label={watch?.watching ? 'Stop watching' : 'Watch this task'}
             className={`flex items-center gap-1 rounded px-1.5 py-1 text-xs ${watch?.watching ? 'text-brand-600' : 'text-gray-400'} hover:bg-gray-100`}>
             {watch?.watching ? <Eye size={15} /> : <EyeOff size={15} />} {watch?.watchers.length ?? ''}
           </button>
           {watch && watch.watchers.length > 0 && (
-            <span className="mr-1 hidden -space-x-1.5 sm:flex" title={watch.watchers.map((w) => w.display_name || w.email).join(', ')}>
+            <span className="mr-1 hidden -space-x-1.5 sm:flex" aria-label={watch.watchers.map((w) => w.display_name || w.email).join(', ')}>
               {watch.watchers.slice(0, 3).map((w) => <Avatar key={w.id} user={w} size={20} />)}
             </span>
           )}
         </>
       )}
-      <button type="button" title="Set a reminder" onClick={() => setDialog('remind')} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Bell size={15} /></button>
+      <button type="button" aria-label="Set a reminder" onClick={() => setDialog('remind')} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Bell size={15} /></button>
       <Menu align="right" label="Task actions" items={[
         { label: 'Copy link', icon: <Link2 size={14} />, onClick: () => { navigator.clipboard?.writeText(`${window.location.origin}/l/${task.list_id}?task=${task.id}`); flash('Link copied'); } },
         // A copy takes edit on the task: with comment access it would be a way round the cap.
@@ -311,9 +310,6 @@ export const TaskActions: React.FC<{
         // Beside Duplicate on purpose: the two are the choice between a copy each and one task
         // between them, and that is a choice best made with both in front of you.
         ...(full ? [{ label: 'Share with people…', icon: <Users size={14} />, onClick: () => setDialog('share') }] : []),
-        // The Spaces menu gates its own "Save as template" the same way; this one was missed,
-        // which is why it was still on a task while the rest of templates was off.
-        ...(FEATURES.templates ? [{ label: 'Save as template', icon: <LayoutTemplate size={14} />, onClick: () => setDialog('template') }] : []),
         { label: favorites.isFavorite('task', task.id) ? 'Remove from Favourites' : 'Add to Favourites', icon: <Star size={14} />, onClick: () => favorites.toggle('task', task.id) },
         // 'Add to my LineUp' was here. The LineUp itself still works from My Tasks.
         ...[],
@@ -342,7 +338,6 @@ export const TaskActions: React.FC<{
       )}
       {dialog === 'add-list' && <AddToListDialog task={task} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); onChanged(); }} />}
       {dialog === 'merge' && <MergeDialog task={task} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onReload(); onChanged(); }} />}
-      {FEATURES.templates && dialog === 'template' && <SaveTemplateDialog kind="task" id={task.id} name={task.name} onClose={() => setDialog(null)} />}
       {dialog === 'remind' && <ReminderDialog taskId={task.id} defaultTitle={task.name} onClose={() => setDialog(null)} onDone={() => { setDialog(null); flash('Reminder set'); }} />}
     </>
   );

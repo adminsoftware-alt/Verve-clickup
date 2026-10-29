@@ -166,7 +166,7 @@ export const RichTextEditor: React.FC<{ value: string; disabled?: boolean; onSav
     <div className="rounded-md border border-brand-400">
       <div className="flex flex-wrap gap-0.5 border-b border-gray-100 px-1.5 py-1" role="toolbar" aria-label="Formatting">
         {TOOLS.map((t) => (
-          <button key={t.label} type="button" title={`${t.label}${t.key ? ` (Ctrl+${t.key.toUpperCase()})` : ''}`} aria-label={t.label}
+          <button key={t.label} type="button" aria-label={t.label}
             onMouseDown={(e) => { e.preventDefault(); apply(t.wrap); }} className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900">{t.icon}</button>
         ))}
         <span className="ml-auto self-center pr-1 text-[11px] text-gray-400">Markdown · click outside to save</span>

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { Task, UserRef } from '../api';
-import { Avatar, StatusDot, formatDue, formatDuration } from '../ui';
+import { Avatar, formatDuration } from '../ui';
+import { DuePicker, StatusPicker, canEditTask, useTaskDraft } from '../task/InlineFields';
 
 const WEEK = 7 * 86_400_000;
 
@@ -57,16 +58,7 @@ export const TeamView: React.FC<{
     });
   }, [tasks, people, everyone]);
 
-  const row = (t: Task) => (
-    <li key={t.id}>
-      <button type="button" onClick={() => onOpenTask(t.id)} className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-gray-50">
-        <StatusDot status={t.status} size={11} />
-        <span className={`min-w-0 flex-1 truncate text-sm ${t.status.group === 'closed' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{t.name}</span>
-        {t.due_date && <span className={`shrink-0 text-[11px] ${t.is_overdue ? 'font-medium text-red-600' : 'text-gray-400'}`}>{formatDue(t.due_date)}</span>}
-      </button>
-      <span className="sr-only">{listName(t.list_id)}</span>
-    </li>
-  );
+  const row = (t: Task) => <TeamRow key={t.id} task={t} where={listName(t.list_id)} onOpen={() => onOpenTask(t.id)} />;
   const section = (title: string, items: Task[], empty: string) => (
     <section className="mt-2">
       <h4 className="px-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{title} <span className="font-normal">{items.length || ''}</span></h4>
@@ -102,5 +94,22 @@ export const TeamView: React.FC<{
         </div>
       )}
     </div>
+  );
+};
+
+/** A person's task: the name opens it; status and due date change in place. */
+const TeamRow: React.FC<{ task: Task; where: string | null; onOpen: () => void }> = ({ task, where, onOpen }) => {
+  const [t, save] = useTaskDraft(task);
+  const can = canEditTask(t);
+  return (
+    <li className="flex items-center gap-2 rounded px-1.5 py-0.5 hover:bg-gray-50">
+      <StatusPicker task={t} disabled={!can} onSave={save} />
+      <button type="button" onClick={onOpen}
+        className={`min-w-0 flex-1 truncate text-left text-sm ${t.status.group === 'closed' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+        {t.name}
+      </button>
+      <DuePicker task={t} disabled={!can} onSave={save} />
+      <span className="sr-only">{where}</span>
+    </li>
   );
 };

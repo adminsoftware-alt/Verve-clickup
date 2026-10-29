@@ -1,8 +1,8 @@
 // The bar of tabs across the bottom of a phone: Dashboard, Tasks, Timesheet, Spaces.
 //
 // The same four for everybody; whose work each one shows is the switch at the top of the page
-// (MobileScope.tsx). Notifications are the bell in the header, and People & Teams, Settings and
-// Admin are under your avatar -- so there is no "More" drawer to open.
+// (MobileScope.tsx). Notifications are the bell in the header, and My team (People, for an admin),
+// Settings and Admin are under your avatar -- so there is no "More" drawer to open.
 //
 // Each tab goes back to where it was left: a manager who looks at their Team's dashboard lands
 // there next time, not on their own.

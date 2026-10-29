@@ -132,7 +132,7 @@ const Thumb: React.FC<{ file: CommentFile }> = ({ file }) => {
     return () => { gone = true; if (made) URL.revokeObjectURL(made); };
   }, [file.id]);
   return (
-    <button type="button" title={file.filename} onClick={() => openAttachment(file)} className="block overflow-hidden rounded-md border border-gray-200 bg-gray-50">
+    <button type="button" aria-label={file.filename} onClick={() => openAttachment(file)} className="block overflow-hidden rounded-md border border-gray-200 bg-gray-50">
       {url ? <img src={url} alt={file.filename} className="h-24 max-w-[12rem] object-cover" /> : <span className="skeleton block h-24 w-32" role="status" aria-label="Loading" />}
     </button>
   );
@@ -144,7 +144,7 @@ export const CommentFiles: React.FC<{ files: CommentFile[] }> = ({ files }) => {
   return (
     <div className="mt-1.5 flex flex-wrap gap-2">
       {files.map((f) => (isImage(f) ? <Thumb key={f.id} file={f} /> : (
-        <button key={f.id} type="button" onClick={() => openAttachment(f)} title="Open"
+        <button key={f.id} type="button" onClick={() => openAttachment(f)} aria-label="Open"
           className="flex max-w-[14rem] items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 hover:border-brand-300">
           <FileText size={13} className="shrink-0 text-gray-400" /><span className="truncate">{f.filename}</span>
         </button>

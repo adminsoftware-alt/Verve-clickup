@@ -6,7 +6,7 @@ import {
 import { useWork, useMe } from './WorkContext';
 import { useAuth } from '../components/AuthContext';
 import { workApi, type Status, type Task, type TaskDetail, type TaskGroup, type TaskInput, type UserRef } from './api';
-import { Menu, PRIORITIES, Portal, StatusDot, formatDuration, useEscapeToClose } from './ui';
+import { Menu, PRIORITIES, Portal, StatusDot, useEscapeToClose } from './ui';
 import { ShareDialog } from './ShareDialog';
 import { AssigneePicker } from './task/AssigneePicker';
 import { rememberTask } from './recent';
@@ -91,9 +91,6 @@ const Picker: React.FC<{
   );
 };
 
-/** Every control in the panel is the same height and shows its edges only under the pointer. */
-const inputClass =
-  'h-7 w-full rounded-md border border-transparent bg-transparent px-2 text-sm text-gray-800 hover:border-gray-200 hover:bg-gray-50 focus:border-brand-400 focus:bg-white focus:outline-none';
 
 export const TaskPanel: React.FC<{
   taskId: string; onClose: () => void; onChanged: () => void; onOpen: (id: string) => void;
@@ -175,9 +172,6 @@ export const TaskPanel: React.FC<{
   const assigneeIds = new Set(task?.assignees.map((a) => a.id));
   // As in ClickUp, an assignee with comment access can still change the status.
   const canChangeStatus = editable || (task?.permission_level === 'comment' && !!user && assigneeIds.has(meId));
-  // The Space's ClickApps decide which fields show (missing = the ClickUp default).
-  const apps = hierarchy?.spaces.find((sp) => sp.id === task?.location.space.id)?.clickapps ?? {};
-  const on = (name: keyof typeof apps, fallback = true) => apps[name] ?? fallback;
 
   return (
     <Portal>
@@ -218,12 +212,12 @@ export const TaskPanel: React.FC<{
                 {task.is_private && <Lock size={12} className="ml-1" />}
               </nav>
               <div className="flex items-center gap-1">
-                <button type="button" title="Share task" onClick={() => setSharing(true)} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
+                <button type="button" aria-label="Share task" onClick={() => setSharing(true)} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
                   <Share2 size={16} />
                 </button>
                 <LayoutSwitch value={layout} onChange={setLayout} />
                 <TaskActions task={task} onChanged={onChanged} onReload={() => { load(); setFeedKey((k) => k + 1); }} onOpen={onOpen} onDeleted={remove} />
-                <button type="button" title="Close" onClick={onClose} className="rounded p-1.5 text-gray-400 hover:bg-gray-100">
+                <button type="button" aria-label="Close" onClick={onClose} className="rounded p-1.5 text-gray-400 hover:bg-gray-100">
                   <X size={18} />
                 </button>
               </div>
@@ -237,8 +231,8 @@ export const TaskPanel: React.FC<{
                 fields across a 27-inch monitor. */}
             <div className={`min-w-0 flex-1 overflow-y-auto px-6 py-4 ${layout === 'full' ? '[&>*]:mx-auto [&>*]:w-full [&>*]:max-w-5xl' : ''}`}>
               <div className="mb-1 flex items-center gap-2">
-                {task.custom_id && on('custom_task_ids') && (
-                  <button type="button" title="Copy task ID" onClick={() => navigator.clipboard?.writeText(task.custom_id!)}
+                {task.custom_id && (
+                  <button type="button" aria-label="Copy task ID" onClick={() => navigator.clipboard?.writeText(task.custom_id!)}
                     className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-600 hover:bg-gray-200">{task.custom_id}</button>
                 )}
                 {task.parent_id && (
@@ -289,7 +283,7 @@ export const TaskPanel: React.FC<{
                     }))}
                   />
                 </Field>
-                {on('priorities') && <Field label="Priority" icon={<Flag size={14} />}>
+                <Field label="Priority" icon={<Flag size={14} />}>
                   <Picker
                     label="Priority"
                     disabled={!editable}
@@ -315,7 +309,7 @@ export const TaskPanel: React.FC<{
                       onPick: () => save({ priority: null }),
                     }]}
                   />
-                </Field>}
+                </Field>
                 <Field label="Assignees" icon={<Users size={14} />} wide>
                   <AssigneePicker
                     listId={task.list_id}
@@ -323,7 +317,7 @@ export const TaskPanel: React.FC<{
                     assignable={assignable}
                     editable={editable}
                     canShare={task.permission_level === 'full'}
-                    multiple={on('multiple_assignees')}
+                    multiple
                     onChange={(ids) => save({ assignees: ids })}
                     onShared={() => workApi.assignable('list', task.list_id).then(setAssignable).catch(() => undefined)}
                   />
@@ -342,7 +336,7 @@ export const TaskPanel: React.FC<{
                   />
                 </Field>
 
-                {on('time_estimates') && <Field label="Time estimate" icon={<Hourglass size={14} />}>
+                <Field label="Time estimate" icon={<Hourglass size={14} />}>
                   <DurationInput
                     key={task.id + String(task.time_estimate_seconds)}
                     label="Time estimate"
@@ -351,8 +345,8 @@ export const TaskPanel: React.FC<{
                     placeholder="3, 2.30, 45m"
                     onChange={(seconds) => { if (seconds !== task.time_estimate_seconds) save({ time_estimate_seconds: seconds }); }}
                   />
-                </Field>}
-                {on('time_tracking') && <Field label="Track time" icon={<Timer size={14} />}>
+                </Field>
+                <Field label="Track time" icon={<Timer size={14} />}>
                   {/* Beside the estimate on purpose: how long you thought it would take and how
                       long it did are the same question asked twice. */}
                   <Popover
@@ -365,7 +359,7 @@ export const TaskPanel: React.FC<{
                       <button
                         type="button"
                         onClick={open}
-                        title={task.time_tracked_seconds ? `${formatDuration(task.time_tracked_seconds)} tracked — open the timer and entries` : 'Start the timer, or add time'}
+
                         aria-label="Track time"
                         className={`flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-left text-sm transition-colors ${
                           task.time_tracked_seconds
@@ -386,7 +380,7 @@ export const TaskPanel: React.FC<{
                       />
                     )}
                   </Popover>
-                </Field>}
+                </Field>
                 <Field label="Type" icon={<Shapes size={14} />}>
                   <Select
                     label="Task type"
@@ -424,18 +418,7 @@ export const TaskPanel: React.FC<{
                     }}
                   />
                 </Field>}
-                {on('sprint_points', false) && (
-                  <Field label="Sprint points">
-                    <input
-                      key={task.id + String(task.points)}
-                      type="number" min={0} step={0.5} aria-label="Sprint points" disabled={!editable} placeholder="—"
-                      defaultValue={task.points ?? ''}
-                      onBlur={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); if (v !== (task.points ?? null)) save({ points: v }); }}
-                      className={inputClass}
-                    />
-                  </Field>
-                )}
-                {FEATURES.taskTagsField && on('tags') && <Field label="Tags" icon={<TagIcon size={14} />} wide>
+                {FEATURES.taskTagsField && <Field label="Tags" icon={<TagIcon size={14} />} wide>
                   <div className="flex flex-wrap items-center gap-1.5 px-2">
                     {task.tags.map((tag) => (
                       <span key={tag.id} className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: tag.bg_color, color: tag.fg_color }}>
@@ -456,7 +439,7 @@ export const TaskPanel: React.FC<{
                 </Field>}
               </div>
 
-              <TaskLists taskId={task.id} isSubtask={!!task.parent_id} editable={editable} enabled={on('multiple_lists')} onChanged={() => { load(); onChanged(); }} />
+              <TaskLists taskId={task.id} isSubtask={!!task.parent_id} editable={editable} onChanged={() => { load(); onChanged(); }} />
 
               {FEATURES.taskCustomFields && ((task.fields?.length ?? 0) > 0 || editable) && (
                 <section className="mt-4 border-t border-gray-100 pt-3" aria-label="Custom fields">

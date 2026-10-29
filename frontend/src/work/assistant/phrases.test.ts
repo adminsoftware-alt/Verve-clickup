@@ -122,6 +122,11 @@ describe('create', () => rows([
   ['add task tidy the drive low priority', { intent: 'create', name: 'Tidy the drive', pri: 4 }],
   ['add task High court filing', { intent: 'create', name: 'High court filing', pri: undefined }],
   ['add task call the bank assign to Aarti', { intent: 'create', name: 'Call the bank', asg: 'aarti' }],
+  // From the 29 October test pass: the second name used to stay in the task's name.
+  ['add review payroll for Aarti and Aditya by 5 Nov', { intent: 'create', name: 'Review payroll', asg: 'aarti+aditya', due: '11-05' }],
+  ['add task for me and Aarti to prepare MIS', { intent: 'create', name: 'Prepare MIS', asg: 'me-id+aarti' }],
+  ['Aarti ko payroll ka task do kal tak', { intent: 'create', name: 'Payroll', asg: 'aarti', due: '10-15' }],
+  ['plz add a tsk to chk bank stmt', { intent: 'create', name: 'Chk bank stmt' }],
   ['add task call the bank assign to Aditya Sharma', { intent: 'create', name: 'Call the bank', asg: 'aditya' }],
   ['add task call the bank assign to me', { intent: 'create', name: 'Call the bank', asg: ME }],
   ['add task call the bank for Aarti', { intent: 'create', name: 'Call the bank', asg: 'aarti' }],
@@ -290,6 +295,9 @@ describe('questions', () => rows([
   ["what's due tomorrow", { intent: 'find', due: 'tomorrow' }],
   ['what is due tomorrow?', { intent: 'find', due: 'tomorrow' }],
   ['how many tasks do I have', { intent: 'ask', topic: 'tasks', about: undefined }],
+  // A Hinglish question with a day in it was made into a task called "My kaam kya" on the spot.
+  ['mera aaj ka kaam kya hai', { intent: 'ask' }],
+  ['mera manager kaun hai', { intent: 'ask' }],
   ['how many open tasks do I have', { intent: 'ask', topic: 'tasks', about: undefined }],
   ['what did I finish this week', { intent: 'ask', topic: 'done' }],
   ['what did I complete this week?', { intent: 'ask', topic: 'done' }],

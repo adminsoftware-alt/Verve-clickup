@@ -184,7 +184,7 @@ export const TaskTypesPage: React.FC = () => {
                 <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                   <button aria-label={`Edit ${t.name}`}
                     type="button"
-                    title={`Edit ${t.name}`}
+
                     onClick={() => setEditing({
                       id: t.id, name: t.name, name_plural: t.name_plural ?? '',
                       description: t.description ?? '', color: t.color, is_milestone: t.is_milestone,
@@ -195,7 +195,7 @@ export const TaskTypesPage: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    title={`Delete ${t.name}`}
+                    aria-label={`Delete ${t.name}`}
                     onClick={async () => await ask.confirm({
                       danger: true,
                       title: `Delete the type “${t.name}”?`,
@@ -219,7 +219,7 @@ export const TaskTypesPage: React.FC = () => {
               <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
                 {editing.id ? 'Edit type' : 'New type'}
               </span>
-              <button aria-label="Close" type="button" title="Close" onClick={() => setEditing(null)} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={14} /></button>
+              <button aria-label="Close" type="button" onClick={() => setEditing(null)} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={14} /></button>
             </div>
             <TypeForm key={editing.id ?? 'new'} draft={editing} onSave={save} onCancel={() => setEditing(null)} />
           </div>

@@ -55,7 +55,7 @@ export const PickCell: React.FC<{
       trigger={
         <span
           className="group/pick flex w-full items-center gap-1.5 rounded-md border border-transparent px-1 py-0.5 text-sm hover:border-gray-200 hover:bg-white"
-          title={label}
+          aria-label={label}
         >
           <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">{current}</span>
           <ChevronDown size={12} className="shrink-0 text-gray-300 group-hover/pick:text-gray-500" />
@@ -302,7 +302,7 @@ export const TableView: React.FC<{
         // The last two segments are what tell one task's home from another's; the whole path is
         // on the tooltip for when it does not.
         return (
-          <span className="block truncate px-1 text-xs text-gray-500" title={path}>
+          <span className="block truncate px-1 text-xs text-gray-500" aria-label={path}>
             {path.split(' / ').slice(-2).join(' / ')}
           </span>
         );
@@ -339,7 +339,7 @@ export const TableView: React.FC<{
                   onChange={(e) => onSelect(rows.map((t) => t.id), e.target.checked)} />
               </th>
               <th className="sticky left-[44px] z-20 border-b border-r border-gray-200 bg-gray-50 px-2 py-2">Task name</th>
-              {columns.map((c) => <th key={c.key} className="overflow-hidden border-b border-r border-gray-200 px-2 py-2" title={c.label}><span className="block truncate">{c.label}</span></th>)}
+              {columns.map((c) => <th key={c.key} className="overflow-hidden border-b border-r border-gray-200 px-2 py-2" aria-label={c.label}><span className="block truncate">{c.label}</span></th>)}
               {shownFields.map((f) => (
                 <th key={f.id} className="border-b border-r border-gray-200 px-2 py-2">
                   <span className="flex items-center gap-1 truncate"><span className="text-gray-400">{fieldIcon(f.type)}</span>{f.name}</span>
@@ -361,7 +361,7 @@ export const TableView: React.FC<{
                       onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== t.name) update(t, { name: v }); else e.target.value = t.name; }}
                       onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
                       className={`${input} ${t.status.group === 'closed' ? 'text-gray-400 line-through' : 'text-gray-800'}`} />
-                    <button type="button" title="Open task" aria-label={`Open ${t.name}`} onClick={() => onOpenTask(t.id)}
+                    <button type="button" aria-label={`Open ${t.name}`} onClick={() => onOpenTask(t.id)}
                       className="shrink-0 rounded p-1 text-gray-300 opacity-0 hover:bg-gray-100 hover:text-gray-700 group-hover:opacity-100 focus:opacity-100">
                       <Maximize2 size={13} />
                     </button>
@@ -372,7 +372,7 @@ export const TableView: React.FC<{
                   <td key={f.id} className={cellBase}>
                     {applies(f, t)
                       ? <FieldEditor compact field={{ ...f, name: `${f.name} of ${t.name}` }} value={t.custom_fields?.[f.id]} people={people} disabled={!canEdit(t)} onChange={(v) => setField(t, f, v)} />
-                      : <span className="block px-1 text-xs text-gray-300" title="This field isn't used in this task's List">n/a</span>}
+                      : <span className="block px-1 text-xs text-gray-300" aria-label="This field isn't used in this task's List">n/a</span>}
                   </td>
                 ))}
               </tr>

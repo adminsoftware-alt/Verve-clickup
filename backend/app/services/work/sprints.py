@@ -1,7 +1,7 @@
 """Sprints, as in ClickUp: a Sprint Folder whose Lists are time-boxed sprints.
 
-Tasks carry sprint points (the Sprint Points ClickApp). Completing a sprint rolls its unfinished
-tasks into the next one; each sprint has a burndown, and the Folder a velocity from past sprints.
+Tasks carry sprint points. Completing a sprint rolls its unfinished tasks into the next one; each
+sprint has a burndown, and the Folder a velocity from past sprints.
 """
 
 import uuid

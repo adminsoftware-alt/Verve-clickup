@@ -5,7 +5,7 @@ import { formatDuration } from '../ui';
 import { spacesApi, type TaskListRef, type TimeInStatus } from '../spacesApi';
 import { useWritableLists } from './TaskActions';
 
-export const TaskLists: React.FC<{ taskId: string; isSubtask: boolean; editable: boolean; enabled: boolean; onChanged: () => void }> = ({ taskId, isSubtask, editable, enabled, onChanged }) => {
+export const TaskLists: React.FC<{ taskId: string; isSubtask: boolean; editable: boolean; onChanged: () => void }> = ({ taskId, isSubtask, editable, onChanged }) => {
   const [lists, setLists] = useState<TaskListRef[]>([]);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,14 +27,14 @@ export const TaskLists: React.FC<{ taskId: string; isSubtask: boolean; editable:
       <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400"><ListIcon size={13} /> Lists</h4>
       <div className="flex flex-wrap items-center gap-1.5">
         {lists.map((l) => (
-          <span key={l.id} className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${l.home ? 'border-brand-200 bg-brand-50 text-brand-800' : 'border-gray-200 text-gray-700'}`} title={l.path}>
+          <span key={l.id} className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${l.home ? 'border-brand-200 bg-brand-50 text-brand-800' : 'border-gray-200 text-gray-700'}`} aria-label={l.path}>
             {l.name}{l.home && <span className="text-[10px] text-brand-500">home</span>}
             {!l.home && editable && (
               <button type="button" aria-label={`Remove from ${l.name}`} onClick={() => run(() => spacesApi.removeFromList(taskId, l.id))}><X size={11} /></button>
             )}
           </span>
         ))}
-        {editable && enabled && !adding && (
+        {editable && !adding && (
           <button type="button" onClick={() => setAdding(true)} className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 px-2 py-0.5 text-xs text-gray-500 hover:text-gray-800">
             <Plus size={11} /> Add to another List
           </button>

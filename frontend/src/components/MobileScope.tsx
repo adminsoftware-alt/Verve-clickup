@@ -27,7 +27,7 @@ export function sectionOf(path: string): Section | null {
   if (path === '/' || path.startsWith('/dashboards')) return 'dashboard';
   if (path.startsWith('/my-tasks') || path.startsWith('/all-tasks') || path.startsWith('/team-tasks')) return 'tasks';
   if (path.startsWith('/timesheets')) return 'timesheet';
-  if (path.startsWith('/spaces') || path.startsWith('/s/') || path.startsWith('/f/') || path.startsWith('/l/') || path.startsWith('/all-spaces')) return 'spaces';
+  if (path.startsWith('/spaces') || path.startsWith('/s/') || path.startsWith('/f/') || path.startsWith('/l/')) return 'spaces';
   return null;
 }
 

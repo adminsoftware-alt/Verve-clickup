@@ -160,8 +160,8 @@ export const WeekNav: React.FC<{ start: string | null; end: string | null; onGo:
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const prev = (cls: string) => <button aria-label="Previous week" type="button" title="Previous week (←)" onClick={() => shift(-7)} className={cls}><ChevronLeft size={17} /></button>;
-  const next = (cls: string) => <button aria-label="Next week" type="button" title="Next week (→)" onClick={() => shift(7)} className={cls}><ChevronRight size={17} /></button>;
+  const prev = (cls: string) => <button aria-label="Previous week" type="button" onClick={() => shift(-7)} className={cls}><ChevronLeft size={17} /></button>;
+  const next = (cls: string) => <button aria-label="Next week" type="button" onClick={() => shift(7)} className={cls}><ChevronRight size={17} /></button>;
   const pickerFor = picking && start && <WeekPicker anchor={title} start={shownStart ?? start} onPick={jump} onClose={() => setPicking(false)} />;
   const chevron = <ChevronDown size={15} className={`wk-caret ${picking ? 'rotate-180' : ''}`} />;
   const titleProps = { ref: title, type: 'button' as const, 'aria-label': 'Pick a week', 'aria-expanded': picking, onClick: () => setPicking((x) => !x) };
@@ -174,7 +174,7 @@ export const WeekNav: React.FC<{ start: string | null; end: string | null; onGo:
         <button {...titleProps} className="wk-seg-range"><CalendarDays size={15} className="wk-cal" />{range}{chevron}</button>
         {next('wk-seg-btn')}
       </div>
-      <button type="button" onClick={() => jump(today)} disabled={away === 0} className="wk-today" title={away === 0 ? 'You are on this week' : 'Go to this week'}>
+      <button type="button" onClick={() => jump(today)} disabled={away === 0} className="wk-today" aria-label={away === 0 ? 'You are on this week' : 'Go to this week'}>
         {away === 0 ? <><span className="wk-dot" /> This week</> : <><RotateCcw size={13} /> Today</>}
       </button>
       {pickerFor}

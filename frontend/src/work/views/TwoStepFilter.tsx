@@ -10,11 +10,30 @@
 // Workload view all wear the same control over completely different data.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Check, ChevronDown, ChevronRight, Search, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ChevronRight, Search } from 'lucide-react';
 
-const PANEL_WIDTH = 280;
+const PANEL_WIDTH = 236;
 /** Above this many choices the value list gets its own search box. */
 const SEARCHABLE = 8;
+
+/** Each field's colour, worn by its icon tile -- the same colours as the Dashboard card filters. */
+const TONE: Record<string, string> = {
+  statuses: '#3B82F6', status: '#3B82F6', groups: '#3B82F6',
+  priorities: '#EF4444', priority: '#EF4444',
+  assignees: '#8B5CF6',
+  due: '#F59E0B', scheduled: '#F59E0B',
+  estimate: '#0EA5E9',
+  taskTags: '#EC4899', tags: '#EC4899',
+  lists: '#234788',
+  includeArchived: '#64748B',
+};
+
+/** The field's icon in a small tile of its colour, as in the Dashboard card filters. */
+const FieldTile: React.FC<{ field: { key: string; Icon: React.ElementType } }> = ({ field }) => (
+  <span className="tile-3d rounded-md" style={{ width: 18, height: 18, '--tile': TONE[field.key] ?? '#64748B' } as React.CSSProperties}>
+    <field.Icon size={10} strokeWidth={2.25} />
+  </span>
+);
 
 export interface FilterOption {
   value: string;
@@ -103,18 +122,16 @@ export const TwoStepFilter: React.FC<{
         type="button"
         onClick={show}
         aria-expanded={open}
-        className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium shadow-sm ${
-          count
-            ? 'border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'}`}
+        data-active={count ? '' : undefined}
+        className="cf-pill relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium"
       >
         {/* Always the word, never the tally in words. The control said "Filter", then "1 filter",
             then "3 filters", so its width jumped and the one thing that never changed -- what the
             button is for -- was the thing that kept being replaced. The number is a badge now, and
             which filters they are is inside, where there is room to say. */}
         Filter
-        {count > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-semibold leading-none text-white">{count}</span>}
-        <ChevronDown size={13} className={count ? 'text-blue-500' : 'text-gray-400'} />
+        {count > 0 && <span className="cf-pill-count flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none">{count}</span>}
+        <ChevronDown size={13} className={`cf-pill-caret transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open && createPortal(
@@ -125,48 +142,46 @@ export const TwoStepFilter: React.FC<{
           className="fixed z-50 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl"
           style={{ top: pos.top, left: pos.left, width: PANEL_WIDTH }}
         >
-          {count > 0 && (
-            <div className="flex flex-wrap items-center gap-1 border-b border-gray-100 bg-gray-50/70 px-2 py-1.5">
-              {fields.map((f) => {
-                const text = textOf(f);
-                if (!text) return null;
-                return (
-                  <span key={f.key} className="flex max-w-full items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-700 ring-1 ring-gray-200">
-                    <span className="truncate"><span className="text-gray-400">{f.label}:</span> {text}</span>
-                    <button type="button" aria-label={`Clear ${f.label}`} onClick={() => onClear(f)} className="text-gray-400 hover:text-gray-700">
-                      <X size={11} />
-                    </button>
-                  </span>
-                );
-              })}
-              <button type="button" onClick={onClearAll} className="filter-clear ml-auto">Clear all</button>
-            </div>
-          )}
-
           {!field ? (
+            // --- step one: what to filter by -----------------------------------------------
             <>
-              <label className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1.5">
-                <Search size={13} className="shrink-0 text-gray-400" />
-                <input
-                  ref={searchRef}
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search…"
-                  aria-label="Search filters"
-                  className="w-full bg-transparent text-[13px] text-gray-800 outline-none placeholder:text-gray-400"
-                />
-              </label>
-              <div className="max-h-72 overflow-y-auto py-1">
+              {/* What is set, and the one click that takes it all off -- as on the Dashboard cards. */}
+              <div className="flex items-center gap-2 border-b border-gray-100 px-2.5 py-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Filters</span>
+                {count > 0 && (
+                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-[#234788] px-1 text-[10px] font-bold leading-none text-white">{count}</span>
+                )}
+                {count > 0 && <button type="button" onClick={onClearAll} className="filter-clear ml-auto">Clear all</button>}
+              </div>
+              {/* A search only earns its row when there are enough filters to look through. */}
+              {fields.length > 4 && (
+                <label className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1">
+                  <Search size={13} className="shrink-0 text-gray-400" />
+                  <input
+                    ref={searchRef}
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search…"
+                    aria-label="Search filters"
+                    className="w-full bg-transparent text-[13px] text-gray-800 outline-none placeholder:text-gray-400"
+                  />
+                </label>
+              )}
+              <div className="max-h-[23rem] overflow-y-auto py-1">
                 {fields.filter((f) => matches(f.label)).map((f) => (
                   <button
                     key={f.key}
                     type="button"
                     onClick={() => { setOpenField(f.key); setSearch(''); }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50"
+                    className="mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12.5px] font-medium text-gray-700 transition-colors hover:bg-gray-100/80 hover:text-gray-900"
                   >
-                    <f.Icon size={14} className="shrink-0 text-gray-400" />
-                    <span className="flex-1 truncate">{f.label}</span>
-                    {textOf(f) && <span className="max-w-24 truncate text-[11px] text-blue-700">{textOf(f)}</span>}
+                    <FieldTile field={f} />
+                    <span className="min-w-0 flex-1 truncate">{f.label}</span>
+                    {f.selected.length > 0 && (
+                      <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-[#234788] px-1 text-[10px] font-semibold tabular-nums text-white" aria-label={`${f.selected.length} picked: ${textOf(f)}`}>
+                        {f.selected.length}
+                      </span>
+                    )}
                     <ChevronRight size={13} className="shrink-0 text-gray-300" />
                   </button>
                 ))}
@@ -176,6 +191,7 @@ export const TwoStepFilter: React.FC<{
               </div>
             </>
           ) : (
+            // --- step two: the values of that one field -------------------------------------
             <>
               <div className="flex items-center gap-1.5 border-b border-gray-100 px-2 py-1.5">
                 <button
@@ -186,15 +202,15 @@ export const TwoStepFilter: React.FC<{
                 >
                   <ArrowLeft size={14} />
                 </button>
-                <field.Icon size={14} className="shrink-0 text-gray-400" />
-                <span className="flex-1 truncate text-[13px] font-medium text-gray-800">{field.label}</span>
+                <FieldTile field={field} />
+                <span className="flex-1 truncate text-[13px] font-semibold text-gray-800">{field.label}</span>
                 {field.selected.length > 0 && (
                   <button type="button" onClick={() => onClear(field)} className="filter-clear">Clear</button>
                 )}
               </div>
 
               {field.options.length > SEARCHABLE && (
-                <label className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1.5">
+                <label className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1">
                   <Search size={13} className="shrink-0 text-gray-400" />
                   <input
                     ref={searchRef}
@@ -207,7 +223,7 @@ export const TwoStepFilter: React.FC<{
                 </label>
               )}
 
-              <div className="max-h-72 overflow-y-auto py-1">
+              <div className="max-h-72 space-y-0.5 overflow-y-auto py-1.5">
                 {field.options.filter((o) => matches(o.label)).length === 0 ? (
                   <p className="px-3 py-3 text-center text-xs text-gray-400">
                     {field.options.length === 0 ? 'Nothing to filter by here.' : `Nothing called “${search}”.`}
@@ -215,21 +231,24 @@ export const TwoStepFilter: React.FC<{
                 ) : (
                   field.options.filter((o) => matches(o.label)).map((o) => {
                     const on = field.selected.includes(o.value);
+                    // Picked rows take a light wash of their own colour (navy when they have none),
+                    // with the tick at the end, where it is scanned.
                     return (
                       <button
                         key={o.value}
                         type="button"
+                        role={field.single ? 'radio' : 'checkbox'}
+                        aria-checked={on}
                         onClick={() => onToggle(field, o.value)}
-                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] ${
-                          on ? 'bg-blue-50/70 font-medium text-blue-900' : 'text-gray-700 hover:bg-gray-50'}`}
+                        style={{ '--opt': o.color ?? '#234788' } as React.CSSProperties}
+                        className={`filter-opt mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12.5px] transition-colors ${
+                          on ? 'is-on font-semibold text-gray-900' : 'font-medium text-gray-700 hover:bg-gray-100/80'}`}
                       >
-                        <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
-                          field.single ? 'rounded-full' : 'rounded'} ${
-                          on ? 'border-blue-500 bg-blue-500 text-white' : 'border-gray-300'}`}>
-                          {on && <Check size={10} strokeWidth={3} />}
-                        </span>
                         {o.color && <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: o.color }} />}
                         <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                        <span className={`filter-opt-check flex h-4 w-4 shrink-0 items-center justify-center ${field.single ? 'rounded-full' : 'rounded-[5px]'} ${on ? 'text-white' : 'border border-gray-300'}`}>
+                          {on && <Check size={10} strokeWidth={3.5} />}
+                        </span>
                       </button>
                     );
                   })

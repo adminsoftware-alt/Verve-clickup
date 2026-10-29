@@ -3,9 +3,10 @@ import { Mail, Pause, Play, Send, Trash2, Users, X } from 'lucide-react';
 import { useAuth } from '../../components/AuthContext';
 import { useWork, useMe } from '../WorkContext';
 import type { Task } from '../api';
-import { Avatar, AvatarStack, Portal, StatusDot, formatDue, useEscapeToClose } from '../ui';
+import { Avatar, AvatarStack, Portal, useEscapeToClose } from '../ui';
+import { DuePicker, PriorityPicker, StatusPicker, canEditTask, useTaskDraft } from '../task/InlineFields';
 import {
-  dashApi, viewerTimezone,
+  dashApi, lensIsOn, viewerTimezone, type ViewLens,
   type DashLevel, type DashboardSharing, type Frequency, type ReportRun, type Schedule, type ScheduleIn, type Source, type Template,
 } from './api';
 import { SourcePicker } from './pickers';
@@ -23,7 +24,7 @@ export const Modal: React.FC<{ label: string; title: React.ReactNode; onClose: (
       <div ref={ref} role="dialog" aria-label={label} onMouseDown={(e) => e.stopPropagation()} className={`flex max-h-[88vh] ${width} max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white shadow-xl`}>
         <header className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
           <h3 className="truncate font-semibold text-gray-900">{title}</h3>
-          <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+          <button type="button" aria-label="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && <footer className="flex justify-end gap-2 border-t border-gray-100 px-5 py-3">{footer}</footer>}
@@ -99,7 +100,7 @@ export const NewDashboardDialog: React.FC<{ onClose: () => void; onCreated: (id:
         <p className="-mt-2 text-xs text-gray-500">
           {owner
             ? 'A Team dashboard shows the Team\'s people as one view. Its Team leads manage it; admins can see it.'
-            : 'Only you can see a personal Dashboard, plus your Team lead and admins (view only). Share it to give others access.'}
+            : 'Only you can see a personal Dashboard, plus your Manager and admins (view only). Share it to give others access.'}
         </p>
         <div>
           <span className="text-xs font-medium text-gray-600">Template</span>
@@ -142,35 +143,45 @@ export const RepointDialog: React.FC<{ dashboardId: string; onClose: () => void;
 
 // --- drill-down -----------------------------------------------------------------------------
 
-export const DrillDialog: React.FC<{ dashboardId: string; cardId: string; segment?: string; title: string; onClose: () => void; onOpenTask: (id: string) => void }> = ({
-  dashboardId, cardId, segment, title, onClose, onOpenTask,
+/** A task behind the card: the name opens it; status, priority and due date change in place. */
+const DrillRow: React.FC<{ task: Task; where: string; onOpen: () => void }> = ({ task, where, onOpen }) => {
+  const [t, save] = useTaskDraft(task);
+  const can = canEditTask(t);
+  return (
+    <li className="flex items-center gap-3 px-1 py-1.5 text-sm hover:bg-gray-50">
+      <StatusPicker task={t} size={12} disabled={!can} onSave={save} />
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
+        <span className="block truncate text-gray-800">{t.name}</span>
+        <span className="block truncate text-xs text-gray-400">{where}</span>
+      </button>
+      <PriorityPicker task={t} disabled={!can} onSave={save} />
+      <AvatarStack users={t.assignees} />
+      <span className="flex w-20 justify-end"><DuePicker task={t} disabled={!can} onSave={save} /></span>
+    </li>
+  );
+};
+
+export const DrillDialog: React.FC<{
+  dashboardId: string; cardId: string; segment?: string; title: string; onClose: () => void; onOpenTask: (id: string) => void;
+  /** A viewer's own filters, so the tasks listed are the ones behind the number they see. */
+  lens?: ViewLens;
+}> = ({
+  dashboardId, cardId, segment, title, onClose, onOpenTask, lens,
 }) => {
   const { locate } = useWork();
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    dashApi.cardTasks(dashboardId, cardId, segment).then((page) => { setTasks(page.tasks); setTotal(page.total); }).catch((e) => setError(e.message));
-  }, [dashboardId, cardId, segment]);
+    (lens && lensIsOn(lens) ? dashApi.viewTasks(dashboardId, cardId, lens, segment) : dashApi.cardTasks(dashboardId, cardId, segment)).then((page) => { setTasks(page.tasks); setTotal(page.total); }).catch((e) => setError(e.message));
+  }, [dashboardId, cardId, segment]); // the viewer's filters as they were when the list was opened
   const where = (listId: string) => (locate('list', listId)?.path ?? []).map((c) => c.name).join(' / ');
   return (
     <Modal label="Tasks behind this card" title={<>{title} <span className="font-normal text-gray-400">{tasks ? total : ''}</span></>} onClose={onClose} width="w-[46rem]">
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {!tasks ? <p className="text-sm text-gray-400"><LinesSkeleton /></p> : tasks.length === 0 ? <p className="text-sm text-gray-400">No tasks.</p> : (
         <ul className="divide-y divide-gray-100">
-          {tasks.map((t) => (
-            <li key={t.id}>
-              <button type="button" onClick={() => onOpenTask(t.id)} className="flex w-full items-center gap-3 px-1 py-2 text-left text-sm hover:bg-gray-50">
-                <StatusDot status={t.status} size={12} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-gray-800">{t.name}</span>
-                  <span className="block truncate text-xs text-gray-400">{where(t.list_id)}</span>
-                </span>
-                <AvatarStack users={t.assignees} />
-                <span className={`w-20 text-right text-xs ${t.is_overdue ? 'text-red-600' : 'text-gray-500'}`}>{formatDue(t.due_date)}</span>
-              </button>
-            </li>
-          ))}
+          {tasks.map((t) => <DrillRow key={t.id} task={t} where={where(t.list_id)} onOpen={() => onOpenTask(t.id)} />)}
           {total > tasks.length && <li className="py-2 text-center text-xs text-gray-400">Showing the first {tasks.length} of {total}.</li>}
         </ul>
       )}
@@ -237,7 +248,7 @@ export const ShareDashboardDialog: React.FC<{ dashboardId: string; name: string;
                 <select aria-label="Change access" value={sh.level} disabled={!editable} onChange={(e) => run(() => dashApi.share(dashboardId, target(g), e.target.value as DashLevel))} className="rounded-md border border-gray-200 px-1.5 py-1 text-sm disabled:bg-gray-50">
                   {LEVELS.map((l) => <option key={l.value} value={l.value} disabled={RANK[l.value] > mine}>{l.label}</option>)}
                 </select>
-                {editable && <button type="button" title="Remove access" onClick={() => run(() => dashApi.unshare(dashboardId, sh.id))} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={15} /></button>}
+                {editable && <button type="button" aria-label="Remove access" onClick={() => run(() => dashApi.unshare(dashboardId, sh.id))} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={15} /></button>}
               </li>
             );
           })}
@@ -292,7 +303,7 @@ export const ReportsDialog: React.FC<{ dashboardId: string; name: string; canEdi
   if (preview) {
     return (
       <Modal label="Report preview" title={preview.title} onClose={() => setPreview(null)} width="w-[52rem]">
-        <iframe title="Report preview" srcDoc={preview.html} sandbox="" className="h-[65vh] w-full rounded border border-gray-200" />
+        <iframe aria-label="Report preview" srcDoc={preview.html} sandbox="" className="h-[65vh] w-full rounded border border-gray-200" />
       </Modal>
     );
   }
@@ -328,10 +339,10 @@ export const ReportsDialog: React.FC<{ dashboardId: string; name: string; canEdi
                     </div>
                     {canEdit && (
                       <div className="flex shrink-0 items-center gap-1">
-                        <button type="button" title="Send now" onClick={() => sendNow(s)} className="rounded p-1.5 text-gray-500 hover:bg-gray-100"><Send size={15} /></button>
-                        <button type="button" title={s.active ? 'Pause' : 'Resume'} onClick={() => run(() => dashApi.updateReport(s.id, toInput(s, !s.active)))} className="rounded p-1.5 text-gray-500 hover:bg-gray-100">{s.active ? <Pause size={15} /> : <Play size={15} />}</button>
+                        <button type="button" aria-label="Send now" onClick={() => sendNow(s)} className="rounded p-1.5 text-gray-500 hover:bg-gray-100"><Send size={15} /></button>
+                        <button type="button" aria-label={s.active ? 'Pause' : 'Resume'} onClick={() => run(() => dashApi.updateReport(s.id, toInput(s, !s.active)))} className="rounded p-1.5 text-gray-500 hover:bg-gray-100">{s.active ? <Pause size={15} /> : <Play size={15} />}</button>
                         <button type="button" onClick={() => setEditing(s)} className="rounded px-2 py-1 text-xs text-brand-600 hover:bg-brand-50">Edit</button>
-                        <button type="button" title="Delete" onClick={async () => await ask.confirm({ danger: true, title: 'Delete this email report?' }) && run(() => dashApi.removeReport(s.id))} className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={15} /></button>
+                        <button type="button" aria-label="Delete" onClick={async () => await ask.confirm({ danger: true, title: 'Delete this email report?' }) && run(() => dashApi.removeReport(s.id))} className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={15} /></button>
                       </div>
                     )}
                   </div>
@@ -347,12 +358,12 @@ export const ReportsDialog: React.FC<{ dashboardId: string; name: string; canEdi
           <ul className="divide-y divide-gray-100">
             {runs.map((r) => (
               <li key={r.id} className="flex items-center gap-3 py-2 text-sm">
-                <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${r.status === 'sent' ? 'bg-emerald-50 text-emerald-700' : r.status === 'not_sent' ? 'bg-amber-50 text-amber-800' : 'bg-red-50 text-red-700'}`}>
+                <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${r.status === 'sent' ? 'bg-[#EEF2F8] text-[#1C3A70]' : r.status === 'not_sent' ? 'bg-amber-50 text-amber-800' : 'bg-red-50 text-red-700'}`}>
                   {r.status === 'sent' ? 'Sent' : r.status === 'not_sent' ? 'Not sent' : 'Failed'}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-gray-800">{when(r.created_at)} · {r.recipients.length} recipient{r.recipients.length === 1 ? '' : 's'}</span>
-                  {r.error && <span className="block truncate text-xs text-gray-500" title={r.error}>{r.error}</span>}
+                  {r.error && <span className="block truncate text-xs text-gray-500" aria-label={r.error}>{r.error}</span>}
                 </span>
                 <button type="button" onClick={() => dashApi.run(r.id).then((x) => setPreview({ title: `Report of ${when(r.created_at)}`, html: x.html })).catch((e) => setError(e.message))} className="text-xs text-brand-600 hover:underline">View</button>
               </li>

@@ -69,8 +69,6 @@ def lists_of(db: Session, opened: Opened[Task]) -> List[sp.TaskListRef]:
 
 
 def add(db: Session, opened: Opened[Task], target: Opened[TaskList]) -> None:
-    from app.services.work import space_admin
-
     task, access = opened.obj, opened.access
     if not opened.level.at_least(PermissionLevel.edit):
         raise Forbidden("You need edit access to the task to add it to another List")
@@ -82,9 +80,6 @@ def add(db: Session, opened: Opened[Task], target: Opened[TaskList]) -> None:
         raise Invalid("Tasks can't be added to a List in another workspace")
     if target.obj.id == task.list_id:
         raise Invalid("This is already the task's home List")
-    home = db.get(TaskList, task.list_id)
-    for space_id in {home.space_id, target.obj.space_id}:
-        space_admin.require(db, space_id, "multiple_lists")
     if db.get(TaskListLink, (task.id, target.obj.id)) is not None:
         return
     if len(extra_lists_for(db, [task.id]).get(task.id, [])) >= MAX_EXTRA_LISTS:

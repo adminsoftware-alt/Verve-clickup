@@ -188,6 +188,73 @@ def test_admins_and_leads_open_peoples_own_boards(api, org):
     assert api.get(f"/workspaces/{org['ws']}/people/owner/dashboard", "admin").status_code == 404
 
 
+def test_a_viewer_filters_someones_board_for_themselves_without_saving(api, org):
+    """A lead looking at a member's board narrows it for themselves; the member's board is untouched."""
+    lst = org["list"]["id"]
+    late = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Urgent late", "assignees": ["member"], "priority": 1, "due_date": late}), 201)
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Low late", "assignees": ["member"], "priority": 4, "due_date": late}), 201)
+    board = ok(api.get(f"/workspaces/{org['ws']}/people/member/dashboard", "lead"))
+    assert board["your_level"] == "view"
+    overdue = next(c for c in board["cards"] if c["title"] == "Overdue")
+    view = lambda lens: by_title(board, ok(api.post(f"/dashboards/{board['id']}/view-data", "lead", lens, params={"tz": "UTC"})))
+
+    # The whole board, then one card, narrowed to urgent work.
+    assert view({"filters": {"priorities": [1]}})["Overdue"]["data"]["value"] == 1
+    card = {"filters": {"due": "overdue", "priorities": [4]}}
+    rows = ok(api.post(f"/dashboards/{board['id']}/view-data", "lead", {"cards": {overdue["id"]: card}, "card_ids": [overdue["id"]]}, params={"tz": "UTC"}))
+    assert [(r["card_id"], r["data"]["value"]) for r in rows] == [(overdue["id"], 1)]
+    drilled = ok(api.post(f"/dashboards/{board['id']}/cards/{overdue['id']}/view-tasks", "lead", {"cards": {overdue["id"]: card}}, params={"tz": "UTC"}))
+    assert [t["name"] for t in drilled["tasks"]] == ["Low late"]
+
+    # Nothing was saved: the member still sees both, and the saved board has no filter.
+    assert by_title(board, data(api, board, "member"))["Overdue"]["data"]["value"] == 2
+    assert ok(api.get(f"/dashboards/{board['id']}", "member"))["filters"]["priorities"] is None
+    # Somebody who may not open the board cannot read it this way either.
+    assert api.post(f"/dashboards/{board['id']}/view-data", "member2", {}).status_code in (403, 404)
+
+
+def test_people_list_says_how_full_each_persons_week_is(api, org):
+    """My team's "Who's free": hours someone can work this week against open work planned into it."""
+    now = datetime.now(timezone.utc)
+    lst = org["list"]["id"]
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Two hours", "assignees": ["member"], "time_estimate_seconds": 7200,
+                                                 "start_date": now.isoformat(), "due_date": now.isoformat()}), 201)
+    weeks = ok(api.get(f"/workspaces/{org['ws']}/dashboards/people/week", "lead", params={"tz": "UTC"}))
+    assert set(weeks) == {r["user"]["id"] for r in ok(api.get(f"/workspaces/{org['ws']}/dashboards/people", "lead"))}
+    member = weeks["member"]
+    assert {"planned", "capacity", "logged"} <= set(member)
+    if now.weekday() < 5:  # a working day, so the estimate lands inside this week's capacity
+        assert member["planned"] == 7200 and member["capacity"] > 0
+    assert member["logged"] == 0
+
+
+def test_a_manager_hands_their_peoples_open_work_to_someone_else(api, org):
+    """Bulk action on My team: a Manager moves a report's open tasks, but only within their team."""
+    lst = org["list"]["id"]
+    task = ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Cover me", "assignees": ["member"]}), 201)
+    ws = org["ws"]
+    assert api.post(f"/workspaces/{ws}/people/hand-over", "lead", {"from_ids": ["member2"], "to_id": "lead"}).status_code == 403
+    assert api.post(f"/workspaces/{ws}/people/hand-over", "member", {"from_ids": ["member"], "to_id": "lead"}).status_code == 403
+    assert api.post(f"/workspaces/{ws}/people/hand-over", "lead", {"from_ids": ["member"], "to_id": "member"}).status_code in (400, 422)
+
+    out = ok(api.post(f"/workspaces/{ws}/people/hand-over", "lead", {"from_ids": ["member"], "to_id": "lead"}))
+    assert out["moved"] == 1 and out["skipped"] == []
+    assert [u["id"] for u in ok(api.get(f"/tasks/{task['id']}", "owner"))["assignees"]] == ["lead"]
+
+
+def test_all_teams_page_has_each_teams_figures(api, org):
+    """All teams: a task two of a Team are on counts once, late work is counted, and only admins ask."""
+    lst = org["list"]["id"]
+    late = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Shared and late", "assignees": ["lead", "member"], "due_date": late}), 201)
+    ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Not theirs", "assignees": ["member2"]}), 201)
+    figures = ok(api.get(f"/workspaces/{org['ws']}/teams/figures", "admin", params={"tz": "UTC"}))
+    hr = figures[org["team"]["id"]]
+    assert (hr["open"], hr["overdue"]) == (1, 1) and {"planned", "capacity"} <= set(hr)
+    assert api.get(f"/workspaces/{org['ws']}/teams/figures", "lead").status_code == 403
+
+
 def test_clear_all_filters_puts_every_card_back_how_it_was_built(api, org):
     lst = org["list"]["id"]
     ok(api.post(f"/lists/{lst}/tasks", "owner", {"name": "Late", "assignees": ["member"], "priority": 1,

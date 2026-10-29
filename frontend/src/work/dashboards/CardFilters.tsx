@@ -424,7 +424,7 @@ export const CardFilterMenu: React.FC<{
     if (!activeCount) return null;
     if (compact) {
       return (
-        <span title={`${activeCount} filter${activeCount === 1 ? '' : 's'}`} className="flex items-center gap-1 rounded-lg border border-gray-200 p-1.5 text-[10px] font-semibold text-gray-500">
+        <span aria-label={`${activeCount} filter${activeCount === 1 ? '' : 's'}`} className="flex items-center gap-1 rounded-lg border border-gray-200 p-1.5 text-[10px] font-semibold text-gray-500">
           <Filter size={12} /> {activeCount}
         </span>
       );
@@ -448,7 +448,7 @@ export const CardFilterMenu: React.FC<{
         aria-label={activeCount ? `${title} (${activeCount} set)` : title}
         data-active={activeCount > 0 ? '' : undefined}
         className={compact
-          ? `no-print cf-trigger relative flex items-center gap-1.5 rounded-lg border p-1.5 font-medium shadow-sm ${activeCount ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-gray-200 bg-white text-gray-700'}`
+          ? `no-print cf-trigger relative flex items-center gap-1.5 rounded-lg border p-1.5 font-medium shadow-sm ${activeCount ? 'border-brand-200 bg-brand-50 text-brand-800' : 'border-gray-200 bg-white text-gray-700'}`
           : 'no-print cf-pill relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium'}
       >
         {compact ? (
@@ -456,7 +456,7 @@ export const CardFilterMenu: React.FC<{
             {/* A funnel in a small tile of the card's own colour (--tile), filled once filters are set. */}
             <Filter size={13} className="cf-i-funnel" />
             {activeCount > 0 && (
-              <span className="cf-badge absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-teal-600 px-1 text-[9px] font-semibold leading-none text-white">
+              <span className="cf-badge absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-semibold leading-none text-white">
                 {activeCount}
               </span>
             )}
@@ -617,7 +617,7 @@ export const CardFilterMenu: React.FC<{
                         )}
                         <span className="min-w-0 flex-1 truncate">{o.label}</span>
                         {o.members && o.value.startsWith('team:') && (
-                          <span className="shrink-0 rounded-full bg-gray-100 px-1.5 text-[11px] font-medium text-gray-500" title={`${o.members.length} in this Team`}>{o.members.length}</span>
+                          <span className="shrink-0 rounded-full bg-gray-100 px-1.5 text-[11px] font-medium text-gray-500" aria-label={`${o.members.length} in this Team`}>{o.members.length}</span>
                         )}
                         <span className={`filter-opt-check flex h-4 w-4 shrink-0 items-center justify-center ${field.many ? 'rounded-[5px]' : 'rounded-full'} ${on ? 'text-white' : 'border border-gray-300'}`}>
                           {on && <Check size={10} strokeWidth={3.5} />}

@@ -177,27 +177,15 @@ def compute(engine: Engine, cards: List[DashboardCard]) -> Dict[str, Any]:
         **(_firm(engine, today, week_end) if who == "everyone"
            else {"birthdays": [], "anniversaries": [], "holidays_this_week": [], "goals_behind": []}),
     }
+    # The team's news -- who is overloaded, who logged nothing, whose timesheet waits -- is the
+    # Team board's. A Manager's own board is about their own work only, like everyone else's: two
+    # boards saying the same thing about the team was one too many (the owner's rule, 2026-10-29).
     if several:
         out.update(_team(engine, open_facts, people, today, yesterday, week_start, week_end))
-    elif who == "me" and _led(engine):
-        # A Manager's own board still tells them about their people: who logged nothing, whose
-        # timesheet waits. Planned hours need the people's own tasks, so overload is left to
-        # the Team board.
-        out.update(_team(engine, [], _led(engine), today, yesterday, week_start, week_end))
-        out["overloaded"] = []
     else:
         out.update({"overloaded": [], "no_time_yesterday": [], "timesheets_waiting": [], "timesheets_missing": []})
     out.update(_yesterday(engine, config, loaded, people, yesterday))
     return out
-
-
-def _led(engine: Engine) -> Set[str]:
-    """The people a Manager may see the time of, without themselves. Empty for an Employee, and
-    for an Admin, who sees everyone and has the Company board for that."""
-    visible = engine.time_people()
-    if visible is None:
-        return set()
-    return visible - {engine.access.user_id}
 
 
 # --- your day ---------------------------------------------------------------------------------

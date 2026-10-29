@@ -249,7 +249,7 @@ export const RecurrencePanel: React.FC<{
                   <button
                     key={DAYS[i]}
                     type="button"
-                    title={DAYS[i]}
+
                     aria-label={DAYS[i]}
                     aria-pressed={on}
                     onClick={() => toggleDay(i)}

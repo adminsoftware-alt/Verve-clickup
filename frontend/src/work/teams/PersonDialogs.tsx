@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { DrawInPlace } from './inlineDialog';
 import { Link, useNavigate } from 'react-router-dom';
-import { Briefcase, Building2, Cake, Calendar, Camera, ClipboardCheck, Clock, Copy, Crown, Hash, Heart, LayoutDashboard, LogOut, Mail, MapPin, Phone, Power, Send, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { Briefcase, Building2, Cake, Calendar, Camera, ChevronDown, ClipboardCheck, Clock, Copy, Crown, Hash, Heart, LayoutDashboard, LogOut, Mail, MapPin, Phone, Power, Search, Send, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { JoinerDialog, OffboardDialog } from './AdminDialogs';
 import type { Role, Task } from '../api';
 import { Avatar, Portal, StatusDot, formatDue, useEscapeToClose } from '../ui';
@@ -32,7 +32,7 @@ const Modal: React.FC<{ title: string; onClose: () => void; wide?: boolean; chil
           className={`flex max-h-[90vh] ${wide ? 'w-[40rem]' : 'w-[30rem]'} max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white p-5 shadow-xl`}>
           <div className="mb-3 flex items-center">
             <h3 className="font-semibold text-gray-900">{title}</h3>
-            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            <button aria-label="Close" type="button" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </div>
           {children}
         </div>
@@ -44,6 +44,88 @@ const Modal: React.FC<{ title: string; onClose: () => void; wide?: boolean; chil
 const inputCls = 'mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal text-gray-800';
 const Field: React.FC<{ label: string; children: React.ReactNode; wide?: boolean }> = ({ label, children, wide }) => (
   <label className={`block text-xs font-medium text-gray-600 ${wide ? 'col-span-2' : ''}`}>{label}{children}</label>
+);
+
+/**
+ * Who someone reports to: only the people who run things -- Admins and Managers -- with a search,
+ * since a firm of seventy made the plain list a long scroll of interns and executives. Someone
+ * already set as the manager stays offered even if they are neither, so editing never loses them.
+ */
+const ManagerPicker: React.FC<{ people: Person[]; teams: TeamFull[]; self?: string; value: string | null | undefined; onChange: (id: string | null) => void }> = ({
+  people, teams, self, value, onChange,
+}) => {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener('mousedown', away, true);
+    window.addEventListener('keydown', esc, true);
+    return () => { document.removeEventListener('mousedown', away, true); window.removeEventListener('keydown', esc, true); };
+  }, [open]);
+  const leaders = people
+    .filter((p) => p.user.id !== self && !p.deactivated_at && (['Admin', 'Manager'].includes(accessOf(p.role, p.user.id, teams)) || p.user.id === value))
+    .sort((a, b) => personName(a).localeCompare(personName(b)));
+  const text = q.trim().toLowerCase();
+  const shown = leaders.filter((p) => !text || `${personName(p)} ${p.designation ?? ''}`.toLowerCase().includes(text));
+  const chosen = people.find((p) => p.user.id === value);
+  const pick = (id: string | null) => { onChange(id); setOpen(false); setQ(''); };
+  return (
+    <div ref={box} className="relative mt-1">
+      <button type="button" aria-label="Reporting manager" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((v) => !v)}
+        className={`flex w-full items-center gap-2 rounded-md border bg-white px-2 py-1.5 text-left text-sm font-normal ${open ? 'border-[#234788] ring-4 ring-[#234788]/10' : 'border-gray-300'}`}>
+        {chosen ? <><Avatar user={chosen.user} size={20} /><span className="min-w-0 flex-1 truncate text-gray-800">{personName(chosen)}</span></>
+          : <span className="flex-1 text-gray-400">No manager</span>}
+        <ChevronDown size={14} className="shrink-0 text-gray-400" />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-[#D9E1EF] bg-white shadow-[0_18px_40px_-12px_rgba(16,24,40,0.3)]">
+          <label className="flex items-center gap-2 border-b border-[#EEF1F5] px-3 py-2">
+            <Search size={14} className="shrink-0 text-gray-400" />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search managers" aria-label="Search managers"
+              className="w-full bg-transparent text-sm font-normal text-gray-800 outline-none placeholder:text-gray-400" />
+          </label>
+          <ul role="listbox" aria-label="Managers" className="max-h-60 overflow-y-auto p-1">
+            {!text && (
+              <li>
+                <button type="button" role="option" aria-selected={!value} onClick={() => pick(null)}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] font-normal ${!value ? 'bg-[#F3F6FB] font-semibold text-[#142B57]' : 'text-gray-500 hover:bg-gray-50'}`}>
+                  No manager
+                </button>
+              </li>
+            )}
+            {shown.map((p) => {
+              const on = p.user.id === value;
+              const access = accessOf(p.role, p.user.id, teams);
+              return (
+                <li key={p.user.id}>
+                  <button type="button" role="option" aria-selected={on} onClick={() => pick(p.user.id)}
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left font-normal ${on ? 'bg-[#F3F6FB]' : 'hover:bg-gray-50'}`}>
+                    <Avatar user={p.user} size={24} />
+                    <span className="min-w-0 flex-1">
+                      <span className={`block truncate text-[13px] ${on ? 'font-semibold text-[#142B57]' : 'text-gray-800'}`}>{personName(p)}</span>
+                      {p.designation && <span className="block truncate text-[11px] text-gray-400">{p.designation}</span>}
+                    </span>
+                    <span className="shrink-0 rounded-md bg-[#EEF2F8] px-1.5 py-px text-[10.5px] font-semibold text-[#234788]">{access}</span>
+                  </button>
+                </li>
+              );
+            })}
+            {shown.length === 0 && <li className="px-3 py-4 text-center text-xs text-gray-400">{leaders.length ? `No manager called “${q}”.` : 'There are no Admins or Managers yet.'}</li>}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** A part of the profile form: a small spaced heading over a rule, then its fields. */
+const Part: React.FC<{ title: string }> = ({ title }) => (
+  <div className="col-span-2 mt-2 border-t border-[#EEF1F5] pt-3 first:mt-0 first:border-t-0 first:pt-0">
+    <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[#6B7FA8]">{title}</p>
+  </div>
 );
 
 const TeamPicker: React.FC<{ teams: TeamFull[]; value: string[]; onChange: (v: string[]) => void }> = ({ teams, value, onChange }) => (
@@ -65,12 +147,39 @@ const TeamPicker: React.FC<{ teams: TeamFull[]; value: string[]; onChange: (v: s
 const ProfileFields: React.FC<{
   form: PersonInput; set: (p: Partial<PersonInput>) => void; people: Person[]; teams: TeamFull[];
   self?: string; roles: Role[]; showEmail: boolean; showRole: boolean; adminFields: boolean;
-}> = ({ form, set, people, teams, self, roles, showEmail, showRole, adminFields }) => (
+  /** Said under the email as it is typed: already in the firm, or blocked. */
+  emailNote?: React.ReactNode;
+}> = ({ form, set, people, teams, self, roles, showEmail, showRole, adminFields, emailNote }) => {
+  // Departments already in use, offered as one-click chips so "HR" and "Hr" do not both appear.
+  const departments = Array.from(new Set(people.map((p) => p.department?.trim()).filter((d): d is string => !!d))).sort();
+  const typed = (form.department ?? '').trim().toLowerCase();
+  const deptChips = departments.filter((d) => d.toLowerCase() !== typed && (!typed || d.toLowerCase().includes(typed))).slice(0, 6);
+  // Ticking a Team suggests its lead as the reporting manager, when none is chosen yet.
+  const pickTeams = (team_ids: string[]) => {
+    const added = team_ids.find((id) => !(form.team_ids ?? []).includes(id));
+    const lead = teams.find((t) => t.id === added)?.lead_ids.find((id) => id !== self);
+    set({ team_ids, ...(lead && !form.manager_id ? { manager_id: lead } : {}) });
+  };
+  return (
   <div className="grid grid-cols-2 gap-3">
+    <Part title="Who they are" />
     <Field label="Full name *"><input autoFocus aria-label="Full name" value={form.name ?? ''} onChange={(e) => set({ name: e.target.value })} className={inputCls} /></Field>
-    {showEmail && <Field label="Work email *"><input aria-label="Work email" type="email" value={form.email ?? ''} onChange={(e) => set({ email: e.target.value })} placeholder="name@verveadvisory.com" className={inputCls} /></Field>}
+    {showEmail && (
+      <Field label="Work email *">
+        <input aria-label="Work email" type="email" value={form.email ?? ''} onChange={(e) => set({ email: e.target.value })} placeholder="name@verveadvisory.com" className={inputCls} />
+        {emailNote && <span className="mt-1 block text-[11.5px] font-normal">{emailNote}</span>}
+      </Field>
+    )}
+    {showRole && adminFields && (
+      <Field label="Role">
+        <select aria-label="Role" value={form.role ?? 'member'} onChange={(e) => set({ role: e.target.value as Role })} className={inputCls}>
+          {roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+        </select>
+      </Field>
+    )}
     {adminFields && (
       <>
+        <Part title="Their job" />
         <Field label="Designation"><input aria-label="Designation" value={form.designation ?? ''} onChange={(e) => set({ designation: e.target.value })} placeholder="e.g. HR Business Partner" className={inputCls} /></Field>
         {/* The rung, apart from the title: "Executive" and "Senior Executive" are two
             designations at two levels, and only the number sorts the same way everywhere. */}
@@ -86,28 +195,31 @@ const ProfileFields: React.FC<{
             {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </Field>
-        <Field label="Department"><input aria-label="Department" value={form.department ?? ''} onChange={(e) => set({ department: e.target.value })} placeholder="e.g. HR" className={inputCls} /></Field>
-        <Field label="Reporting manager">
-          <select aria-label="Reporting manager" value={form.manager_id ?? ''} onChange={(e) => set({ manager_id: e.target.value || null })} className={inputCls}>
-            <option value="">No manager</option>
-            {people.filter((p) => p.user.id !== self && !p.deactivated_at).map((p) => <option key={p.user.id} value={p.user.id}>{personName(p)}{p.designation ? ` — ${p.designation}` : ''}</option>)}
-          </select>
+        <Field label="Department">
+          <input aria-label="Department" value={form.department ?? ''} onChange={(e) => set({ department: e.target.value })} placeholder="e.g. HR" className={inputCls} />
+          {deptChips.length > 0 && (
+            <span className="mt-1 flex flex-wrap gap-1">
+              {deptChips.map((d) => (
+                <button key={d} type="button" onClick={() => set({ department: d })}
+                  className="rounded-md border border-[#DCE3EF] bg-[#F5F8FD] px-1.5 py-px text-[11px] font-medium text-[#234788] hover:border-[#B9C7E2]">{d}</button>
+              ))}
+            </span>
+          )}
         </Field>
-        {showRole && (
-          <Field label="Role">
-            <select aria-label="Role" value={form.role ?? 'member'} onChange={(e) => set({ role: e.target.value as Role })} className={inputCls}>
-              {roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-            </select>
-          </Field>
-        )}
+        <div className="block text-xs font-medium text-gray-600">Reporting manager
+          <ManagerPicker people={people} teams={teams} self={self} value={form.manager_id} onChange={(manager_id) => set({ manager_id })} />
+        </div>
         <Field label="Employee code"><input aria-label="Employee code" value={form.employee_code ?? ''} onChange={(e) => set({ employee_code: e.target.value })} className={inputCls} /></Field>
         <Field label="Date of joining"><input aria-label="Date of joining" type="date" value={form.date_of_joining ?? ''} onChange={(e) => set({ date_of_joining: e.target.value || null })} className={inputCls} /></Field>
         {/* Date of birth, marriage anniversary and the interview flag were here. The
             fields still exist on a person and still import from a spreadsheet; they are just
             not asked for when someone is added. */}
-
+        <div className="col-span-2 text-xs font-medium text-gray-600" role="group" aria-label="Teams">Teams
+          <TeamPicker teams={teams} value={form.team_ids ?? []} onChange={pickTeams} />
+        </div>
       </>
     )}
+    <Part title="Contact" />
     <Field label="Phone"><input aria-label="Phone" value={form.phone ?? ''} onChange={(e) => set({ phone: e.target.value })} className={inputCls} /></Field>
     {/* Private like a birthday: only Admins and the person see it. The person can keep it up to date. */}
     <Field label="Emergency contact name"><input aria-label="Emergency contact name" value={form.emergency_contact_name ?? ''} onChange={(e) => set({ emergency_contact_name: e.target.value || null })} className={inputCls} /></Field>
@@ -115,13 +227,9 @@ const ProfileFields: React.FC<{
     <div className="col-span-2 text-xs font-medium text-gray-600">Address
       <div className="mt-1"><AddressField value={form.address} onChange={(address, city) => set({ address, location: city })} /></div>
     </div>
-    {adminFields && (
-      <div className="col-span-2 text-xs font-medium text-gray-600" role="group" aria-label="Teams">Teams
-        <TeamPicker teams={teams} value={form.team_ids ?? []} onChange={(team_ids) => set({ team_ids })} />
-      </div>
-    )}
   </div>
-);
+  );
+};
 
 const SignInLink: React.FC<{ link: string }> = ({ link }) => {
   const [copied, setCopied] = useState(false);
@@ -138,11 +246,24 @@ const SignInLink: React.FC<{ link: string }> = ({ link }) => {
 export const AddPersonDialog: React.FC<{
   ws: string; people: Person[]; teams: TeamFull[]; roles: Role[]; onClose: () => void; onDone: (p: Person) => void;
 }> = ({ ws, people, teams, roles, onClose, onDone }) => {
-  const [form, setForm] = useState<PersonInput>({ role: 'member', team_ids: [] });
+  // Most people are added on the day they join, so the date starts as today.
+  const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const fresh = (): PersonInput => ({ role: 'member', team_ids: [], date_of_joining: today() });
+  const [form, setForm] = useState<PersonInput>(fresh);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
+  // Emails that may not be added back, to say so while the address is typed rather than on save.
+  const [blocked, setBlocked] = useState<Set<string>>(new Set());
+  useEffect(() => { peopleApi.blocked(ws).then((rows) => setBlocked(new Set(rows.map((b) => b.email.toLowerCase())))).catch(() => undefined); }, [ws]);
+  const email = (form.email ?? '').trim().toLowerCase();
+  const existing = email ? people.find((p) => p.user.email.toLowerCase() === email) : undefined;
+  const emailNote = !email ? null
+    : existing ? <span className="text-amber-700">Already in the firm: <b className="font-semibold">{personName(existing)}</b>{existing.deactivated_at ? ' (left; turn them back on from their profile)' : ''}.</span>
+      : blocked.has(email) ? <span className="text-red-700">This email is blocked and can’t be added back. Remove it from Blocked addresses first.</span>
+        : null;
   const [done, setDone] = useState<{ person: Person; emailed: boolean; email_problem: string | null; link: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const ok = !!form.name?.trim() && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email?.trim() ?? '');
+  const ok = !!form.name?.trim() && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email?.trim() ?? '') && !existing && !blocked.has(email);
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -161,7 +282,8 @@ export const AddPersonDialog: React.FC<{
           <div className="mt-4 flex items-center justify-between">
             <SignInLink link={done.link} />
             <div className="flex gap-2">
-              <button type="button" onClick={() => { setDone(null); setForm({ role: 'member', team_ids: [] }); }} className="rounded-md px-3 py-1.5 text-sm text-brand-700 hover:bg-brand-50">Add another</button>
+              <button type="button" onClick={() => { onClose(); navigate(`/people?person=${encodeURIComponent(done.person.user.id)}`); }} className="rounded-md px-3 py-1.5 text-sm text-brand-700 hover:bg-brand-50">Open their profile</button>
+              <button type="button" onClick={() => { setDone(null); setForm(fresh()); }} className="rounded-md px-3 py-1.5 text-sm text-brand-700 hover:bg-brand-50">Add another</button>
               <button type="button" onClick={onClose} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white">Done</button>
             </div>
           </div>
@@ -169,7 +291,7 @@ export const AddPersonDialog: React.FC<{
       ) : (
         <div className="min-h-0 overflow-auto">
           <p className="mb-3 text-xs text-gray-500">Add someone who's joining, with their details. No email is needed to get started — they appear as “Pending” until they first sign in.</p>
-          <ProfileFields form={form} set={(p) => setForm((f) => ({ ...f, ...p }))} people={people} teams={teams} roles={roles} showEmail showRole adminFields />
+          <ProfileFields form={form} set={(p) => setForm((f) => ({ ...f, ...p }))} people={people} teams={teams} roles={roles} showEmail showRole adminFields emailNote={emailNote} />
           {/* The joiner checklist is not a decision to make while typing someone's name in --
               it is HR's, afterwards, from the person's own page. The plan, the tasks it makes and
               the leaver rules that match it are all untouched. */}
@@ -299,7 +421,7 @@ export const PersonPanel: React.FC<{
               <Avatar user={person.user} size={48} />
               {canEdit && (
                 <>
-                  <button aria-label="Change photo" type="button" title="Change photo" onClick={() => photoRef.current?.click()}
+                  <button aria-label="Change photo" type="button" onClick={() => photoRef.current?.click()}
                     className="absolute -bottom-1 -right-1 rounded-full border border-gray-200 bg-white p-1 text-gray-500 shadow-sm hover:text-gray-800"><Camera size={11} /></button>
                   <input ref={photoRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="Upload photo" className="hidden"
                     onChange={(e) => { photo(e.target.files?.[0]); e.target.value = ''; }} />
@@ -315,7 +437,7 @@ export const PersonPanel: React.FC<{
                 {left && <span className="rounded-full bg-red-100 px-2 py-0.5 text-red-800">Access turned off</span>}
               </div>
             </div>
-            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+            <button aria-label="Close" type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
           </header>
           <div className="min-h-0 flex-1 overflow-auto p-5">
             {error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}

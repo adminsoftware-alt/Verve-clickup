@@ -172,8 +172,9 @@ export const ProfileChip: React.FC = () => {
 
             <div className="border-t border-gray-100 py-1">
               <Link to="/settings" role="menuitem" onClick={close} className={item}><UserRound size={15} className="text-gray-400" /> My profile</Link>
-              {/* Running teams is a manager's job, and the directory is part of it. */}
-              {isManager && <Link to="/people" role="menuitem" onClick={close} className={item}><Users size={15} className="text-gray-400" /> People &amp; Teams</Link>}
+              {/* On a computer My team is in the sidebar, under Timesheet. A phone has no sidebar, so
+                  this is its way in there. */}
+              {isManager && <Link to="/people" role="menuitem" onClick={close} className={`${item} md:hidden`}><Users size={15} className="text-gray-400" /> {isAdmin ? 'People' : 'My team'}</Link>}
               {/* On a phone there is no sidebar, so Admin's way in is here. */}
               {isAdmin && <Link to="/admin" role="menuitem" onClick={close} className={`${item} md:hidden`}><ShieldCheck size={15} className="text-gray-400" /> Admin</Link>}
             </div>

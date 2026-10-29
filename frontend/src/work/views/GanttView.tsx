@@ -156,14 +156,14 @@ export const GanttView: React.FC<{
     const done = t.status.group === 'done' || t.status.group === 'closed';
     if (type?.is_milestone) {
       return (
-        <button key={t.id} type="button" title={`${t.name} (milestone)`} aria-label={`Bar: ${t.name}`} onMouseDown={(e) => drag(e, t, 'move')}
+        <button key={t.id} type="button" aria-label={`Bar: ${t.name}`} onMouseDown={(e) => drag(e, t, 'move')}
           className="absolute flex items-center gap-1 text-xs text-gray-700" style={{ left: x(b) - 7, top: top + 9 }}>
           <Diamond size={16} fill={type.color} style={{ color: type.color }} /><span className="whitespace-nowrap">{t.name}</span>
         </button>
       );
     }
     return (
-      <div key={t.id} role="button" tabIndex={0} aria-label={`Bar: ${t.name}`} title={`${t.name} · ${new Date(a).toLocaleDateString()} → ${new Date(b).toLocaleDateString()}`}
+      <div key={t.id} role="button" tabIndex={0} aria-label={`Bar: ${t.name}`}
         onMouseDown={(e) => drag(e, t, 'move')} onKeyDown={(e) => e.key === 'Enter' && onOpenTask(t.id)}
         className={`group absolute flex h-6 items-center overflow-hidden rounded-md text-[11px] font-medium text-white shadow-sm ${canEdit(t) ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${done ? 'opacity-60' : ''}`}
         style={{ left, top: top + 5, width: w, backgroundColor: t.status.color }}>
@@ -234,7 +234,7 @@ export const GanttView: React.FC<{
             {zoom !== 'month' && Array.from({ length: days }, (_, i) => i).filter((i) => [0, 6].includes(new Date(addDays(from, i)).getDay())).map((i) => (
               <div key={i} className="absolute inset-y-0 bg-gray-50" style={{ left: i * px, width: px }} />
             ))}
-            <div className="absolute inset-y-0 w-px bg-red-400" style={{ left: x(today) + px / 2 }} title="Today" />
+            <div className="absolute inset-y-0 w-px bg-red-400" style={{ left: x(today) + px / 2 }} aria-label="Today" />
           </div>
           {/* rows */}
           {rows.map((r, i) => (
@@ -278,7 +278,7 @@ export const GanttView: React.FC<{
               <span key={t.id} className="flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
                 <button type="button" onClick={() => onOpenTask(t.id)} className="hover:underline">{t.name}</button>
                 {canEdit(t) && (
-                  <button type="button" title="Schedule this week" aria-label={`Schedule ${t.name}`} onClick={() => onUpdate(t.id, { start_date: new Date(today + 9 * 3600_000).toISOString(), due_date: new Date(addDays(today, 4) + 17 * 3600_000).toISOString() })}
+                  <button type="button" aria-label={`Schedule ${t.name}`} onClick={() => onUpdate(t.id, { start_date: new Date(today + 9 * 3600_000).toISOString(), due_date: new Date(addDays(today, 4) + 17 * 3600_000).toISOString() })}
                     className="text-brand-600 hover:text-brand-800"><CalendarPlus size={12} /></button>
                 )}
               </span>

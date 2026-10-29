@@ -1,4 +1,4 @@
-"""ClickUp's Create a Space: default permission, then the workflow -- statuses, views, ClickApps."""
+"""Create Space: name and look, default permission, and the statuses it starts with."""
 
 from tests.v2.conftest import ok
 
@@ -18,15 +18,14 @@ def test_the_workflow_chosen_is_the_one_made(api, workspace):
     sp = make(api, workspace, description="Campaigns", icon="M", color="#7b68ee",
               statuses=[{"name": "Idea", "color": "#87909e", "group": "not_started"},
                         {"name": "In review", "color": "#5b9fef", "group": "active"},
-                        {"name": "Live", "color": "#008844", "group": "closed"}],
-              views=["board", "calendar"], clickapps={"sprint_points": True, "time_tracking": False})
-    assert sp["description"] == "Campaigns" and sp["clickapps"]["sprint_points"] and not sp["clickapps"]["time_tracking"]
+                        {"name": "Live", "color": "#008844", "group": "closed"}])
+    assert sp["description"] == "Campaigns" and sp["icon"] == "M" and sp["color"] == "#7b68ee"
     names = [s["name"] for s in ok(api.get(f"/spaces/{sp['id']}/statuses", "owner"))["statuses"]]
     assert names == ["Idea", "In review", "Live"]
-    # The Space and its new Folders open with the chosen views; a List keeps only its List view.
-    assert [v["type"] for v in ok(api.get(f"/spaces/{sp['id']}/views", "owner"))] == ["overview", "list", "board", "calendar"]
+    # The Space and its new Folders open with just the required views; a List keeps only its List view.
+    assert [v["type"] for v in ok(api.get(f"/spaces/{sp['id']}/views", "owner"))] == ["overview", "list"]
     folder = ok(api.post(f"/spaces/{sp['id']}/folders", "owner", {"name": "Q4"}), 201)
-    assert [v["type"] for v in ok(api.get(f"/folders/{folder['id']}/views", "owner"))] == ["overview", "list", "board", "calendar"]
+    assert [v["type"] for v in ok(api.get(f"/folders/{folder['id']}/views", "owner"))] == ["overview", "list"]
     lst = ok(api.post(f"/spaces/{sp['id']}/lists", "owner", {"name": "Q4 list"}), 201)
     assert [v["type"] for v in ok(api.get(f"/lists/{lst['id']}/views", "owner"))] == ["list"]
 

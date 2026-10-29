@@ -1,54 +1,14 @@
-"""Browsing and joining Spaces, sidebar sections, public links, tasks in several Lists, and the
-content behind the Doc, Whiteboard and Chat views."""
+"""Public links, tasks in several Lists, and the content behind the Doc, Whiteboard and Chat views."""
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-
-
-class SpaceJoinRequest(Base):
-    """Someone asking to be let into a private Space they found on the All Spaces page."""
-
-    __tablename__ = "space_join_requests"
-    __table_args__ = (CheckConstraint("status IN ('pending', 'approved', 'declined')", name="status"),)
-
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    message: Mapped[Optional[str]] = mapped_column(String(500))
-    status: Mapped[str] = mapped_column(String(10), nullable=False, default="pending")
-    decided_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-
-class HiddenSpace(Base):
-    """A Space someone has left (hidden from their sidebar). Access is unchanged; it's a personal preference."""
-
-    __tablename__ = "hidden_spaces"
-
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    space_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"), primary_key=True)
-
-
-class SidebarSection(Base):
-    """A personal heading in the sidebar that groups Spaces ("Clients", "Internal")."""
-
-    __tablename__ = "sidebar_sections"
-
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(60), nullable=False)
-    orderindex: Mapped[float] = mapped_column(Float, nullable=False, default=0)
-    space_ids: Mapped[List[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), default=list)
-    collapsed: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"), default=False)
 
 
 class PublicLink(Base):
