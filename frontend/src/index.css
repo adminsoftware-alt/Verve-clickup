@@ -64,6 +64,8 @@
   
   /* Fonts */
   --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  /* A display face for a few large words, like the name on the Dashboard greeting. Sans, as the app is. */
+  --font-display: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
   
   /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -72,7 +74,9 @@
 
 /*
  * Element resets live in Tailwind's base layer. Unlayered rules outrank every Tailwind
- * utility in v4, so a bare `* { padding: 0 }` silently cancelled all p-*/m-* classes.
+ * utility in v4, so a bare `* { padding: 0 }` silently cancelled all the p- and m- classes.
+ * (Never write "star slash" inside a comment here: it ends the comment, and the rest of the
+ * text became part of the selectors below, which switched off every rule in this block.)
  * Inline styles, used by most existing pages, still win over this layer as before.
  */
 @layer base {
@@ -95,7 +99,13 @@
   [role="tab"],
   [role="option"],
   [role="menuitem"],
+  [role="menuitemcheckbox"],
+  [role="menuitemradio"],
   [role="switch"],
+  [role="radio"],
+  [role="checkbox"],
+  [role="link"],
+  [aria-haspopup]:not(input),
   a[href],
   label:has(> input[type="checkbox"]),
   label:has(> input[type="radio"]),
@@ -135,15 +145,8 @@
     line-height: 1.2;
   }
 
-  a {
-    color: var(--color-primary);
-    text-decoration: none;
-    transition: color var(--transition-fast);
-  }
-
-  a:hover {
-    color: var(--color-primary-hover);
-  }
+  /* Links keep the colour of the text around them (Tailwind's default) and take navy where a
+     component says so; a teal link rule here never applied and would now be off-brand. */
 
   button {
     cursor: pointer;
@@ -436,7 +439,6 @@ select:not([multiple]):not([size]) {
 .premium-btn:hover {
   background-color: #F9FAFB;
   box-shadow: 0 3px 6px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
-  transform: translateY(-0.5px);
 }
 
 .premium-btn:active {
@@ -500,6 +502,13 @@ select:not([multiple]):not([size]) {
 .org-chart ul ul::before { content: ''; position: absolute; top: 0; left: 50%; height: 20px; border-left: 1px solid #d1d5db; }
 .org-chart > ul > li { padding-top: 0; }
 .org-chart > ul > li::before, .org-chart > ul > li::after { display: none; }
+/* People with no reports, stacked in one column under their manager in a light tray, so a big
+   team grows down the canvas instead of across it. */
+.org-chart ul.org-stack > li { padding-top: 0; }
+.org-chart ul.org-stack > li::before, .org-chart ul.org-stack > li::after { display: none; }
+.org-stack-box { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid #E4E8F0; border-radius: 14px; background: #F7F9FC; }
+/* The canvas: faint dots, like a drawing tool's paper, so moving it is visible. */
+.org-canvas { background-color: #FBFCFE; background-image: radial-gradient(#DCE2EC 1px, transparent 1px); background-size: 18px 18px; touch-action: none; user-select: none; }
 
 /* Printing a Dashboard (Print / save as PDF): only the Dashboard, every card, no app chrome. */
 /* Admin: the options pop up, the chosen one grows into its window, and the page behind fades. */
@@ -596,27 +605,12 @@ select:not([multiple]):not([size]) {
 @keyframes assistant-dot { 0%, 80%, 100% { transform: translateY(0); opacity: 0.45; } 40% { transform: translateY(-4px); opacity: 1; } }
 .assistant-dot { animation: assistant-dot 1.1s ease-in-out infinite; }
 .assistant-in { animation: ui-dialog-in 200ms var(--ui-ease); transform-origin: bottom right; }
-/* The launcher: a slowly turning ring of colour and a glow that breathes, so it always reads as there. */
-@property --assistant-turn { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
-@keyframes assistant-turn { to { --assistant-turn: 360deg; } }
-@keyframes assistant-glow { 0%, 100% { box-shadow: 0 0 10px 2px rgba(255, 61, 127, 0.35), 0 6px 16px rgba(20, 8, 46, 0.35); } 50% { box-shadow: 0 0 22px 7px rgba(168, 85, 247, 0.55), 0 6px 16px rgba(20, 8, 46, 0.35); } }
-@keyframes assistant-blink { 0%, 70%, 100% { opacity: 1; } 35% { opacity: 0.35; } }
-.assistant-launcher { animation: assistant-glow 2.4s ease-in-out infinite; }
-.assistant-launcher-ring { background: conic-gradient(from var(--assistant-turn), #ff9f1c, #ff3d7f, #a855f7, #ff9f1c); animation: assistant-turn 3s linear infinite; }
-.assistant-blink { animation: assistant-blink 1.6s ease-in-out infinite; }
-/* Inside the assistant panel, "brand" is the launcher's pink-violet, and solid buttons wear its gradient. */
-.ai-theme {
-  --color-brand-50: #fdf2fb; --color-brand-100: #fbe4f6; --color-brand-200: #f6c6ec; --color-brand-300: #ee9adb;
-  --color-brand-400: #e264c6; --color-brand-500: #d13bb0; --color-brand-600: #b4269a; --color-brand-700: #8e1d7c;
-  --color-brand-800: #6c1860; --color-brand-900: #4a1243;
-}
-.ai-theme .bg-brand-600:not(:disabled), .ai-theme .from-brand-500 { background-image: linear-gradient(135deg, #ff8a3d, #ff3d7f 50%, #a855f7); }
-.ai-theme .bg-brand-600:not(:disabled):hover { filter: brightness(1.06); }
-.assistant-hint { background: linear-gradient(#fff, #fff) padding-box, linear-gradient(90deg, #ff9f1c, #ff3d7f, #a855f7) border-box; border: 1.5px solid transparent; }
+/* The launcher: a flat navy circle with a white bubble. The panel uses the app's own navy too, so
+   the assistant reads as part of Verveflow rather than a widget bolted onto it. */
+.assistant-launcher { box-shadow: 0 6px 16px -6px rgba(27, 42, 74, 0.45); }
 @media (prefers-reduced-motion: reduce) {
   .assistant-dot { animation: none; opacity: 0.7; }
   .assistant-in { animation: none; }
-  .assistant-launcher, .assistant-launcher-ring, .assistant-blink { animation: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   [role="menu"], [role="listbox"], .fixed.inset-0[class*="bg-black/"], .fixed.inset-0[class*="bg-black/"] > [role="dialog"], .ui-slide-in { animation: none !important; }
@@ -804,10 +798,9 @@ select:not([multiple]):not([size]) {
 .dash-3d .ui-card.mb-6 button.rounded-md {
   border-radius: 9px;
 }
-.dash-3d .ui-card.mb-6 button[aria-label="Refresh"]:hover svg { transform: rotate(180deg); }
 .dash-3d .ui-card.mb-6 button[aria-label="Refresh"] svg { transition: transform 400ms var(--ui-ease); }
 .dash-3d .ui-card.mb-6 button[aria-label="Refresh"]:hover,
-.dash-3d .ui-card.mb-6 [title="Save"]:hover { background: #EEF2F8; color: #234788; }
+.dash-3d .ui-card.mb-6 [aria-label="Save"]:hover { background: #EEF2F8; color: #234788; }
 /* Section headings ("At a glance"): a short navy bar before the words, the words in ink. */
 .dash-3d .ui-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: #344054; font-size: 0.72rem; letter-spacing: 0.09em; }
 .dash-3d .ui-eyebrow::before { content: ''; width: 3px; height: 13px; border-radius: 2px; background: linear-gradient(180deg, #3A63AE, #234788); }
@@ -1197,7 +1190,7 @@ select:not([multiple]):not([size]) {
 /* --- A tool, not a web page: how every control answers the pointer -------------------------------
    One accent everywhere -- the logo's navy -- including the menus and pop-ups that open outside a
    page. A button gives a little under a click, a menu row lights navy under the pointer, focus is
-   a navy ring, and hints are small dark bubbles (components/Tooltips.tsx) instead of the browser's. */
+   a navy ring, and there are no hover hints: each control is labelled in place (aria-label for icons). */
 :root {
   --color-brand-50: #EEF2F8; --color-brand-100: #D9E1EF; --color-brand-200: #B3C3DF;
   --color-brand-300: #8CA5CF; --color-brand-400: #5A7DB6; --color-brand-500: #2F5699;
@@ -1226,30 +1219,9 @@ button:focus-visible, a:focus-visible, [role="button"]:focus-visible, [role="tab
 [role="menu"] [role="menuitem"]:not(.text-red-600):hover .text-gray-400 { color: #234788; }
 [role="menu"] [role="menuitem"]:not(.text-red-600):active { background: #D9E1EF !important; }
 
-/* The hint bubble. */
-/* Hover hints, classic and quiet: a small white label with a hairline and a soft shadow, a tiny
-   pointer to its control, and a short fade. No dark slab. */
-@keyframes ui-tip-in { from { opacity: 0; transform: translate(-50%, calc(-100% + 2px)); } to { opacity: 1; transform: translate(-50%, -100%); } }
-@keyframes ui-tip-in-below { from { opacity: 0; transform: translate(-50%, -2px); } to { opacity: 1; transform: translate(-50%, 0); } }
-.ui-tip {
-  position: fixed; z-index: 1000; pointer-events: none; transform: translate(-50%, -100%);
-  width: max-content; max-width: 240px; padding: 4px 8px; border-radius: 6px;
-  background: #FFFFFF; color: #1B2A4A; border: 1px solid #DFE4EC;
-  font-size: 11.5px; font-weight: 500; line-height: 1.35; letter-spacing: 0.005em;
-  box-shadow: 0 4px 12px -4px rgba(16, 24, 40, 0.16), 0 1px 2px rgba(16, 24, 40, 0.05);
-  animation: ui-tip-in 140ms var(--ui-ease);
-  white-space: pre-line; text-align: center;
-}
-/* The pointer: a small white square turned 45deg, its two outer edges drawn with the hairline. */
-.ui-tip::after {
-  content: ''; position: absolute; left: 50%; width: 7px; height: 7px; background: #FFFFFF;
-  transform: translateX(-50%) rotate(45deg);
-  bottom: -4.5px; border-right: 1px solid #DFE4EC; border-bottom: 1px solid #DFE4EC;
-}
-.ui-tip.is-below { transform: translate(-50%, 0); animation-name: ui-tip-in-below; }
-.ui-tip.is-below::after { bottom: auto; top: -4.5px; border: 0; border-left: 1px solid #DFE4EC; border-top: 1px solid #DFE4EC; }
+/* No hover hints (the firm's rule): a control says what it is in its own label, and to a
+   screen reader through aria-label. */
 @media (prefers-reduced-motion: reduce) {
-  .ui-tip { animation: none; }
   button:active { transform: none !important; }
 }
 
@@ -1437,64 +1409,64 @@ button.wl-tile:not(:disabled):hover { box-shadow: 0 6px 14px -10px color-mix(in 
    edge to edge beside it with a white top bar. Only the frame is restyled: the pages inside keep
    their own look. */
 html[data-shell="classic"] .app-shell { background: #13254d !important; }
-html[data-shell="classic"] .app-sidebar {
+html[data-shell="classic"] .app-sidebar.is-collapsed {
   background: linear-gradient(180deg, #13254d 0%, #172c5a 60%, #1a3164 100%) !important;
   box-shadow: none !important; border: 0 !important; border-radius: 0 !important;
 }
-html[data-shell="classic"] .app-sidebar > div:first-child { border-bottom-color: rgba(255, 255, 255, 0.1); }
-html[data-shell="classic"] .app-sidebar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); }
+html[data-shell="classic"] .app-sidebar.is-collapsed > div:first-child { border-bottom-color: rgba(255, 255, 255, 0.1); }
+html[data-shell="classic"] .app-sidebar.is-collapsed::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); }
 
-html[data-shell="classic"] .app-sidebar .brand-lockup-name { color: #ffffff; }
-html[data-shell="classic"] .app-sidebar .brand-lockup-name > span { color: #9DB6E8; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .brand-lockup-name { color: #ffffff; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .brand-lockup-name > span { color: #9DB6E8; }
 /* The logo in white: the cards behind turn translucent white, the front card white, the tick navy. */
-html[data-shell="classic"] .app-sidebar .brand-lockup rect:nth-of-type(1) { fill: rgba(255, 255, 255, 0.22); }
-html[data-shell="classic"] .app-sidebar .brand-lockup rect:nth-of-type(2) { fill: rgba(255, 255, 255, 0.5); }
-html[data-shell="classic"] .app-sidebar .brand-lockup rect:nth-of-type(3) { fill: #ffffff; }
-html[data-shell="classic"] .app-sidebar .brand-lockup path { stroke: #234788; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .brand-lockup rect:nth-of-type(1) { fill: rgba(255, 255, 255, 0.22); }
+html[data-shell="classic"] .app-sidebar.is-collapsed .brand-lockup rect:nth-of-type(2) { fill: rgba(255, 255, 255, 0.5); }
+html[data-shell="classic"] .app-sidebar.is-collapsed .brand-lockup rect:nth-of-type(3) { fill: #ffffff; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .brand-lockup path { stroke: #234788; }
 
 /* Top rows: soft white text, icons in faint glass tiles; the page you are on a lit row with a white tile. */
-html[data-shell="classic"] .app-sidebar .side-row { color: #D3DCEE; }
-html[data-shell="classic"] .app-sidebar .side-row > svg,
-html[data-shell="classic"] .app-sidebar .side-row > span > svg { color: #A9B8D8; }
-html[data-shell="classic"] .app-sidebar .side-row:has(> svg) { color: #D3DCEE; }
-html[data-shell="classic"] .app-sidebar .side-row > svg {
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row { color: #D3DCEE; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row > svg,
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row > span > svg { color: #A9B8D8; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row:has(> svg) { color: #D3DCEE; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row > svg {
   background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
-html[data-shell="classic"] .app-sidebar .side-row:hover,
-html[data-shell="classic"] .app-sidebar .side-row:has(> svg):hover { background: rgba(255, 255, 255, 0.07); color: #ffffff; }
-html[data-shell="classic"] .app-sidebar .side-row:has(> svg):hover > svg {
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row:hover,
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row:has(> svg):hover { background: rgba(255, 255, 255, 0.07); color: #ffffff; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row:has(> svg):hover > svg {
   color: #ffffff; background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
 }
-html[data-shell="classic"] .app-sidebar .side-row.is-active:has(> svg),
-html[data-shell="classic"] .app-sidebar .side-row.is-active:has(> svg):hover {
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row.is-active:has(> svg),
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row.is-active:has(> svg):hover {
   background: rgba(255, 255, 255, 0.12); color: #ffffff;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
-html[data-shell="classic"] .app-sidebar .side-row.is-active > svg,
-html[data-shell="classic"] .app-sidebar .side-row.is-active:hover > svg {
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row.is-active > svg,
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row.is-active:hover > svg {
   background: #ffffff; color: #234788; box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.4);
 }
-html[data-shell="classic"] .app-sidebar .side-row > .text-xs.text-gray-400 { background: rgba(255, 255, 255, 0.1); color: #D3DCEE; }
-html[data-shell="classic"] .app-sidebar .side-row.is-active > .text-xs.text-gray-400 { background: #ffffff; color: #234788; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row > .text-xs.text-gray-400 { background: rgba(255, 255, 255, 0.1); color: #D3DCEE; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row.is-active > .text-xs.text-gray-400 { background: #ffffff; color: #234788; }
 
 /* Section heading and the Spaces tree. */
-html[data-shell="classic"] .app-sidebar .side-head { color: #7F91B8; }
-html[data-shell="classic"] .app-sidebar .side-head svg { color: #7F91B8; }
-html[data-shell="classic"] .app-sidebar .side-rule { border-top-color: rgba(255, 255, 255, 0.1); }
-html[data-shell="classic"] .app-sidebar .side-space > span > span:not(.rounded-md) { color: #ffffff; }
-html[data-shell="classic"] .app-sidebar .side-folder > span > svg { color: #9DB6E8; }
-html[data-shell="classic"] .app-sidebar .side-list > span > svg { color: #7F91B8; }
-html[data-shell="classic"] .app-sidebar .side-list > span > span { color: #C3CEE6; }
-html[data-shell="classic"] .app-sidebar .side-branch::before { background: rgba(255, 255, 255, 0.12); }
-html[data-shell="classic"] .app-sidebar .side-list.is-active,
-html[data-shell="classic"] .app-sidebar .side-folder.is-active,
-html[data-shell="classic"] .app-sidebar .side-space.is-active { background: rgba(255, 255, 255, 0.12); color: #ffffff; }
-html[data-shell="classic"] .app-sidebar .side-list.is-active::before,
-html[data-shell="classic"] .app-sidebar .side-folder.is-active::before,
-html[data-shell="classic"] .app-sidebar .side-space.is-active::before { background: #9DB6E8; }
-html[data-shell="classic"] .app-sidebar .side-list.is-active > span > span { color: #ffffff; }
-html[data-shell="classic"] .app-sidebar .side-row .text-gray-400,
-html[data-shell="classic"] .app-sidebar .side-row .text-gray-500 { color: #8FA0C4; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-head { color: #7F91B8; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-head svg { color: #7F91B8; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-rule { border-top-color: rgba(255, 255, 255, 0.1); }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-space > span > span:not(.rounded-md) { color: #ffffff; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-folder > span > svg { color: #9DB6E8; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-list > span > svg { color: #7F91B8; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-list > span > span { color: #C3CEE6; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-branch::before { background: rgba(255, 255, 255, 0.12); }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-list.is-active,
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-folder.is-active,
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-space.is-active { background: rgba(255, 255, 255, 0.12); color: #ffffff; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-list.is-active::before,
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-folder.is-active::before,
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-space.is-active::before { background: #9DB6E8; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-list.is-active > span > span { color: #ffffff; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row .text-gray-400,
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-row .text-gray-500 { color: #8FA0C4; }
 
 /* The work area runs edge to edge beside the navy sidebar, white top bar along its top. It used
    to sit inset as a rounded panel with a 10px navy band round it; that band read as a stray blue
@@ -1509,10 +1481,10 @@ html[data-shell="classic"] .app-sidebar + main > header button[aria-label="Searc
   background: #F3F5F9; box-shadow: inset 0 0 0 1px #E3E8F0;
 }
 html[data-shell="classic"] .topbar-title:empty::before { color: #1B2A4A; }
-html[data-shell="classic"] .app-sidebar .side-folder,
-html[data-shell="classic"] .app-sidebar .side-folder > span > span { color: #E3E9F5; }
-html[data-shell="classic"] .app-sidebar .side-space,
-html[data-shell="classic"] .app-sidebar .side-list { color: #C3CEE6; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-folder,
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-folder > span > span { color: #E3E9F5; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-space,
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-list { color: #C3CEE6; }
 
 /* --- Sidebar: logo band, fold button, and the narrow (icons only) sidebar -----------------------
    The logo sits in its own band across the full width, with no line under it; the Spaces section
@@ -1534,9 +1506,9 @@ html[data-shell="classic"] .app-sidebar .side-list { color: #C3CEE6; }
 .side-fold:hover { color: #234788; }
 .app-sidebar .side-rule { border-top-color: transparent !important; }
 
-html[data-shell="classic"] .app-sidebar > .side-brand { background: #0D1B3A; }
-html[data-shell="classic"] .side-fold { background: rgba(255, 255, 255, 0.08); color: #A9B8D8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
-html[data-shell="classic"] .side-fold:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+html[data-shell="classic"] .app-sidebar.is-collapsed > .side-brand { background: #0D1B3A; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-fold { background: rgba(255, 255, 255, 0.08); color: #A9B8D8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-fold:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
 
 /* Narrow: the logo mark and the fold button stacked, the main rows as icons, the tree put away. */
 .app-sidebar.is-collapsed > .side-brand { flex-direction: column; justify-content: center; gap: 12px; padding: 16px 0 !important; }
@@ -1582,19 +1554,25 @@ html[data-shell="classic"] .side-fold:hover { background: rgba(255, 255, 255, 0.
 .app-sidebar .side-main a[href="/dashboards"] > svg { color: #2F6FD6; background: #E6EFFC; }
 .app-sidebar .side-main a[href="/my-tasks"] > svg { color: #7048D8; background: #EFEAFD; }
 .app-sidebar .side-main a[href="/timesheets"] > svg { color: #B7791F; background: #FCF2DF; }
+.app-sidebar .side-main a[href="/people"] > svg { color: #C2366B; background: #FCE8F0; }
+.app-sidebar .side-main [data-nav="admin"] > svg { color: #4338CA; background: #E9E8FC; }
 
-html[data-shell="classic"] .app-sidebar .side-main {
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-main {
   background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
 }
-html[data-shell="classic"] .app-sidebar .side-main a[href="/"] > svg,
-html[data-shell="classic"] .app-sidebar .side-main a[href="/dashboards"] > svg { color: #93C2FF; background: rgba(96, 165, 250, 0.16); box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.2); }
-html[data-shell="classic"] .app-sidebar .side-main a[href="/my-tasks"] > svg { color: #C9B6FF; background: rgba(167, 139, 250, 0.16); box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.22); }
-html[data-shell="classic"] .app-sidebar .side-main a[href="/timesheets"] > svg { color: #FCD27A; background: rgba(251, 191, 36, 0.14); box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.2); }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-main a[href="/"] > svg,
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-main a[href="/dashboards"] > svg { color: #93C2FF; background: rgba(96, 165, 250, 0.16); box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.2); }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-main a[href="/my-tasks"] > svg { color: #C9B6FF; background: rgba(167, 139, 250, 0.16); box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.22); }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-main a[href="/timesheets"] > svg { color: #FCD27A; background: rgba(251, 191, 36, 0.14); box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.2); }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-main a[href="/people"] > svg { color: #F9A8C8; background: rgba(244, 114, 182, 0.14); box-shadow: inset 0 0 0 1px rgba(244, 114, 182, 0.22); }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-main [data-nav="admin"] > svg { color: #B4B0FB; background: rgba(129, 140, 248, 0.16); box-shadow: inset 0 0 0 1px rgba(129, 140, 248, 0.24); }
 /* The page you are on: the tile fills with that page's colour. */
 .app-sidebar .side-main a[href="/"].is-active > svg,
 .app-sidebar .side-main a[href="/dashboards"].is-active > svg { color: #fff !important; background: #2F6FD6 !important; box-shadow: 0 3px 8px -2px rgba(47, 111, 214, 0.5) !important; }
 .app-sidebar .side-main a[href="/my-tasks"].is-active > svg { color: #fff !important; background: #7048D8 !important; box-shadow: 0 3px 8px -2px rgba(112, 72, 216, 0.5) !important; }
 .app-sidebar .side-main a[href="/timesheets"].is-active > svg { color: #fff !important; background: #D08A1E !important; box-shadow: 0 3px 8px -2px rgba(208, 138, 30, 0.5) !important; }
+.app-sidebar .side-main a[href="/people"].is-active > svg { color: #fff !important; background: #C2366B !important; box-shadow: 0 3px 8px -2px rgba(194, 54, 107, 0.5) !important; }
+.app-sidebar .side-main [data-nav="admin"].is-active > svg { color: #fff !important; background: #4338CA !important; box-shadow: 0 3px 8px -2px rgba(67, 56, 202, 0.5) !important; }
 .app-sidebar.is-collapsed .side-main { padding: 4px; }
 
 /* Narrow sidebar: the Spaces stay, as their letter badges under the main pages. */
@@ -1609,7 +1587,7 @@ html[data-shell="classic"] .app-sidebar .side-main a[href="/timesheets"] > svg {
    The glass panel round Dashboard, My Tasks and Timesheet is gone. They stand apart instead by
    round colour badges for their icons, slightly larger text, and extra room before Spaces. */
 .app-sidebar .side-main,
-html[data-shell="classic"] .app-sidebar .side-main {
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-main {
   padding: 0; background: none; box-shadow: none; border-radius: 0; margin-bottom: 10px;
 }
 .app-sidebar .side-main .side-row:has(> svg) { min-height: 40px; font-size: 14px; }
@@ -1619,8 +1597,8 @@ html[data-shell="classic"] .app-sidebar .side-main {
 .app-sidebar .side-main .side-row.is-active:has(> svg):hover {
   position: relative; box-shadow: none !important; background: rgba(35, 71, 136, 0.07) !important;
 }
-html[data-shell="classic"] .app-sidebar .side-main .side-row.is-active:has(> svg),
-html[data-shell="classic"] .app-sidebar .side-main .side-row.is-active:has(> svg):hover { background: rgba(255, 255, 255, 0.08) !important; }
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-main .side-row.is-active:has(> svg),
+html[data-shell="classic"] .app-sidebar.is-collapsed .side-main .side-row.is-active:has(> svg):hover { background: rgba(255, 255, 255, 0.08) !important; }
 .app-sidebar .side-main .side-row.is-active:has(> svg)::before {
   content: ''; position: absolute; left: -12px; top: 9px; bottom: 9px; width: 4px; border-radius: 0 4px 4px 0; background: #234788;
 }
@@ -1628,6 +1606,8 @@ html[data-shell="classic"] .app-sidebar .side-main .side-row.is-active:has(> svg
 .app-sidebar .side-main a[href="/dashboards"].is-active::before { background: #5A9BF6; }
 .app-sidebar .side-main a[href="/my-tasks"].is-active::before { background: #9B7BF0; }
 .app-sidebar .side-main a[href="/timesheets"].is-active::before { background: #F0B44C; }
+.app-sidebar .side-main a[href="/people"].is-active::before { background: #E8749F; }
+.app-sidebar .side-main [data-nav="admin"].is-active::before { background: #818CF8; }
 .app-sidebar.is-collapsed .side-main .side-row.is-active:has(> svg)::before { left: -12px; }
 
 /* "Clear" and "Clear all" in every filter drop-down: a small rose chip with a ×, so the way to
@@ -1670,7 +1650,11 @@ html[data-shell="classic"] .app-sidebar + main > header button[aria-label="Searc
   height: 38px; border-radius: 10px;
   background: #F6F8FB; border: 1px solid #E3E8F0; box-shadow: none; color: #667085;
 }
-.app-sidebar + main > header button[aria-label="Search (Ctrl+K)"]:hover,
+/* Under the pointer: a touch darker and its edge a shade of navy -- noticed, not lit up. The ring
+   is kept for keyboard focus, where it says where you are. */
+.app-sidebar + main > header button[aria-label="Search (Ctrl+K)"]:hover {
+  background: #EFF2F7; border-color: #C9D3E3; box-shadow: none;
+}
 .app-sidebar + main > header button[aria-label="Search (Ctrl+K)"]:focus-visible {
   background: #fff; border-color: #B3C3DF; box-shadow: 0 0 0 3px rgba(35, 71, 136, 0.08);
 }
@@ -1699,16 +1683,6 @@ html[data-shell="classic"] .app-sidebar + main:has(.mytasks-ui, .location-ui) > 
 header.app-topbar > div:last-child { gap: 10px; }
 .topbar-title h1 svg, .topbar-title nav > svg:first-child { color: #234788; }
 
-/* The assistant's button: a flat navy circle with a white bubble, no turning colour ring or
-   breathing glow. Its panel keeps its own look. */
-.assistant-launcher { animation: none; box-shadow: 0 6px 16px -6px rgba(27, 42, 74, 0.45); }
-.assistant-launcher-ring { display: none; }
-.assistant-launcher > span:nth-of-type(2) { background: #234788; }
-.assistant-launcher:hover > span:nth-of-type(2) { background: #1B3A72; }
-.assistant-launcher path { stroke: #fff; }
-.assistant-launcher circle { fill: #fff; animation: none; }
-.assistant-hint { background: #fff; border: 1px solid #E3E8F0; }
-.assistant-hint > span { border-color: #E3E8F0; color: #667085; }
 @media (max-width: 639px) {
   .app-sidebar + main > header button[aria-label="Search (Ctrl+K)"],
   html[data-shell="classic"] .app-sidebar + main > header button[aria-label="Search (Ctrl+K)"] { width: 36px; height: 36px; flex: none; border-radius: 999px; padding: 0; }
@@ -1786,15 +1760,12 @@ header.app-topbar > div:last-child { gap: 10px; }
   100% { transform: rotate(0); }
 }
 @keyframes bell-count-pop { 0%, 100% { transform: scale(1); } 30% { transform: scale(1.3); } }
-.header-bell:hover .header-bell-icon,
+/* The bell rings when something arrives (and for keyboard focus), never just for being pointed at. */
 .header-bell:focus-visible .header-bell-icon { animation: bell-ring 900ms ease-in-out; }
-.bell-pick:hover .header-bell-icon { animation: bell-ring 900ms ease-in-out; }
 .header-bell.is-ringing .header-bell-icon { animation: bell-ring 900ms ease-in-out 2; }
 .header-bell.is-ringing .bell-count { animation: bell-count-pop 450ms ease-out 2; }
 @media (prefers-reduced-motion: reduce) {
-  .header-bell:hover .header-bell-icon,
   .header-bell:focus-visible .header-bell-icon,
-  .bell-pick:hover .header-bell-icon,
   .header-bell.is-ringing .header-bell-icon,
   .header-bell.is-ringing .bell-count { animation: none; }
 }
@@ -2032,6 +2003,8 @@ header.app-topbar > div:last-child { gap: 10px; }
 .app-sidebar .side-main a[href="/"], .app-sidebar .side-main a[href="/dashboards"] { --rail-glow: rgba(47, 111, 214, 0.75); }
 .app-sidebar .side-main a[href="/my-tasks"] { --rail-glow: rgba(112, 72, 216, 0.75); }
 .app-sidebar .side-main a[href="/timesheets"] { --rail-glow: rgba(240, 160, 40, 0.85); }
+.app-sidebar .side-main a[href="/people"] { --rail-glow: rgba(214, 64, 122, 0.75); }
+.app-sidebar .side-main [data-nav="admin"] { --rail-glow: rgba(67, 56, 202, 0.75); }
 /* It keeps a soft glow the whole time you are in that section; the pop plays once on arrival. */
 .app-sidebar .side-row.is-active > svg {
   filter: drop-shadow(0 0 6px var(--rail-glow));
@@ -2044,8 +2017,9 @@ header.app-topbar > div:last-child { gap: 10px; }
 }
 @media (prefers-reduced-motion: reduce) { .app-sidebar .side-row.is-active > svg { animation: none; } }
 
-/* --- The area right of the sidebar: Frost, a light blue-white, chosen 2026-10-28 ----------------
-   The pane and each page's own root take it; cards, tables and the top bar stay white on it. */
+/* --- The area right of the sidebar: Porcelain, a near-white with a cool edge, chosen 2026-10-29 ---
+   (was Frost #E8EEF8). The pane and each page's own root take it; cards, tables and the top bar
+   stay white on it, set apart by their hairlines. */
 .app-sidebar + main,
 .app-sidebar + main .mytasks-ui,
 .app-sidebar + main .location-ui,
@@ -2054,4 +2028,43 @@ header.app-topbar > div:last-child { gap: 10px; }
 .app-sidebar + main .mytasks-ui > header,
 .app-sidebar + main .mytasks-ui > [role="tablist"],
 .app-sidebar + main .location-ui > header,
-.app-sidebar + main .location-ui > header + div { background: #E8EEF8 !important; }
+.app-sidebar + main .location-ui > header + div { background: #F8F9FB !important; }
+
+/* --- Sidebar: Cornflower -------------------------------------------------------------------------
+   Wide, the sidebar is a soft cornflower blue, so the Spaces tree reads clearly and calmly in navy
+   ink beside the page; folded to its icons it keeps the deep navy of the classic shell (the
+   classic rules above apply only to .is-collapsed). One hairline separates it from the page. */
+.app-sidebar:not(.is-collapsed) {
+  background: linear-gradient(180deg, #E2EAF7 0%, #DBE5F4 45%, #D4E0F2 100%) !important;
+  border-right: 0 !important;
+  box-shadow: inset -1px 0 0 #C9D6EC !important;
+}
+.app-sidebar:not(.is-collapsed) > .side-brand { background: transparent; }
+.app-sidebar:not(.is-collapsed) .side-fold { background: #fff; color: #5B6880; box-shadow: inset 0 0 0 1px #E3E8F0; }
+.app-sidebar:not(.is-collapsed) .side-fold:hover { color: #234788; box-shadow: inset 0 0 0 1px #B3C3DF; }
+.app-sidebar:not(.is-collapsed) .side-head { color: #5B6B8A; letter-spacing: 0.12em; }
+/* Rows: ink text, a pale navy wash under the pointer, nothing moves. */
+.app-sidebar:not(.is-collapsed) .side-row:hover,
+.app-sidebar:not(.is-collapsed) .side-row:has(> svg):hover { background: rgba(255, 255, 255, 0.5); }
+.app-sidebar .side-row:has(> svg):hover > svg { transform: none; }
+.app-sidebar:not(.is-collapsed) .side-space > span > span:not(.rounded-md) { color: #142B57; }
+.app-sidebar:not(.is-collapsed) .side-folder,
+.app-sidebar:not(.is-collapsed) .side-folder > span > span { color: #1F2A44; }
+.app-sidebar:not(.is-collapsed) .side-list > span > span { color: #3A4660; }
+.app-sidebar:not(.is-collapsed) .side-branch::before { background: #BFCDE6; }
+/* The List, Folder or Space you are on: white, a hairline, and a navy bar at the edge. */
+.app-sidebar:not(.is-collapsed) .side-list.is-active,
+.app-sidebar:not(.is-collapsed) .side-folder.is-active,
+.app-sidebar:not(.is-collapsed) .side-space.is-active {
+  background: #fff; box-shadow: inset 0 0 0 1px #E3E8F0, 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+.app-sidebar:not(.is-collapsed) .side-list.is-active > span > span,
+.app-sidebar:not(.is-collapsed) .side-folder.is-active > span > span { color: #1C3A70; font-weight: 600; }
+/* A Space badge gets a faint white keyline, so a navy badge does not sink into a navy row. */
+.app-sidebar:not(.is-collapsed) .side-space .rounded-md { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6); }
+/* On the cornflower, the quiet greys (counts, the ··· and + beside a row) step darker so they
+   stay readable. */
+.app-sidebar:not(.is-collapsed) .text-gray-400 { color: #6E7E9C; }
+.app-sidebar:not(.is-collapsed) .text-gray-500 { color: #55657F; }
+
+.font-display { font-family: var(--font-display); }

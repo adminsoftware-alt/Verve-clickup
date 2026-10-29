@@ -3,8 +3,9 @@ import { Check, Copy, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Chev
 import { useMe, useWork } from '../WorkContext';
 import { useMyTasks } from '../MyTasksContext';
 import { TaskPanel } from '../TaskPanel';
-import { Menu, NameDialog, PRIORITIES, Portal, StatusDot, formatDue, formatDuration, fromDateInput, startOfDay, useClickAway } from '../ui';
-import { workApi, type Task } from '../api';
+import { Menu, NameDialog, Portal, StatusDot, formatDuration, fromDateInput, startOfDay, useClickAway } from '../ui';
+import { workApi, type Task, type TaskInput } from '../api';
+import { DuePicker, PriorityPicker, StatusPicker, canEditTask } from '../task/InlineFields';
 import { planningApi, type CalendarEvent, type Planner, type TimeBlock } from '../planningApi';
 import { FilterPanel } from '../views/FilterPanel';
 import { EMPTY_FILTERS, applyFilters, type ViewFilters } from '../views/viewSettings';
@@ -423,17 +424,23 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
   const trayCard = (t: Task) => {
     const where = (listName(t.list_id) ?? '').split(' / ').pop();
     const planned = blockedTaskIds.has(t.id);
+    const can = canEditTask(t);
+    // A change made on the card saves and reloads the tray, which may move the card to another section.
+    const edit = (input: TaskInput) => act(async () => { await workApi.updateTask(t.id, input); refreshMine(); });
     return (
       <li key={t.id}>
-        <button type="button" draggable aria-label={`Plan ${t.name}`}
+        {/* A div, not a button, so the status, date and priority inside it can be buttons of
+            their own; it still plans the task on click or Enter, and drags onto the calendar. */}
+        <div role="button" tabIndex={0} draggable aria-label={`Plan ${t.name}`}
           onDragStart={(e) => { e.dataTransfer.setData('application/x-timetriq-task', t.id); e.dataTransfer.effectAllowed = 'copy'; }}
           onClick={() => { setTrayOpen(false); setPlanning(t); }}
+          onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setTrayOpen(false); setPlanning(t); } }}
           className={`tap-row group flex w-full cursor-grab gap-2 rounded-lg border border-[#E6E8EC] bg-white text-left text-sm transition-colors hover:border-[#B3C3DF] active:cursor-grabbing ${
             trayPrefs.dense ? 'items-center px-2 py-1.5' : 'items-start px-2.5 py-2'}`}>
           {trayPrefs.dense ? (
             // One line: the name, and only what presses -- how late, or how long.
             <>
-              <span className="flex shrink-0"><StatusDot status={t.status} size={10} /></span>
+              <StatusPicker task={t} size={10} disabled={!can} onSave={edit} />
               <span className={`min-w-0 flex-1 truncate text-[13px] ${planned ? 'text-gray-500' : 'text-gray-800'}`}>{t.name}</span>
               {t.is_overdue && t.due_date
                 ? <span className="shrink-0 rounded-full bg-[#FEF3F2] px-1.5 text-[11px] font-medium text-[#B42318]">{lateBy(t.due_date)}</span>
@@ -442,21 +449,20 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
             </>
           ) : (<>
           <GripVertical size={13} className="mt-0.5 hidden shrink-0 text-gray-300 sm:block" />
-          <span className="mt-0.5 flex shrink-0"><StatusDot status={t.status} size={11} /></span>
+          <span className="mt-0.5 flex shrink-0"><StatusPicker task={t} disabled={!can} onSave={edit} /></span>
           <span className="min-w-0 flex-1">
             <span className={`block truncate text-[13px] font-medium ${planned ? 'text-gray-500' : 'text-gray-800'}`}>{t.name}</span>
             <span className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
               {where && <span className="max-w-[9rem] truncate rounded bg-[#F2F4F7] px-1.5 text-[#667085]">{where}</span>}
-              {t.due_date && (t.is_overdue
-                ? <span className="rounded-full border border-[#FECDCA] bg-[#FEF3F2] px-1.5 font-medium text-[#B42318]">{lateBy(t.due_date)}</span>
-                : <span className="text-gray-500">{formatDue(t.due_date)}</span>)}
+              <DuePicker task={t} disabled={!can} onSave={edit} />
+              {t.is_overdue && t.due_date && <span className="rounded-full border border-[#FECDCA] bg-[#FEF3F2] px-1.5 font-medium text-[#B42318]">{lateBy(t.due_date)}</span>}
               {!!t.time_estimate_seconds && <span className="rounded bg-[#EEF2F8] px-1.5 font-medium text-[#1C3A70]">{formatDuration(t.time_estimate_seconds)}</span>}
-              {t.priority && t.priority <= 2 && <span className="font-medium" style={{ color: PRIORITIES[t.priority].color }}>{PRIORITIES[t.priority].label}</span>}
+              <PriorityPicker task={t} disabled={!can} withLabel={!!t.priority && t.priority <= 2} onSave={edit} />
               {planned && <span className="inline-flex items-center gap-0.5 rounded-full bg-[#EEF2F8] px-1.5 font-medium text-[#234788]"><Check size={10} strokeWidth={3} /> Planned</span>}
             </span>
           </span>
           </>)}
-        </button>
+        </div>
       </li>
     );
   };
@@ -702,7 +708,7 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
                                   <span className="ml-auto flex shrink-0 items-center">
                                     {task && (
                                       <button type="button" aria-label={timing ? `Stop the timer on ${task.name}` : `Start a timer on ${task.name}`}
-                                        onPointerDown={stop} onClick={() => (timing ? stopTimer() : startTimer(task.id)).catch((e) => notify.error(e))}
+                                        onPointerDown={stop} onClick={() => (timing ? stopTimer() : startTimer(task.id, task)).catch((e) => notify.error(e))}
                                         className={`vf-block-btn rounded p-0.5 ${timing ? 'text-red-600' : ''}`}>
                                         {timing ? <Square size={10} fill="currentColor" /> : <Play size={10} fill="currentColor" />}
                                       </button>
@@ -768,7 +774,7 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
           timing={!!blockMenu.block.task && timer?.entry.task_id === blockMenu.block.task.id}
           onClose={() => setBlockMenu(null)}
           onOpen={() => blockMenu.block.task_id && setOpenTask(blockMenu.block.task_id)}
-          onTimer={() => { const t = blockMenu.block.task; if (t) (timer?.entry.task_id === t.id ? stopTimer() : startTimer(t.id)).catch((e) => notify.error(e)); }}
+          onTimer={() => { const t = blockMenu.block.task; if (t) (timer?.entry.task_id === t.id ? stopTimer() : startTimer(t.id, t)).catch((e) => notify.error(e)); }}
           onComplete={() => { const t = blockMenu.block.task; if (t) setStep(t, 'done'); }}
           onDuplicate={() => act(async () => { await copyBlock(blockMenu.block, new Date(blockMenu.block.end_at)); })}
           onRepeat={() => act(async () => {
@@ -884,8 +890,8 @@ const MonthGrid: React.FC<{
                   {own.slice(0, Math.max(0, SHOWN - allDay.length)).map((it) => (
                     <span key={it.id}
                       onClick={(e) => { if (it.block?.task_id) { e.stopPropagation(); onOpenTask(it.block.task_id); } }}
-                      title={`${it.title} · ${hhmm(it.start)}`}
-                      className={`flex items-center gap-1 truncate rounded px-1.5 py-px text-[11px] ${
+                      aria-label={`${it.title} · ${hhmm(it.start)}`}
+                      className={`flex items-center gap-1 truncate rounded px-1.5 py-px text-[11px] ${it.block?.task_id ? 'cursor-pointer ' : ''}${
                         it.kind === 'block' ? 'bg-indigo-50 text-indigo-800 hover:bg-indigo-100' : 'bg-gray-100 text-gray-600'}`}>
                       <span className="tabular shrink-0 opacity-70">{hhmm(it.start).replace(/:00/, '')}</span>
                       <span className="truncate">{it.title}</span>

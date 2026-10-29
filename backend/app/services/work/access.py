@@ -2,7 +2,7 @@
 
 import uuid
 from dataclasses import dataclass
-from typing import Dict, Generic, List, Optional, Set, TypeVar
+from typing import Dict, Generic, List, Optional, Set, Tuple, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -55,17 +55,20 @@ def access_problem(db: Session, member: WorkspaceMember) -> Optional[str]:
     return sign_in_problem(workspace, member.role, user)
 
 
-def _membership(db: Session, workspace_id: uuid.UUID, user_id: str) -> Optional[WorkspaceMember]:
-    """The membership, with its workspace fetched in the same round trip (access_problem needs both)."""
+def _membership(db: Session, workspace_id: uuid.UUID, user_id: str) -> Optional[Tuple[WorkspaceMember, Optional[Workspace]]]:
+    """The membership, with its workspace fetched in the same round trip (access_problem needs both).
+
+    The workspace is handed back too: the session only holds loaded objects weakly, so if nobody
+    kept it, access_problem would have to read it again."""
     known = db.identity_map.get(Session.identity_key(WorkspaceMember, (workspace_id, user_id)))
     if known is not None:
-        return known
+        return known, None
     row = db.execute(
         select(WorkspaceMember, Workspace)
         .join(Workspace, Workspace.id == WorkspaceMember.workspace_id)
         .where(WorkspaceMember.workspace_id == workspace_id, WorkspaceMember.user_id == user_id)
     ).first()
-    return row[0] if row else None
+    return (row[0], row[1]) if row else None
 
 
 class Access:
@@ -79,13 +82,16 @@ class Access:
         self._shares: Optional[Dict[ShareKey, PermissionLevel]] = None
         self._team_shares: Optional[Dict[ShareKey, PermissionLevel]] = None
         self._my_teams: Optional[Set[uuid.UUID]] = None
+        # The Teams this person is directly in, when a caller has already read them (see my_teams).
+        self.direct_teams: Optional[Set[uuid.UUID]] = None
         self._led_people: Optional[Set[str]] = None
 
     @classmethod
     def for_workspace(cls, db: Session, user_id: str, workspace_id: uuid.UUID) -> "Access":
-        member = _membership(db, workspace_id, user_id)
-        if member is None:
+        found = _membership(db, workspace_id, user_id)
+        if found is None:
             raise NotFound("Workspace not found")
+        member, _workspace = found  # _workspace stays referenced until access_problem has used it
         problem = access_problem(db, member)
         if problem:
             raise Forbidden(problem)
@@ -120,7 +126,7 @@ class Access:
         if self._my_teams is None:
             from app.services.work import team_tree
 
-            mine = list(
+            mine = list(self.direct_teams) if self.direct_teams is not None else list(
                 self.db.scalars(
                     select(TeamMember.team_id).join(Team, Team.id == TeamMember.team_id)
                     .where(TeamMember.user_id == self.user_id, Team.workspace_id == self.workspace_id)

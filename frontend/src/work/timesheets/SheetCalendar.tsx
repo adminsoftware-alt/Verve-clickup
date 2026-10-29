@@ -161,7 +161,7 @@ export const SheetCalendar: React.FC<{
                       key={b.entry.id}
                       type="button"
                       onClick={() => b.row.task.can_open && onOpenTask(b.row.task.id)}
-                      title={`${b.row.task.name}\n${clock(b.entry.started_at)}${b.entry.ended_at ? ` – ${clock(b.entry.ended_at)}` : ' – running'}\n${formatDuration(b.entry.duration_seconds ?? 0)}${b.entry.description ? `\n${b.entry.description}` : ''}`}
+                      aria-label={`${b.row.task.name}\n${clock(b.entry.started_at)}${b.entry.ended_at ? ` – ${clock(b.entry.ended_at)}` : ' – running'}\n${formatDuration(b.entry.duration_seconds ?? 0)}${b.entry.description ? `\n${b.entry.description}` : ''}`}
                       className={`absolute overflow-hidden rounded-md pl-1.5 pr-1 text-left ${skin.bg} ring-1 ring-black/5 hover:ring-2 hover:ring-black/10`}
                       style={{
                         top: top(b.from),

@@ -1,10 +1,11 @@
-// One address, filled in by hand or for you: from where you are now, or from the pincode.
+// One address, typed in, with the city and state filled in from the pincode. (Filling it from
+// "where you are now" was removed: it is usually an admin entering someone else's address.)
 //
 // It replaces the separate "Location" and "Address" boxes. The address is still kept as plain
 // lines of text -- everything that shows a person's address prints it as it is -- and the city
 // becomes their location, so the People pages keep working without a second field to fill.
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Crosshair, Loader2, MapPin, Pencil, Plus } from 'lucide-react';
+import { ChevronDown, Loader2, MapPin, Pencil, Plus } from 'lucide-react';
 
 import { COUNTRIES, INDIA } from './addressData';
 
@@ -69,7 +70,7 @@ export const AddressField: React.FC<{
   const [open, setOpen] = useState(!value);
   const [parts, setParts] = useState<AddressParts>(() => parseAddress(value));
   const [offices, setOffices] = useState<PostOffice[]>([]);
-  const [busy, setBusy] = useState<'pin' | 'gps' | null>(null);
+  const [busy, setBusy] = useState<'pin' | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const looked = useRef('');
   const id = useRef(`addr-${Math.random().toString(36).slice(2, 8)}`).current;
@@ -106,30 +107,6 @@ export const AddressField: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parts.pincode, parts.country]);
 
-  const locate = () => {
-    if (!navigator.geolocation) { setNote('This browser cannot tell where you are. Fill the address in by hand.'); return; }
-    setBusy('gps'); setNote(null);
-    navigator.geolocation.getCurrentPosition(async ({ coords }) => {
-      try {
-        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&accept-language=en&lat=${coords.latitude}&lon=${coords.longitude}`);
-        const { address: a = {} } = await r.json() as { address?: Record<string, string> };
-        looked.current = a.postcode ?? '';  // already filled from the map; no second lookup
-        update({
-          line1: [a.house_number, a.building ?? a.amenity].filter(Boolean).join(', '),
-          line2: [a.road, a.neighbourhood ?? a.suburb].filter(Boolean).join(', '),
-          city: a.city ?? a.town ?? a.village ?? a.county ?? '',
-          state: a.state ?? '',
-          pincode: (a.postcode ?? '').replace(/\s/g, ''),
-          country: COUNTRIES.find((c) => c.toLowerCase() === (a.country ?? '').toLowerCase()) ?? a.country ?? '',
-        });
-        setNote('Filled in from your location. Add your house or flat number and check the rest.');
-      } catch {
-        setNote('Could not find an address for where you are. Fill it in by hand.');
-      } finally { setBusy(null); }
-    }, () => { setBusy(null); setNote('Location access was refused. Allow it in the browser, or fill the address in by hand.'); },
-    { timeout: 15000 });
-  };
-
   const india = parts.country === 'India';
   const cities = Array.from(new Set([
     ...offices.flatMap((o) => [o.District, o.Block]).filter((s) => s && s !== 'NA'),
@@ -152,13 +129,7 @@ export const AddressField: React.FC<{
 
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <button type="button" onClick={locate} disabled={busy !== null}
-          className="flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-60">
-          {busy === 'gps' ? <Loader2 size={13} className="animate-spin" /> : <Crosshair size={13} />} Use my current location
-        </button>
-        <span className="text-xs text-gray-500">or type it in. A pincode fills the city and state.</span>
-      </div>
+      <p className="mb-3 text-xs font-normal text-gray-500">Type it in. A pincode fills the city and state.</p>
       {note && <p role="status" className="mb-3 rounded-md bg-white px-2.5 py-1.5 text-xs text-gray-600 ring-1 ring-gray-200">{note}</p>}
       <div className="grid gap-3 sm:grid-cols-2">
         <Label text="Country">

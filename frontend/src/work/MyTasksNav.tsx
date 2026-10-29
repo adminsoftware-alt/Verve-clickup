@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Target, BarChart3, Bell, CalendarDays, Landmark, Layers, Users, Clock, UserCheck } from 'lucide-react';
+import { Target, BarChart3, Bell, CalendarDays, Landmark, Layers, Users, Clock, UserCheck, Shield } from 'lucide-react';
+
+const AdminLauncher = lazy(() => import('./teams/AdminPage').then((m) => ({ default: m.AdminLauncher })));
 import { InboxLink } from './InboxPages';
 import { useWork } from './WorkContext';
 import { FEATURES } from '../config/features';
@@ -13,6 +15,7 @@ export const MyTasksNav: React.FC = () => {
   if (!workspace) return null;
   const isAdmin = hierarchy?.role === 'owner' || hierarchy?.role === 'admin';
   const looksAfterOthers = isAdmin || teams.some((t) => t.lead_ids.includes(me));
+  const [adminOpen, setAdminOpen] = useState(false);
 
   const rowClass = (active: boolean) =>
     `side-row flex w-full items-center gap-2 no-underline ${active ? 'is-active bg-brand-50 text-brand-700' : 'text-gray-700'}`;
@@ -76,6 +79,26 @@ export const MyTasksNav: React.FC = () => {
         {gap}<Clock size={16} className="shrink-0 text-gray-500" />
         <span className="flex-1 truncate font-medium">Timesheet</span>
       </Link>
+      {/* A Manager opens their team every day -- who is free, who is behind, whose timesheet is
+          missing -- so it sits with the day's other pages, not at the foot under every Space. An
+          Admin's is the whole firm, so it is called People. Employees have no team to run. */}
+      {workspace && looksAfterOthers && (
+        <Link to="/people" className={`${rowClass(pathname.startsWith('/people'))} pl-1.5`}>
+          {gap}<Users size={16} className="shrink-0 text-gray-500" />
+          <span className="flex-1 truncate font-medium">{isAdmin ? 'People' : 'My team'}</span>
+        </Link>
+      )}
+      {/* Admin is where an admin runs the firm -- people, costs, the audit log -- so it sits with
+          the day's pages at the top, not at the foot under every Space. It opens as a pop-up where
+          you are; /admin still answers as a page, for bookmarks. */}
+      {workspace && isAdmin && (
+        <button type="button" data-nav="admin" onClick={() => setAdminOpen(true)} aria-haspopup="dialog"
+          className={`${rowClass(adminOpen || pathname.startsWith('/admin'))} pl-1.5`}>
+          {gap}<Shield size={16} className="shrink-0 text-gray-500" />
+          <span className="flex-1 truncate text-left font-medium">Admin</span>
+        </button>
+      )}
+      {adminOpen && <Suspense fallback={null}><AdminLauncher onClose={() => setAdminOpen(false)} /></Suspense>}
     </nav>
   );
 };

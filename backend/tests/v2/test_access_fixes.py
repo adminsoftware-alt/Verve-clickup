@@ -66,16 +66,6 @@ def test_admin_settings_are_admin_only_to_read_too(api, workspace):
         ok(api.get(f"/workspaces/{ws}/{path}", "admin"))
 
 
-def test_join_requests_are_not_every_members_to_read(api, workspace):
-    ws = workspace["id"]
-    space = ok(api.post(f"/workspaces/{ws}/spaces", "owner", {"name": "Partners", "is_private": True}), 201)
-    ok(api.patch(f"/spaces/{space['id']}", "owner", {"discoverable": True}))
-    join(api, ws, "member2")
-    ok(api.post(f"/workspaces/{ws}/all-spaces/{space['id']}/request", "member2", {"message": "please"}), 201)
-    assert ok(api.get(f"/workspaces/{ws}/join-requests", "member")) == []
-    assert len(ok(api.get(f"/workspaces/{ws}/join-requests", "owner"))) == 1
-
-
 # --- #9 and #10: private Lists -------------------------------------------------------------------
 
 def test_an_assignee_opens_their_task_in_a_private_list(api, workspace):

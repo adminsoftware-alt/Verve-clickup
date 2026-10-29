@@ -91,7 +91,7 @@ export const TemplatePicker: React.FC<{
                   </ul>
                 </button>
                 <button
-                  type="button" title="Delete template" aria-label={`Delete ${t.name}`} onClick={() => remove(t)}
+                  type="button" aria-label={`Delete ${t.name}`} onClick={() => remove(t)}
                   className="invisible absolute right-2 top-2 rounded p-1 text-gray-400 hover:bg-white hover:text-red-600 group-hover:visible"
                 >
                   <Trash2 size={13} />

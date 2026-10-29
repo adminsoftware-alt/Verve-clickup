@@ -152,7 +152,6 @@ def test_battery_worked_on_goal_and_sprint_cards(api, workspace, space, folderle
     gc = _card(api, dash, {"type": "goal", "config": {"goal_ids": [goal["id"]]}})
     assert _data(api, dash, gc)["data"]["goals"][0]["progress"] == 25
 
-    ok(api.patch(f"/spaces/{space['id']}", "owner", {"clickapps": {"sprint_points": True}}))
     folder = ok(api.post(f"/spaces/{space['id']}/folders", "owner", {"name": "Eng"}), 201)
     ok(api.put(f"/folders/{folder['id']}/sprints", "owner", {"weeks": 1}))
     [sprint] = ok(api.get(f"/folders/{folder['id']}/sprints", "owner"))

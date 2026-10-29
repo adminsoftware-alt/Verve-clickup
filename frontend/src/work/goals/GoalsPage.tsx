@@ -169,7 +169,7 @@ const GoalDialog: React.FC<{ goal?: Goal; onClose: () => void; onSaved: (g: Goal
         <form role="dialog" aria-label={goal ? 'Edit goal' : 'New goal'} onSubmit={save} onMouseDown={(e) => e.stopPropagation()}
           className="flex max-h-[90vh] w-[40rem] max-w-[calc(100vw-2rem)] flex-col gap-3 overflow-auto rounded-xl bg-white p-5 shadow-xl">
           <div className="flex items-center justify-between"><h3 className="font-semibold text-gray-900">{goal ? 'Edit goal' : 'New goal'}</h3>
-            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button></div>
+            <button aria-label="Close" type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button></div>
           <label className="text-xs font-medium text-gray-600">Goal<input autoFocus value={name} onChange={(e) => setName(e.target.value)} className={input} placeholder="e.g. Grow the practice" /></label>
           <label className="text-xs font-medium text-gray-600">Why it matters<textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} className={input} /></label>
           <div className="grid grid-cols-3 gap-3">
@@ -296,7 +296,7 @@ const GoalDetail: React.FC<{ id: string }> = ({ id }) => {
         <span className="h-3.5 w-3.5 rounded-full" style={{ backgroundColor: goal.color }} />
         <h1 className="text-2xl font-semibold text-gray-900">{goal.name}</h1>
         {goal.is_private && <Lock size={14} className="text-gray-400" />}
-        <button aria-label={fav ? 'Remove from Favourites' : 'Add to Favourites'} type="button" title={fav ? 'Remove from Favourites' : 'Add to Favourites'} onClick={() => favorites.toggle('goal', goal.id)} className={fav ? 'text-amber-500' : 'text-gray-300 hover:text-amber-500'}><Star size={16} fill={fav ? 'currentColor' : 'none'} /></button>
+        <button aria-label={fav ? 'Remove from Favourites' : 'Add to Favourites'} type="button" onClick={() => favorites.toggle('goal', goal.id)} className={fav ? 'text-amber-500' : 'text-gray-300 hover:text-amber-500'}><Star size={16} fill={fav ? 'currentColor' : 'none'} /></button>
         <TrackBadge goal={goal} />
         {goal.can_edit && (
           <span className="ml-auto flex gap-2">

@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Lock, PartyPopper, Send, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Lock, PartyPopper, RotateCw, Send, Trash2 } from 'lucide-react';
 import { useMe } from '../WorkContext';
 import { workApi, type Task, type UserRef } from '../api';
-import { Avatar, AvatarStack, StatusDot, formatDue, formatDuration } from '../ui';
+import { Avatar, AvatarStack, formatDuration } from '../ui';
+import { DuePicker, PriorityPicker, StatusPicker, canEditTask, useTaskDraft } from '../task/InlineFields';
 import { BatteryCard, CapacityCard, GoalCard, SprintCard, VarianceCard, WorkedOnCard } from './moreCards';
 import { PlanCard } from './PlanCard';
 import { CardSkeleton, LinesSkeleton } from '../Skeleton';
@@ -43,10 +44,23 @@ export interface CardHandlers {
   onRefresh?: () => void;
   /** Move the card's own window, for the arrows that step a week at a time. */
   onShift?: (start: string, end: string) => void;
+  /** The board's data could not be read: the card offers Retry instead of loading for ever. */
+  failed?: boolean;
 }
 
-export const CardBody: React.FC<{ card: Card; data: CardData | undefined; dashboardId: string } & CardHandlers> = ({ card, data, dashboardId, onDrill, onOpenTask, onRefresh, onShift }) => {
-  if (!data) return <CardSkeleton />;
+export const CardBody: React.FC<{ card: Card; data: CardData | undefined; dashboardId: string } & CardHandlers> = ({ card, data, dashboardId, onDrill, onOpenTask, onRefresh, onShift, failed }) => {
+  // One card that could not be read says so, with a way to try again, rather than a skeleton
+  // that never finishes or a bare line of red.
+  const retry = (text: string) => (
+    <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-xs text-gray-500">
+      <span>{text}</span>
+      {onRefresh && (
+        <button type="button" onClick={onRefresh}
+          className="vf-tool flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium"><RotateCw size={12} /> Retry</button>
+      )}
+    </div>
+  );
+  if (!data) return failed ? retry("This card couldn't be loaded.") : <CardSkeleton />;
   if (data.no_access) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-1 px-4 text-center text-xs text-gray-400">
@@ -55,7 +69,7 @@ export const CardBody: React.FC<{ card: Card; data: CardData | undefined; dashbo
       </div>
     );
   }
-  if (data.error) return <div className="flex h-full items-center justify-center px-4 text-center text-xs text-red-600">{data.error}</div>;
+  if (data.error) return retry(data.error);
   const d = data.data;
   switch (card.type) {
     case 'calculation':
@@ -114,7 +128,7 @@ const personName = (u: UserRef | null) => (u ? u.display_name || u.email : 'Unas
 /** ClickUp's "Who's behind": each person with overdue work, worst first. */
 const BehindCard: React.FC<{ rows: BehindRow[]; total: number } & CardHandlers> = ({ rows, total, onDrill, onOpenTask }) => {
   if (!rows.length) {
-    return <div className="flex h-full flex-col items-center justify-center gap-1 text-sm text-emerald-700"><PartyPopper size={20} /> Nobody is behind.</div>;
+    return <div className="flex h-full flex-col items-center justify-center gap-1 text-sm text-[#234788]"><PartyPopper size={20} /> Nobody is behind.</div>;
   }
   return (
     <div className="h-full overflow-auto">
@@ -201,7 +215,7 @@ const DoneCalendar: React.FC<{
                 onClick={() => p.count && onPick(p.day)}
                 aria-pressed={on}
                 aria-label={`${when(p.day)}: ${p.count === 0 ? 'nothing finished' : `${p.count} finished`}`}
-                title={`${when(p.day)}: ${p.count === 0 ? 'nothing finished' : `${p.count} finished${p.late ? `, ${p.late} late` : ''}`}`}
+
                 className={`h-6 w-full rounded-[4px] transition-all ${shade(p.count)} ${
                   p.late ? 'ring-1 ring-amber-400' : ''} ${
                   on ? 'ring-2 ring-emerald-700' : ''} ${
@@ -253,7 +267,7 @@ const CompletedCard: React.FC<{
   // One task swings the percentage by a sixth when only six are finished, so red is held back
   // until there are enough of them for the number to mean anything.
   const tone = total === 0 ? 'text-gray-300'
-    : share >= 80 ? 'text-emerald-600'
+    : share >= 80 ? 'text-[#234788]'
     : total >= 10 && share < 50 ? 'text-red-600'
     : 'text-amber-600';
 
@@ -290,7 +304,7 @@ const CompletedCard: React.FC<{
                   <Check size={13} className="shrink-0 text-emerald-500" />
                   <span className="min-w-0 flex-1 truncate text-gray-700">{t.name}</span>
                   <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                    t.days_late > 0 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                    t.days_late > 0 ? 'bg-amber-50 text-amber-700' : 'bg-[#EEF2F8] text-[#1C3A70]'}`}>
                     {t.days_late > 0 ? `${t.days_late}d late` : 'on time'}
                   </span>
                 </button>
@@ -770,8 +784,8 @@ const EmbedCard: React.FC<{ url: string; title: string }> = ({ url, title }) => 
   if (!url) return <Empty text="No page yet. Edit the card and paste a link." />;
   return (
     <div className="relative h-full">
-      <iframe src={url} title={title} className="h-full w-full rounded-md border border-gray-100" sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-presentation" referrerPolicy="no-referrer" loading="lazy" allowFullScreen />
-      <a href={url} target="_blank" rel="noreferrer" title="Open in a new tab" className="no-print absolute right-1 top-1 rounded bg-white/90 p-1 text-gray-500 shadow-sm hover:text-gray-800"><ExternalLink size={12} /></a>
+      <iframe src={url} aria-label={title} className="h-full w-full rounded-md border border-gray-100" sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-presentation" referrerPolicy="no-referrer" loading="lazy" allowFullScreen />
+      <a href={url} target="_blank" rel="noreferrer" aria-label="Open in a new tab" className="no-print absolute right-1 top-1 rounded bg-white/90 p-1 text-gray-500 shadow-sm hover:text-gray-800"><ExternalLink size={12} /></a>
     </div>
   );
 };
@@ -807,16 +821,34 @@ const DiscussionCard: React.FC<{ dashboardId: string; cardId: string }> = ({ das
               <p className="text-xs text-gray-500"><b className="font-medium text-gray-800">{m.user ? m.user.display_name || m.user.email : 'Someone'}</b> · {new Date(m.created_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</p>
               <p className="whitespace-pre-wrap text-sm text-gray-800">{m.body}</p>
             </div>
-            {m.user?.id === me && <button type="button" title="Delete message" onClick={() => remove(m)} className="no-print rounded p-0.5 text-gray-300 opacity-0 hover:text-red-600 group-hover:opacity-100 focus:opacity-100"><Trash2 size={12} /></button>}
+            {m.user?.id === me && <button type="button" aria-label="Delete message" onClick={() => remove(m)} className="no-print rounded p-0.5 text-gray-300 hover:text-red-600"><Trash2 size={12} /></button>}
           </li>
         ))}
       </ul>
       {error && <p className="text-xs text-red-600">{error}</p>}
       <form onSubmit={send} className="no-print mt-2 flex items-center gap-1.5 border-t border-gray-100 pt-2">
         <input value={text} onChange={(e) => setText(e.target.value)} maxLength={5000} placeholder="Write a message…" aria-label="Message" className="min-w-0 flex-1 rounded-md border border-gray-200 px-2 py-1 text-sm focus:border-brand-400 focus:outline-none" />
-        <button type="submit" title="Send" disabled={!text.trim()} className="rounded-md bg-brand-600 p-1.5 text-white hover:bg-brand-700 disabled:opacity-40"><Send size={13} /></button>
+        <button type="submit" aria-label="Send" disabled={!text.trim()} className="rounded-md bg-brand-600 p-1.5 text-white hover:bg-brand-700 disabled:opacity-40"><Send size={13} /></button>
       </form>
     </div>
+  );
+};
+
+/** One row of the task list: the name opens the task; status, priority and due date change in place. */
+const TaskListRow: React.FC<{ task: Task; onOpen: () => void }> = ({ task, onOpen }) => {
+  const [t, save] = useTaskDraft(task);
+  const can = canEditTask(t);
+  return (
+    <li className="flex items-center gap-2 border-t border-gray-100 py-1 pl-1 text-sm hover:bg-gray-50">
+      <StatusPicker task={t} disabled={!can} onSave={save} />
+      <button type="button" onClick={onOpen}
+        className={`min-w-0 flex-1 truncate text-left ${t.status.group === 'closed' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+        {t.name}
+      </button>
+      <PriorityPicker task={t} disabled={!can} withLabel={false} onSave={save} />
+      <span className="flex w-12 shrink-0 justify-center"><AvatarStack users={t.assignees} max={2} /></span>
+      <span className="flex w-16 shrink-0 justify-end"><DuePicker task={t} disabled={!can} onSave={save} /></span>
+    </li>
   );
 };
 
@@ -836,26 +868,10 @@ const TaskListCard: React.FC<{ tasks: Task[]; total: number; onOpenTask: (id: st
       <div className="sticky top-0 z-10 flex items-center gap-2 bg-white py-1 pl-1 text-[11px] font-medium text-gray-400">
         <span className="min-w-0 flex-1">Name</span>
         <span className="w-12 shrink-0 text-center">Who</span>
-        <span className="w-14 shrink-0 text-right">Due</span>
+        <span className="w-16 shrink-0 text-right">Due</span>
       </div>
       <ul>
-        {tasks.map((t) => (
-          <li key={t.id}>
-            <button
-              type="button" onClick={() => onOpenTask(t.id)}
-              className="flex w-full items-center gap-2 border-t border-gray-100 py-1.5 pl-1 text-left text-sm hover:bg-gray-50"
-            >
-              <StatusDot status={t.status} size={11} />
-              <span className={`min-w-0 flex-1 truncate ${t.status.group === 'closed' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
-                {t.name}
-              </span>
-              <span className="flex w-12 shrink-0 justify-center"><AvatarStack users={t.assignees} max={2} /></span>
-              <span className={`w-14 shrink-0 whitespace-nowrap text-right text-xs ${t.is_overdue ? 'text-red-600' : 'text-gray-500'}`}>
-                {formatDue(t.due_date)}
-              </span>
-            </button>
-          </li>
-        ))}
+        {tasks.map((t) => <TaskListRow key={t.id} task={t} onOpen={() => onOpenTask(t.id)} />)}
       </ul>
       {total > tasks.length && (
         <button type="button" onClick={onMore} className="mt-1 w-full py-1 text-center text-xs text-brand-600 hover:underline">
@@ -1030,7 +1046,7 @@ const DayBar: React.FC<{
       disabled={!seconds || !onPick}
       onClick={onPick}
       aria-pressed={!!active}
-      title={seconds
+      aria-label={seconds
         ? `${formatDuration(seconds)} of ${hours}h · ${when}${billable ? ` · ${formatDuration(billable)} billable` : ''} — show this day`
         : `Nothing logged · ${when}`}
       className={`block w-full rounded-lg px-1.5 py-1 text-center transition-all ${skin.tile} ${
@@ -1163,7 +1179,7 @@ const DayAgenda: React.FC<{
             <button
               type="button"
               onClick={() => onOpenTask(e.task_id)}
-              title={`${e.task_name} — open it`}
+              aria-label={`${e.task_name} — open it`}
               className="flex w-full items-center gap-2.5 rounded-lg bg-white px-2.5 py-1.5 text-left text-sm ring-1 ring-gray-100 hover:ring-teal-300"
             >
               {e.started_at && (
@@ -1310,7 +1326,7 @@ const TimesheetCard: React.FC<{
                               type="button"
                               onClick={() => onOpenTask(t.id)}
                               className="flex w-full items-center gap-2 text-left"
-                              title={`${t.name} — ${t.status}`}
+                              aria-label={`${t.name} — ${t.status}`}
                             >
                               <span className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white" style={{ backgroundColor: t.color }} />
                               <span className="min-w-0 flex-1">
@@ -1386,10 +1402,10 @@ const PortfolioCard: React.FC<{ rows: PortfolioRow[] } & Pick<CardHandlers, 'onD
             const over = r.estimate_seconds > 0 && r.tracked_seconds > r.estimate_seconds;
             return (
               <tr key={r.list_id} onClick={() => onDrill(r.list_id, r.path)} className="cursor-pointer border-t border-gray-100 hover:bg-gray-50">
-                <td className="max-w-0 truncate py-1.5 pl-1 text-gray-800" title={r.path}>{r.path}</td>
+                <td className="max-w-0 truncate py-1.5 pl-1 text-gray-800" aria-label={r.path}>{r.path}</td>
                 <td>
                   <span className="flex items-center gap-2">
-                    <span className="h-1.5 w-24 overflow-hidden rounded bg-gray-100"><span className="block h-full bg-emerald-500" style={{ width: `${r.progress}%` }} /></span>
+                    <span className="h-1.5 w-24 overflow-hidden rounded bg-gray-100"><span className="block h-full bg-[#234788]" style={{ width: `${r.progress}%` }} /></span>
                     <span className="text-xs text-gray-500">{r.progress}%</span>
                   </span>
                 </td>

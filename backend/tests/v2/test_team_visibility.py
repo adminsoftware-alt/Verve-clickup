@@ -94,9 +94,9 @@ def test_highlights_say_whose_board_and_the_hours_logged(api, workspace, space, 
 
 
 def test_highlights_add_what_no_card_says(api, workspace, folderless_list):
-    """A timer left on, a task past its estimate, work held up by a late task, and on a Team board
-    or a Manager's own board, who logged nothing yesterday -- each said once, in a sentence. The
-    firm's news (a birthday) is the Company board's alone."""
+    """A timer left on, a task past its estimate, work held up by a late task, and on a Team board,
+    who logged nothing yesterday -- each said once, in a sentence. A personal board, a Manager's
+    included, is about its owner's work only. The firm's news (a birthday) is the Company board's alone."""
     from app.db.models import WorkspaceMember
     from app.services.work.dashboards.insights import sentences
 
@@ -129,11 +129,11 @@ def test_highlights_add_what_no_card_says(api, workspace, folderless_list):
     said = " ".join(sentences(mine))
     assert "Your timer on Audit" in said and "waiting on a task that is late" in said and "birthday" not in said
 
-    # A Manager's own board tells them about their team, but not the firm.
+    # A Manager's own board is personal too: nothing about their team (that is the Team board's), nor the firm.
     lead_home = ok(api.get(f"/workspaces/{ws}/dashboards/home", "lead"))
     led = ok(api.get(f"/dashboards/{lead_home['id']}/insights", "lead", params={"tz": "UTC"}))
     assert led["who"] == "me" and led["birthdays"] == []
-    assert "no_time_yesterday_count" in led and "no_time_yesterday_count" not in mine  # worked out for the Manager's team only
+    assert led["no_time_yesterday"] == [] and led["timesheets_waiting"] == [] and led["timesheets_missing"] == []
 
     # The Company board has the firm's news.
     owned = {x["standard"]: x for x in ok(api.get(f"/workspaces/{ws}/dashboards", "owner"))}

@@ -7,6 +7,7 @@ import {
 import type { CustomField, FieldType, Task, UserRef } from '../api';
 import { useMe, type LocatedNode } from '../WorkContext';
 import { Avatar, NoMatch, Portal, SearchBox, matchesSearch } from '../ui';
+import { PeopleTeamsSwitch, TeamRow, teamIsOn, useAssignTeams, type PickMode } from '../task/PeopleTeams';
 
 export const FIELD_TYPES: { type: FieldType; label: string; icon: React.ReactNode; hint: string }[] = [
   { type: 'dropdown', label: 'Dropdown', icon: <ChevronDown size={14} />, hint: 'Pick one option' },
@@ -163,7 +164,7 @@ export const FieldEditor: React.FC<{
             type={field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'} placeholder={compact ? '' : '—'}
             onBlur={(e) => commitText(e.target.value, value)} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
             className={input} />
-          {href && <a href={href} target="_blank" rel="noreferrer" title="Open" className="shrink-0 text-gray-400 hover:text-brand-600"><ExternalLink size={12} /></a>}
+          {href && <a href={href} target="_blank" rel="noreferrer" aria-label="Open" className="shrink-0 text-gray-400 hover:text-brand-600"><ExternalLink size={12} /></a>}
         </span>
       );
     }
@@ -283,9 +284,7 @@ export const FieldEditor: React.FC<{
         // You first, then everyone else: picking yourself is the most common pick.
         : [...people].sort((a, b) => Number(b.id === me) - Number(a.id === me))
           .map((p) => ({ id: p.id, name: p.id === me ? `Me (${p.display_name || p.email})` : p.display_name || p.email, color: undefined, user: p as UserRef | undefined }));
-      return (
-        <Picker label={field.name} disabled={disabled} trigger={trigger}>
-          {() => (
+      const list = (
             <Searchable
               items={choices} text={(c) => c.name} label={`Search ${field.name}`}
               // People are always searchable; a short list of labels reads faster without a box.
@@ -302,13 +301,43 @@ export const FieldEditor: React.FC<{
                 </label>
               )}
             </Searchable>
-          )}
+      );
+      return (
+        <Picker label={field.name} disabled={disabled} trigger={trigger}>
+          {() => (field.type === 'people'
+            ? <PeopleOrTeams chosen={chosen} peopleList={list} onSet={(ids) => onChange(ids.length ? ids : null)} />
+            : list)}
         </Picker>
       );
     }
   }
 };
 
+
+/** A people field's picker with the People | Teams switch: a Team ticks (or unticks) everyone in it. */
+const PeopleOrTeams: React.FC<{ chosen: string[]; peopleList: React.ReactNode; onSet: (ids: string[]) => void }> = ({ chosen, peopleList, onSet }) => {
+  const [mode, setMode] = useState<PickMode>('people');
+  const [q, setQ] = useState('');
+  const teams = useAssignTeams(q);
+  const on = new Set(chosen);
+  return (
+    <>
+      <div className="mb-1.5"><PeopleTeamsSwitch mode={mode} onChange={setMode} /></div>
+      {mode === 'people' ? peopleList : (
+        <>
+          <SearchBox value={q} onChange={setQ} label="Search Teams" placeholder="Search Teams…" />
+          {teams.map((t) => (
+            <TeamRow key={t.id} compact team={t} on={teamIsOn(t, on)} onPick={() => {
+              const ids = t.members.map((u) => u.id);
+              onSet(teamIsOn(t, on) ? chosen.filter((x) => !ids.includes(x)) : [...new Set([...chosen, ...ids])]);
+            }} />
+          ))}
+          {teams.length === 0 && <p className="px-2 py-2 text-xs text-gray-400">No Teams to pick from.</p>}
+        </>
+      )}
+    </>
+  );
+};
 
 // --- places --------------------------------------------------------------------------------------
 

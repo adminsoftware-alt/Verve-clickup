@@ -127,8 +127,6 @@ def describe(db: Session, n: Notification) -> Tuple[str, str]:
         "team_change": (f"{d.get('person')} joined your team {d.get('team')}" if d.get("action") == "joined"
                         else f"{d.get('person')} left the firm and your team {d.get('team')}" if d.get("action") == "offboarded"
                         else f"{d.get('person')} left your team {d.get('team')}"),
-        "space_join_request": f"asked to join the {d.get('space')} Space",
-        "space_join_decision": f"{'let you into' if d.get('status') == 'approved' else 'declined your request to join'} the {d.get('space')} Space",
         "chat_mention": f"mentioned you in {d.get('view') or 'a chat'}: {(d.get('body') or '')[:120]}",
     }
     line = lines.get(n.kind, n.kind.replace("_", " "))

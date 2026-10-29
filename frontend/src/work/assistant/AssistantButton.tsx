@@ -15,24 +15,9 @@ import { ChatBubble } from './Bubble';
 // press it.
 const Assistant = lazy(() => import('./Assistant').then((m) => ({ default: m.Assistant })));
 
-/** What the label says. Rotated, because the second thing somebody learns is that it does more
- *  than the first thing they used it for -- and a label that never changes stops being read. */
-const HINTS = [
-  'Say what you want — "call the auditor tomorrow"',
-  'Log hours — "2 hours on the Sharma audit"',
-  'Close one — "mark the GST filing done"',
-  'Ask — "what\'s overdue?"',
-  'Ask about your own figures — "how many hours this week?"',
-  'Run a timer — "start timer on payroll"',
-  'Ask about a task — "who is working on the GST return?"',
-];
-
 export const AssistantButton: React.FC = () => {
   const [open, setOpen] = useState(false);
-  const [hovering, setHovering] = useState(false);
   const phone = usePhone();
-  // A different hint each time it is hovered, so the things it does get discovered.
-  const shown = useRef(0);
   // Focus goes back to the button the panel was opened from, so a keyboard user closing it with
   // Escape is not dropped at the top of the page.
   const button = useRef<HTMLButtonElement>(null);
@@ -59,41 +44,19 @@ export const AssistantButton: React.FC = () => {
     );
   }
 
+  // What it can do is said on its Home screen, where it can be read; the button itself only has to
+  // be found, so it carries no label that appears on hover.
   return (
-    <div
-      className={`no-print pointer-events-none fixed right-4 z-[90] flex items-center gap-2 sm:right-6
+    <button
+      ref={button}
+      type="button"
+      onClick={() => setOpen(true)}
+      aria-haspopup="dialog"
+      aria-label="Verveflow Assistant (Ctrl+J)"
+      className={`assistant-launcher no-print fixed right-4 z-[90] flex h-14 w-14 items-center justify-center rounded-full bg-[#234788] hover:bg-[#1B3A72] sm:right-6
         ${phone ? 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))]' : 'bottom-6'}`}
-      onMouseEnter={() => { shown.current = (shown.current + 1) % HINTS.length; setHovering(true); }}
-      onMouseLeave={() => setHovering(false)}
     >
-      {/* The label, not a browser tooltip: that takes a second to appear, sits where the cursor
-          happens to be, and vanishes the moment anything moves. Hidden on a phone, where there
-          is no hover and the thumb is already on its way to the button. */}
-      <span
-        aria-hidden
-        className={`assistant-hint hidden select-none whitespace-nowrap rounded-xl px-3 py-2 text-xs font-medium text-gray-800 shadow-lg
-          transition-all duration-150 md:block
-          ${hovering ? 'translate-x-0 opacity-100' : 'pointer-events-none translate-x-2 opacity-0'}`}
-      >
-        {HINTS[shown.current]}
-        <span className="ml-2 rounded border border-fuchsia-300 px-1 text-[10px] text-fuchsia-600">Ctrl J</span>
-      </span>
-
-      <button
-        ref={button}
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-haspopup="dialog"
-        aria-label="Verve Assistant — say what you want (Ctrl+J)"
-        className="assistant-launcher group pointer-events-auto relative flex h-14 w-14 items-center justify-center rounded-full
-          transition-transform hover:scale-105 active:scale-95"
-      >
-        {/* Always shining: a ring of colour turning slowly round it, and a glow that breathes,
-            so it is never mistaken for part of the page. */}
-        <span aria-hidden className="assistant-launcher-ring pointer-events-none absolute -inset-[3px] rounded-full" />
-        <span aria-hidden className="absolute inset-0 rounded-full bg-[#14082e]" />
-        <ChatBubble />
-      </button>
-    </div>
+      <ChatBubble />
+    </button>
   );
 };

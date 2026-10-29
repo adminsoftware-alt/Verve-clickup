@@ -35,7 +35,7 @@ export const EmbedView: React.FC<{ view: View; canEdit: boolean; onSaved: (v: Vi
         </div>
       ) : null}
       {url ? (
-        <iframe title={view.name} src={url} className="min-h-0 w-full flex-1 border-0"
+        <iframe aria-label={view.name} src={url} className="min-h-0 w-full flex-1 border-0"
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation" referrerPolicy="no-referrer" />
       ) : !canEdit ? <p className="p-10 text-center text-sm text-gray-400">Nothing embedded yet.</p> : null}
     </div>

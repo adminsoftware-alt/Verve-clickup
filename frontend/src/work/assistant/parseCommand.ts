@@ -177,14 +177,15 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
   if (early && parseTypedDate(early[2].replace(/^(?:on|by)\s+/i, ''), now)) rest = `${early[1]} to ${early[3]} ${early[2]}`;
 
   // "Add a task for Aarti to call the bank", "add a task for me to ...": who it is for, then the work.
-  const forWhom = rest.match(/^((?:please\s+)?(?:add|create|make|new)\s+(?:an?\s+)?(?:task|todo|to-do|reminder)\s+)for\s+(\S+(?:\s+\S+)?)\s+to\s+(.+)$/i);
+  // "For me and Aarti" too: every name between "for" and "to" has to be somebody, or none is taken.
+  const forWhom = rest.match(/^((?:please\s+)?(?:add|create|make|new)\s+(?:an?\s+)?(?:task|todo|to-do|reminder)\s+)for\s+(\S+(?:\s+\S+)?(?:\s+and\s+\S+(?:\s+\S+)?)*)\s+to\s+(.+)$/i);
   if (forWhom) {
-    const pair = matchPerson(forWhom[2], people, { parts: 'first', fuzzy: false });
-    const one = pair ? null : matchPerson(forWhom[2].split(/\s+/)[0], people, { parts: 'first', fuzzy: false });
-    const hit = pair ?? one;
-    if (hit && (pair || forWhom[2].split(/\s+/).length === 1)) {
-      rest = `${forWhom[1]}${forWhom[3]} assign to ${hit === 'me' ? 'me' : forWhom[2]}`;
-    }
+    const named = forWhom[2].split(/\s+and\s+/i);
+    const all = named.every((who) => {
+      const pair = matchPerson(who, people, { parts: 'first', fuzzy: false });
+      return pair || (who.split(/\s+/).length === 1 && matchPerson(who, people, { parts: 'first', fuzzy: false }));
+    });
+    if (all) rest = `${forWhom[1]}${forWhom[3]} assign to ${named.join(' and ')}`;
   }
 
   // --- how often ------------------------------------------------------------------------------
@@ -266,10 +267,28 @@ export function parseCommand(input: string, people: Person[], me?: string, now =
       const said = pair ? `${m[1]} ${m[2]}` : m[1];
       // `rest` is squashed, so the name sits one space after "for" and its words one space apart.
       const after = rest.slice((m.index ?? 0) + m[0].indexOf(m[1]) + said.length);
-      if (!/^\s*(?:$|[,.;]|\b(?:and|due|by|on|from|starting|start|priority|estimate|today|tomorrow|next|this|in|with)\b)/i.test(after)) continue;
+      const ends = (s: string) => /^\s*(?:$|[,.;]|\b(?:and|due|by|on|from|starting|start|priority|estimate|today|tomorrow|next|this|in|with)\b)/i.test(s);
+      if (!ends(after)) continue;
       assignees.push(hit === 'me' ? (me ?? '') : hit.id);
       found.push({ field: 'Assignee', from: said });
-      rest = squash(rest.replace(new RegExp(`\\bfor\\s+${said.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i'), ' '));
+      // "For Aarti and Aditya": more people, for as long as each word after "and" is somebody.
+      // Stopping at the first name left "and Aditya" in the task's name and Aditya off the task.
+      let taken = said;
+      let tail = after;
+      for (;;) {
+        const more = tail.match(/^\s*(?:,|and|&)\s*(\S+)(?:\s+(\S+))?/i);
+        if (!more) break;
+        const both = more[2] ? matchPerson(`${more[1]} ${more[2]}`, people, { parts: 'first', fuzzy: false }) : null;
+        const next = both ?? matchPerson(more[1], people, { parts: 'first', fuzzy: false });
+        const name = both ? `${more[1]} ${more[2]}` : more[1];
+        const piece = tail.slice(0, more[0].indexOf(more[1]) + name.length);
+        if (!next || !ends(tail.slice(piece.length))) break;
+        assignees.push(next === 'me' ? (me ?? '') : next.id);
+        found.push({ field: 'Assignee', from: name });
+        taken += piece;
+        tail = tail.slice(piece.length);
+      }
+      rest = squash(rest.replace(new RegExp(`\\bfor\\s+${taken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i'), ' '));
       break;
     }
   }

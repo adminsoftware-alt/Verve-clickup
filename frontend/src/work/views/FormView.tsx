@@ -133,9 +133,9 @@ export const FormBuilder: React.FC<{ view: View; listId: string; canEdit: boolea
                   <li key={f.key} className="flex items-center gap-2 rounded-md border border-gray-200 bg-white px-2 py-1.5">
                     <input aria-label={`Question label for ${labelOf(f.key)}`} value={f.label ?? ''} placeholder={labelOf(f.key)} onChange={(e) => setFieldAt(i, { label: e.target.value })} className="min-w-0 flex-1 text-sm focus:outline-none" />
                     <label className="flex items-center gap-1 text-xs text-gray-500"><input type="checkbox" checked={f.key === 'name' || !!f.required} disabled={f.key === 'name'} onChange={(e) => setFieldAt(i, { required: e.target.checked })} /> Required</label>
-                    <button aria-label="Move up" type="button" title="Move up" onClick={() => moveField(i, -1)} className="text-gray-300 hover:text-gray-600"><ArrowUp size={13} /></button>
-                    <button aria-label="Move down" type="button" title="Move down" onClick={() => moveField(i, 1)} className="text-gray-300 hover:text-gray-600"><ArrowDown size={13} /></button>
-                    {f.key !== 'name' && <button type="button" title="Remove question" onClick={() => setForm({ ...form, fields: list.filter((_, j) => j !== i) })} className="text-gray-300 hover:text-red-600"><Trash2 size={13} /></button>}
+                    <button aria-label="Move up" type="button" onClick={() => moveField(i, -1)} className="text-gray-300 hover:text-gray-600"><ArrowUp size={13} /></button>
+                    <button aria-label="Move down" type="button" onClick={() => moveField(i, 1)} className="text-gray-300 hover:text-gray-600"><ArrowDown size={13} /></button>
+                    {f.key !== 'name' && <button type="button" aria-label="Remove question" onClick={() => setForm({ ...form, fields: list.filter((_, j) => j !== i) })} className="text-gray-300 hover:text-red-600"><Trash2 size={13} /></button>}
                   </li>
                 ))}
               </ul>

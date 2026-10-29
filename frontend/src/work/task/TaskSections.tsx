@@ -76,7 +76,7 @@ const InlineText: React.FC<{ value: string; label: string; editable: boolean; cl
   const finish = () => { setEditing(false); const t = text.trim(); if (t && t !== value) onSave(t); else setText(value); };
   if (!editable || !editing) {
     return (
-      <span role={editable ? 'button' : undefined} tabIndex={editable ? 0 : undefined} title={editable ? 'Click to rename' : undefined}
+      <span role={editable ? 'button' : undefined} tabIndex={editable ? 0 : undefined} aria-label={editable ? 'Click to rename' : undefined}
         onClick={() => editable && setEditing(true)} onKeyDown={(e) => { if (editable && e.key === 'Enter') setEditing(true); }}
         className={`min-w-0 flex-1 truncate ${editable ? 'cursor-text' : ''} ${className}`}>{value}</span>
     );
@@ -185,7 +185,7 @@ export const Checklists: React.FC<{ taskId: string; editable: boolean; me?: stri
           {total > 0 && <span className="text-xs text-gray-500">{done}/{total}</span>}
         </button>
         {editable && addMenu(
-          <span title="Add a checklist" className="flex h-6 w-6 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100"><Plus size={14} /></span>,
+          <span aria-label="Add a checklist" className="flex h-6 w-6 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100"><Plus size={14} /></span>,
         )}
       </div>
       {error && <p className="mt-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700">{error}</p>}
@@ -207,7 +207,7 @@ export const Checklists: React.FC<{ taskId: string; editable: boolean; me?: stri
                   </span>
                   {editable && (
                     <Menu align="right" label={`Actions for ${cl.name}`} width={214} items={menuFor(cl)}
-                      trigger={<span className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" title="Checklist actions"><MoreHorizontal size={15} /></span>} />
+                      trigger={<span className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" aria-label="Checklist actions"><MoreHorizontal size={15} /></span>} />
                   )}
                 </div>
                 <ul className="px-1">
@@ -224,13 +224,13 @@ export const Checklists: React.FC<{ taskId: string; editable: boolean; me?: stri
                           onSave={(name) => run(() => collabApi.updateItem(item.id, { name }))} />
                         {editable ? (
                           <button type="button" onClick={() => setAssigningItem(item)}
-                            title={item.assignee ? `Assigned to ${item.assignee.display_name || item.assignee.email}` : 'Assign this item'}
+                            aria-label={item.assignee ? `Assigned to ${item.assignee.display_name || item.assignee.email}` : 'Assign this item'}
                             className={`shrink-0 rounded-full ${item.assignee ? '' : 'invisible p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 group-hover:visible'}`}>
                             {item.assignee ? <Avatar user={item.assignee} size={20} /> : <UserPlus size={14} />}
                           </button>
                         ) : item.assignee ? <Avatar user={item.assignee} size={20} /> : null}
                         {editable && (
-                          <button type="button" title="Delete item" aria-label={`Delete ${item.name}`} onClick={() => run(() => collabApi.deleteItem(item.id))}
+                          <button type="button" aria-label={`Delete ${item.name}`} onClick={() => run(() => collabApi.deleteItem(item.id))}
                             className="invisible shrink-0 rounded p-1 text-gray-300 hover:bg-red-50 hover:text-red-600 group-hover:visible"><Trash2 size={13} /></button>
                         )}
                       </li>
@@ -381,9 +381,9 @@ export const Attachments: React.FC<{ taskId: string; canAttach: boolean; isFull:
                 <span className="block truncate text-sm text-gray-800 hover:underline">{a.filename}</span>
                 <span className="block text-[11px] text-gray-400">{size(a.size)} · {a.user?.display_name || a.user?.email || ''}</span>
               </button>
-              <button type="button" title="Download" onClick={() => openAttachment(a, true).catch((e) => setError(e.message))} className="text-gray-400 hover:text-gray-700"><Download size={14} /></button>
+              <button type="button" aria-label="Download" onClick={() => openAttachment(a, true).catch((e) => setError(e.message))} className="text-gray-400 hover:text-gray-700"><Download size={14} /></button>
               {(isFull || a.user?.id === me) && (
-                <button type="button" title="Delete" onClick={async () => await ask.confirm({ danger: true, title: `Delete ${a.filename}?` }) && collabApi.deleteAttachment(a.id).then(load).then(onChanged).catch((e) => setError(e.message))} className="text-gray-300 hover:text-red-600"><Trash2 size={14} /></button>
+                <button type="button" aria-label="Delete" onClick={async () => await ask.confirm({ danger: true, title: `Delete ${a.filename}?` }) && collabApi.deleteAttachment(a.id).then(load).then(onChanged).catch((e) => setError(e.message))} className="text-gray-300 hover:text-red-600"><Trash2 size={14} /></button>
               )}
             </li>
           ))}

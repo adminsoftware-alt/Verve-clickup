@@ -11,7 +11,7 @@ const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(unde
 
 const Row: React.FC<{ task: PublicTask; depth: number }> = ({ task, depth }) => (
   <li className="flex items-center gap-3 border-b border-gray-100 py-2 text-sm" style={{ paddingLeft: depth * 20 }}>
-    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: task.status_color }} title={task.status} />
+    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: task.status_color }} aria-label={task.status} />
     <span className="min-w-0 flex-1 truncate text-gray-900">{task.name}</span>
     <span className="w-28 shrink-0 text-xs text-gray-500">{task.status}</span>
     {task.assignees.length > 0 && <span className="w-32 shrink-0 truncate text-xs text-gray-500">{task.assignees.join(', ')}</span>}
@@ -85,7 +85,7 @@ export const PublicPage: React.FC = () => {
           </article>
         )}
         {page.view_type === 'embed' && typeof page.doc?.url === 'string' && (
-          <iframe title={page.title} src={page.doc.url} className="h-[75vh] w-full rounded-xl border border-gray-200 bg-white"
+          <iframe aria-label={page.title} src={page.doc.url} className="h-[75vh] w-full rounded-xl border border-gray-200 bg-white"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
         )}
         {page.kind !== 'task' && page.tasks.length > 0 && (

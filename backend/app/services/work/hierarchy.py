@@ -33,7 +33,7 @@ from app.services.work.errors import Conflict, Forbidden, Invalid
 from app.services.work.mywork import ensure_not_personal
 from app.services.work.permissions import Node, can_create_spaces, can_manage_workspace
 from app.services.work.statuses import seed_space_statuses
-from app.services.work.views import add_default_views, add_required_views
+from app.services.work.views import add_required_views
 
 Location = Union[Space, Folder, TaskList]
 
@@ -173,12 +173,7 @@ def create_space(db: Session, access: Access, data: s.SpaceCreate) -> Space:
         task_prefix=default_prefix(data.name),
         orderindex=_next_orderindex(db, Space.orderindex, Space.workspace_id == access.workspace_id),
         default_permission=data.default_permission,
-        default_views=[v.value for v in dict.fromkeys(data.views)] if data.views else None,
     )
-    if data.clickapps:
-        from app.services.work import space_admin
-
-        space_admin.set_clickapps(space, dict(data.clickapps))
     db.add(space)
     db.flush()
     if data.statuses:
@@ -191,7 +186,6 @@ def create_space(db: Session, access: Access, data: s.SpaceCreate) -> Space:
     else:
         seed_space_statuses(db, space)
     add_required_views(db, space, access.user_id)
-    add_default_views(db, space, space, access.user_id)
     db.flush()
     from app.services.work import audit
 
@@ -201,15 +195,7 @@ def create_space(db: Session, access: Access, data: s.SpaceCreate) -> Space:
 
 def update_space(db: Session, opened: Opened[Space], data: s.SpaceUpdate) -> Space:
     fields = data.model_fields_set
-    if ("clickapps" in fields or "discoverable" in fields) and opened.level != PermissionLevel.full:
-        raise Forbidden("You need full access to change this Space's ClickApps")
     _apply_location_update(db, opened, LocationKind.space, data)
-    if "clickapps" in fields and data.clickapps:
-        from app.services.work import space_admin
-
-        space_admin.set_clickapps(opened.obj, dict(data.clickapps))
-    if "discoverable" in fields and data.discoverable is not None:
-        opened.obj.discoverable = data.discoverable
     if "default_permission" in fields:
         if opened.level != PermissionLevel.full:
             raise Forbidden("You need full access to change this Space's default permission")
@@ -277,7 +263,6 @@ def create_folder(
     db.add(folder)
     db.flush()
     add_required_views(db, folder, access.user_id)
-    add_default_views(db, folder, space, access.user_id)
     # A Folder is only useful with somewhere to put tasks, so it starts with one List.
     starter = TaskList(
         space_id=space.id,
@@ -290,7 +275,6 @@ def create_folder(
     db.add(starter)
     db.flush()
     add_required_views(db, starter, access.user_id)
-    add_default_views(db, starter, space, access.user_id)
     db.flush()
     return folder
 
@@ -335,7 +319,6 @@ def create_list(
     db.add(lst)
     db.flush()
     add_required_views(db, lst, access.user_id)
-    add_default_views(db, lst, space, access.user_id)
     db.flush()
     return lst
 
@@ -396,8 +379,6 @@ def space_out(space: Space, level: PermissionLevel) -> s.SpaceOut:
         description=space.description,
         icon=space.icon,
         task_prefix=space.task_prefix,
-        clickapps=_clickapps(space),
-        discoverable=space.discoverable,
         default_permission=space.default_permission,
     )
 
@@ -425,12 +406,6 @@ def list_out(lst: TaskList, level: PermissionLevel) -> s.ListOut:
         due_date=lst.due_date,
         sprint_completed_at=lst.sprint_completed_at,
     )
-
-
-def _clickapps(space: Space) -> Dict[str, bool]:
-    from app.services.work import space_admin
-
-    return space_admin.clickapps(space)
 
 
 # --- the sidebar tree --------------------------------------------------------
@@ -489,9 +464,6 @@ def get_hierarchy(db: Session, access: Access, include_archived: bool = False) -
     personal_ids = {sp.id for sp in spaces if sp.personal_owner_id is not None}
     my_personal: Optional[s.ListNode] = None
 
-    from app.services.work import space_admin
-
-    hidden = space_admin.hidden_ids(db, access.user_id)
     shared = s.SharedWithMe()
     space_nodes: Dict[uuid.UUID, s.SpaceNode] = {}
     for space in spaces:
@@ -509,8 +481,6 @@ def get_hierarchy(db: Session, access: Access, include_archived: bool = False) -
             archived=space.archived_at is not None,
             orderindex=space.orderindex,
             permission_level=level,
-            hidden=space.id in hidden,
-            clickapps=space_admin.clickapps(space),
         )
 
     folder_nodes: Dict[uuid.UUID, s.FolderNode] = {}
@@ -619,7 +589,6 @@ def get_hierarchy(db: Session, access: Access, include_archived: bool = False) -
         spaces=sorted(space_nodes.values(), key=_sort_key),
         shared_with_me=shared,
         personal_list=my_personal,
-        sections=space_admin.sections(db, access),
     )
 
 

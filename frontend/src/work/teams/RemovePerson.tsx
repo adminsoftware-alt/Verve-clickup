@@ -29,17 +29,17 @@ import { LinesSkeleton } from '../Skeleton';
 /** The value a task's dropdown takes when the answer is "nobody -- it goes". */
 const DELETE_TASK = '__delete__';
 
-const card = 'rounded-xl border border-red-200 bg-white p-5';
+const card = 'rounded-xl border border-[#E4E8F0] bg-white p-5';
 
 /** The numbered step heading, so the three questions read as a sequence. */
 const Step: React.FC<{ n: number; title: string; done?: boolean; children: React.ReactNode }> = ({ n, title, done, children }) => (
   <section className="flex gap-3">
-    <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
-      done ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-      {done ? <Check size={13} /> : n}
+    <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+      done ? 'bg-[#234788] text-white' : 'bg-[#EEF2F8] text-[#234788]'}`}>
+      {done ? <Check size={13} strokeWidth={3} /> : n}
     </span>
     <div className="min-w-0 flex-1">
-      <h4 className="mb-2 text-[13px] font-semibold text-gray-800">{title}</h4>
+      <h4 className="mb-2.5 text-[14px] font-semibold text-[#142B57]">{title}</h4>
       {children}
     </div>
   </section>
@@ -173,25 +173,6 @@ const PersonPicker: React.FC<{ people: Person[]; chosen: Person | null; onPick: 
   );
 };
 
-// The value wraps to its own line when the column is narrow, rather than breaking mid-name.
-const Fact: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div className="flex flex-wrap gap-x-2 text-sm">
-    <span className="w-32 shrink-0 text-gray-500">{label}</span>
-    <span className="min-w-[9rem] flex-1 text-gray-800">{children}</span>
-  </div>
-);
-
-/** The same row, but the value opens something. */
-const ActionFact: React.FC<{ label: string; onClick: () => void; open?: boolean; children: React.ReactNode }> = ({ label, onClick, open, children }) => (
-  <div className="flex flex-wrap gap-x-2 text-sm">
-    <span className="w-32 shrink-0 text-gray-500">{label}</span>
-    <button type="button" onClick={onClick} className="flex min-w-[9rem] flex-1 items-center gap-1 rounded text-left text-gray-800 underline-offset-2 hover:text-brand-700 hover:underline">
-      {children}
-      <ChevronRight size={13} className={`shrink-0 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`} />
-    </button>
-  </div>
-);
-
 /** Past this many tasks the list gets a search box and an "undecided only" switch. */
 const FILTER_FROM = 8;
 
@@ -211,6 +192,8 @@ const TaskDecisions: React.FC<{
 }> = ({ tasks, perTask, setPerTask, candidates, managerId }) => {
   const [filter, setFilter] = useState('');
   const [onlyUndecided, setOnlyUndecided] = useState(false);
+  // Tasks ticked to be decided together: give them all to one person, or delete them.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
 
   const decided = tasks.filter((t) => perTask[t.id]).length;
   const undecided = tasks.length - decided;
@@ -218,6 +201,21 @@ const TaskDecisions: React.FC<{
     const q = filter.trim().toLowerCase();
     return tasks.filter((t) => (!q || t.name.toLowerCase().includes(q)) && (!onlyUndecided || !perTask[t.id]));
   }, [tasks, filter, onlyUndecided, perTask]);
+
+  const allPicked = shown.length > 0 && shown.every((t) => picked.has(t.id));
+  const togglePick = (id: string) => setPicked((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const togglePickAll = () => setPicked(allPicked ? new Set() : new Set(shown.map((t) => t.id)));
+  const decidePicked = (to: string) => {
+    if (!to || !picked.size) return;
+    setPerTask((m) => ({ ...m, ...Object.fromEntries([...picked].map((id) => [id, to])) }));
+    setPicked(new Set());
+  };
+  const box = (on: boolean, onClick: () => void, label: string) => (
+    <button type="button" role="checkbox" aria-checked={on} aria-label={label} onClick={onClick}
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] border transition-colors ${on ? 'border-[#234788] bg-[#234788] text-white' : 'border-gray-300 bg-white hover:border-[#234788]'}`}>
+      {on && <Check size={11} strokeWidth={3.5} />}
+    </button>
+  );
 
   const giveAll = (to: string) => {
     // Applies to what is on screen, so "filter, then give all" sorts out one batch at a time.
@@ -228,11 +226,14 @@ const TaskDecisions: React.FC<{
     <div className="mt-4 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="space-y-2.5 border-b border-gray-200 bg-gray-50/80 px-3.5 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
+          <div className="flex items-start gap-2.5">
+            <span className="mt-0.5">{box(allPicked, togglePickAll, allPicked ? 'Untick every task shown' : 'Tick every task shown')}</span>
+            <div>
             <p className="text-[13px] font-semibold text-gray-900">
               Open tasks <span className="font-normal text-gray-400">{tasks.length}</span>
             </p>
-            <p className="mt-0.5 text-[11px] text-gray-500">Give each one to a colleague, or delete it.</p>
+            <p className="mt-0.5 text-[11px] text-gray-500">Give each to someone, or delete it. Tick several to decide them together.</p>
+            </div>
           </div>
           <select
             aria-label="Give every shown task to the same person" value=""
@@ -270,13 +271,30 @@ const TaskDecisions: React.FC<{
         )}
       </div>
 
+      {picked.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#D9E1EF] bg-[#F3F6FB] px-3.5 py-2">
+          <span className="text-[12.5px] font-semibold text-[#142B57]">{picked.size} ticked</span>
+          <select aria-label="Give the ticked tasks to" value="" onChange={(e) => decidePicked(e.target.value)}
+            className="h-8 rounded-lg border border-[#C9D3E6] bg-white px-2 text-[12px] text-gray-800 focus:border-[#234788] focus:outline-none">
+            <option value="">Give to…</option>
+            {candidates.map((c) => (
+              <option key={c.user.id} value={c.user.id}>{personName(c)}{c.user.id === managerId ? ' (their manager)' : ''}</option>
+            ))}
+          </select>
+          <button type="button" onClick={() => decidePicked(DELETE_TASK)}
+            className="h-8 rounded-lg border border-red-200 bg-white px-2.5 text-[12px] font-medium text-red-700 hover:bg-red-50">Delete them</button>
+          <button type="button" onClick={() => setPicked(new Set())} className="ml-auto text-[12px] font-medium text-gray-500 hover:text-gray-800">Clear</button>
+        </div>
+      )}
+
       <ul className="max-h-[22rem] divide-y divide-gray-100 overflow-y-auto overscroll-contain">
         {shown.map((t) => {
           const choice = perTask[t.id] ?? '';
           return (
-            <li key={t.id} className="group flex items-center gap-3 px-3.5 py-2 hover:bg-gray-50/70">
+            <li key={t.id} className={`group flex items-center gap-3 px-3.5 py-2 ${picked.has(t.id) ? 'bg-[#F7F9FC]' : 'hover:bg-gray-50/70'}`}>
+              {box(picked.has(t.id), () => togglePick(t.id), `Tick ${t.name}`)}
               <StatusDot status={t.status} size={10} />
-              <span className="min-w-0 flex-1 truncate text-[13px] text-gray-800" title={t.name}>{t.name}</span>
+              <span className="min-w-0 flex-1 truncate text-[13px] text-gray-800" aria-label={t.name}>{t.name}</span>
               <span className="hidden w-14 shrink-0 text-right text-[11px] tabular-nums text-gray-400 sm:block">
                 {t.due_date ? formatDue(t.due_date) : ''}
               </span>
@@ -316,14 +334,12 @@ const TaskDecisions: React.FC<{
       <div className="flex items-center gap-3 border-t border-gray-200 bg-gray-50/80 px-3.5 py-2">
         <div className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-gray-200">
           <div
-            className={`h-full rounded-full transition-all ${undecided ? 'bg-amber-500' : 'bg-emerald-500'}`}
+            className={`h-full rounded-full transition-all ${undecided ? 'bg-amber-500' : 'bg-[#234788]'}`}
             style={{ width: `${(decided / tasks.length) * 100}%` }}
           />
         </div>
-        <p className={`text-[11px] ${undecided ? 'text-amber-800' : 'text-emerald-700'}`}>
-          {undecided
-            ? `${decided} of ${tasks.length} decided. Nothing is handed over or deleted until each one has an answer.`
-            : `All ${tasks.length} decided.`}
+        <p className={`text-[11px] ${undecided ? 'text-amber-800' : 'text-[#234788]'}`}>
+          {undecided ? `${decided} of ${tasks.length} decided` : `All ${tasks.length} decided`}
         </p>
       </div>
     </div>
@@ -345,6 +361,7 @@ export const RemovePersonSection: React.FC<{
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   // Their details arrive on their own as soon as they are picked -- what work is on them and
   // which teams. Nobody should have to go and look that up in another tab, or click to see it.
@@ -357,6 +374,7 @@ export const RemovePersonSection: React.FC<{
     setPerTask({});
     setMovingTeam(false);
     setMoveNote(null);
+    setConfirming(false);
     if (!chosen) return;
     let live = true;
     peopleApi.offboardPreview(ws, chosen.user.id)
@@ -426,7 +444,7 @@ export const RemovePersonSection: React.FC<{
   if (done) {
     return (
       <div className={card}>
-        <p role="status" className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800">
+        <p role="status" className="flex items-start gap-2 rounded-lg bg-[#F3F6FB] px-3 py-2.5 text-sm text-[#142B57] ring-1 ring-[#D9E1EF]">
           <Check size={16} className="mt-0.5 shrink-0" /> {done}
         </p>
         <button type="button" onClick={() => { setChosen(null); setDone(null); }} className="mt-4 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50">
@@ -436,22 +454,51 @@ export const RemovePersonSection: React.FC<{
     );
   }
 
+  const stage = !chosen ? 1 : confirming ? 3 : 2;
+  // What will be done, told once more on the confirmation page.
+  const giving = Object.values(perTask).filter((v) => v && v !== DELETE_TASK).length;
+  const deleting = Object.values(perTask).filter((v) => v === DELETE_TASK).length;
+  const leadTo = handTo ? people.find((p) => p.user.id === handTo) : null;
   return (
     <div className={`${card} space-y-6`}>
+      <ol className="flex items-center gap-2 border-b border-[#EEF1F5] pb-4 text-[12px] font-semibold" aria-label="Steps">
+        {['Person', 'Their work', 'Confirm'].map((label, i) => {
+          const n = i + 1;
+          const on = n === stage;
+          const past = n < stage;
+          return (
+            <li key={label} className="flex items-center gap-2">
+              {i > 0 && <span className={`h-px w-8 ${past || on ? 'bg-[#234788]' : 'bg-[#E4E8F0]'}`} aria-hidden />}
+              <span className={`flex items-center gap-1.5 ${on ? 'text-[#142B57]' : past ? 'text-[#234788]' : 'text-gray-400'}`}>
+                <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${on || past ? 'bg-[#234788] text-white' : 'bg-gray-100 text-gray-500'}`}>
+                  {past ? <Check size={11} strokeWidth={3} /> : n}
+                </span>
+                {label}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
       <Step n={1} title="Who are you removing?" done={!!chosen}>
         <PersonPicker people={people.filter((p) => p.user.id !== me)} chosen={chosen} onPick={setChosen} />
         {chosen && (
-          <div className="mt-3 space-y-1.5 rounded-xl border border-gray-200 bg-gray-50/70 p-3.5">
-            <Fact label="Role">{accessOf(chosen.role, chosen.user.id, teams)}{chosen.designation ? ` · ${chosen.designation}` : ''}</Fact>
-            {chosen.department && <Fact label="Department">{chosen.department}</Fact>}
-            <Fact label="Reporting manager">{manager ? personName(manager) : <span className="text-gray-400">None</span>}</Fact>
-            {/* Changing their team is the thing an admin often came here to do, having reached
-                for "remove" because it was the only control on the page. */}
-            <ActionFact label="Teams" open={movingTeam} onClick={() => setMovingTeam(!movingTeam)}>
-              {theirTeams.length ? theirTeams.map((t) => t.name).join(', ') : <span className="text-gray-400">None</span>}
-            </ActionFact>
+          <div className="mt-3 space-y-2 rounded-xl border border-[#E4E8F0] bg-[#F9FAFC] p-3.5 text-[12.5px]">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="rounded-md bg-[#EEF2F8] px-1.5 py-px font-semibold text-[#234788]">{accessOf(chosen.role, chosen.user.id, teams)}</span>
+              {chosen.designation && <span className="text-gray-600">{chosen.designation}</span>}
+              {chosen.department && <span className="text-gray-400">· {chosen.department}</span>}
+              {chosen.deactivated_at && <span className="rounded-md bg-gray-100 px-1.5 py-px text-gray-600">Access already off</span>}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-gray-600">
+              <span>Reports to <b className="font-semibold text-gray-800">{manager ? personName(manager) : 'nobody'}</b></span>
+              <button type="button" onClick={() => setMovingTeam(!movingTeam)} className="inline-flex items-center gap-1 text-left hover:text-[#234788]">
+                Teams: <b className="font-semibold text-gray-800">{theirTeams.length ? theirTeams.map((t) => t.name).join(', ') : 'none'}</b>
+                <span className="font-semibold text-[#234788]">· Change</span>
+              </button>
+              {!!preview?.sole_lead_of.length && <span className="text-amber-700">Only lead of <b className="font-semibold">{preview.sole_lead_of.join(', ')}</b></span>}
+            </div>
             {movingTeam && (
-              <div className="ml-4 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white p-2.5 sm:ml-32">
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E4E8F0] bg-white p-2.5">
                 <span className="text-xs text-gray-500">Move them to</span>
                 <select
                   aria-label="Move to team" defaultValue={theirTeams[0]?.id ?? ''}
@@ -470,28 +517,27 @@ export const RemovePersonSection: React.FC<{
                   {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
                 <span className="text-[11px] text-gray-500">They leave the team they are in now.</span>
-                {moveNote && <span className="w-full text-xs text-emerald-700">{moveNote}</span>}
+                {moveNote && <span className="w-full text-xs text-[#234788]">{moveNote}</span>}
               </div>
             )}
             {/* Their open tasks and their direct reports were counted here too. The tasks are
                 listed, each with its decision, in step 2; the reports move up to this person's
                 manager without anyone choosing, so a number for them asked nothing of you. */}
-            {!!preview?.sole_lead_of.length && (
-              <Fact label="Only lead of">
-                <span className="text-amber-700">{preview.sole_lead_of.join(', ')}</span>
-              </Fact>
-            )}
-            {chosen.deactivated_at && <Fact label="Access">Already turned off</Fact>}
           </div>
         )}
       </Step>
 
-      {chosen && (
-        <Step n={2} title="What should happen?" done={confirmed}>
-          <p className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 text-xs leading-relaxed text-gray-600">
-            Their access goes off, their direct reports move up to their manager, they leave every Team, and the
-            joiner tasks follow the leaver rules. Their comments, time and history stay.
-          </p>
+      {chosen && !confirming && (
+        <Step n={2} title="What should happen?">
+          <div className="rounded-xl border border-[#E4E8F0] bg-[#F9FAFC] px-3.5 py-3">
+            <p className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-gray-500">Done for you</p>
+            <ul className="grid gap-x-6 gap-y-1 text-[12.5px] text-gray-700 sm:grid-cols-2">
+              {['Their access is turned off', 'Their reports move up to their manager', 'They leave every Team', 'Joiner tasks follow the leaver rules'].map((line) => (
+                <li key={line} className="flex items-center gap-2"><Check size={13} strokeWidth={2.5} className="shrink-0 text-[#234788]" /> {line}</li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11.5px] text-gray-500">Their comments, logged time and history stay.</p>
+          </div>
 
           {/* A decision for each task, not one for all of them.
               Handing somebody's whole workload to a single colleague is almost never what happens:
@@ -526,16 +572,29 @@ export const RemovePersonSection: React.FC<{
             </label>
           )}
 
+          {/* Everything but the name check: Continue opens the confirmation once each task has an answer. */}
+          {blocked && <p className="mt-3 text-xs text-amber-700">{blocked}</p>}
+          <div className="mt-4 flex items-center gap-2">
+            <button type="button" onClick={() => setConfirming(true)} disabled={!!blocked}
+              className="flex items-center gap-1.5 rounded-lg bg-[#234788] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1B3A72] disabled:cursor-not-allowed disabled:opacity-40">
+              Continue <ChevronRight size={15} />
+            </button>
+            <button type="button" onClick={() => setChosen(null)} className="rounded-lg px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-100">Cancel</button>
+          </div>
         </Step>
       )}
 
-      {chosen && (
+      {chosen && confirming && (
         <Step n={3} title="Confirm">
+          <ul className="mb-3 space-y-1 rounded-xl border border-[#E4E8F0] bg-[#F9FAFC] px-3.5 py-3 text-[12.5px] text-gray-700">
+            <li><b className="font-semibold text-[#142B57]">{personName(chosen)}</b> is offboarded and their access turned off.</li>
+            {giving > 0 && <li>{giving} task{giving === 1 ? '' : 's'} handed over to the people you chose.</li>}
+            {deleting > 0 && <li className="text-red-700">{deleting} task{deleting === 1 ? '' : 's'} deleted.</li>}
+            {leadTo && !!preview?.sole_lead_of.length && <li>The lead of {preview.sole_lead_of.join(', ')} goes to {personName(leadTo)}.</li>}
+          </ul>
           <p className="mb-2 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-            Their work moves to the people you named, anything you marked for deletion goes for good, and
-            their reporting line changes. Access can be turned back on from their profile, but none of the
-            hand-over is undone by doing so.
+            Hand-overs and deleted tasks can't be undone. Access can be turned back on later from their profile.
           </p>
           {/* Typing the name is the second step of the check: it is the one thing that cannot be
               done by clicking through a dialog you have stopped reading. */}
@@ -551,7 +610,7 @@ export const RemovePersonSection: React.FC<{
                 typed && !confirmed
                   ? 'border-amber-300 focus:border-amber-500 focus:ring-amber-500/15'
                   : confirmed
-                    ? 'border-emerald-400 focus:border-emerald-500 focus:ring-emerald-500/15'
+                    ? 'border-[#234788] focus:border-[#234788] focus:ring-[#234788]/15'
                     : 'border-gray-300 hover:border-gray-400 focus:border-brand-500 focus:ring-brand-500/15'}`}
             />
           </label>
@@ -566,7 +625,7 @@ export const RemovePersonSection: React.FC<{
             >
               <UserX size={15} /> {busy ? 'Working…' : 'Offboard them'}
             </button>
-            <button type="button" onClick={() => setChosen(null)} className="rounded-lg px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-100">Cancel</button>
+            <button type="button" onClick={() => { setConfirming(false); setTyped(''); }} className="rounded-lg px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-100">Back</button>
           </div>
         </Step>
       )}

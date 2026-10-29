@@ -38,7 +38,8 @@ def test_import_adds_people_with_managers_from_the_same_file(api, ws):
     assert (dry["added"], dry["errors"]) == (3, 2)
     assert not any(p["user"]["email"] == "priya@example.com" for p in ok(api.get(f"/workspaces/{ws}/people", "owner")))
 
-    out = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows}))
+    # The good rows saved and the bad ones skipped: the import as it was before all-or-nothing.
+    out = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows, "all_or_nothing": False}))
     assert [r["outcome"] for r in out["rows"]] == ["added", "added", "error", "error", "added"]
     assert "unknown team: Nope" in out["rows"][4]["problems"]
     priya, ravi = by_email(api, ws, "priya@example.com"), by_email(api, ws, "ravi@example.com")
@@ -67,7 +68,7 @@ def test_the_onboarding_workbook_makes_teams_people_and_managers_in_one_go(api, 
     assert dry["teams_created"] == ["Tax", "GST"] and "parent team Nowhere is not on Teams" in dry["team_problems"][0]
     assert not ok(api.get(f"/workspaces/{ws}/teams", "owner"))  # a check changes nothing
 
-    out = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows, "teams": teams}))
+    out = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows, "teams": teams, "all_or_nothing": False}))
     assert out["added"] == 4 and "a Manager needs at least one Team" in out["rows"][3]["problems"][0]
     made = {t["name"]: t for t in ok(api.get(f"/workspaces/{ws}/teams", "owner"))}
     assert set(made) == {"Tax", "GST"} and made["GST"]["parent_team_id"] == made["Tax"]["id"]
@@ -78,18 +79,39 @@ def test_the_onboarding_workbook_makes_teams_people_and_managers_in_one_go(api, 
 
     # Re-importing the same workbook creates nothing twice; a demotion to Employee takes effect.
     rows[0]["role"] = "Employee"
-    again = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows, "teams": teams}))
+    again = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows, "teams": teams, "all_or_nothing": False}))
     assert again["teams_created"] == [] and again["updated"] == 4
     assert {t["name"]: t for t in ok(api.get(f"/workspaces/{ws}/teams", "owner"))}["Tax"]["lead_ids"] == []
     bad = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": [{"email": "x@example.com", "role": "Boss"}]}))
     assert "use Admin, Manager or Employee" in bad["rows"][0]["problems"][0]
 
 
+def test_import_is_all_or_nothing_by_default(api, ws):
+    """One row with a problem and nothing is saved -- no half-imported firm. A clean file goes in whole."""
+    ok(api.post(f"/workspaces/{ws}/teams", "owner", {"name": "Audit"}), 201)
+    rows = [
+        {"email": "anil@example.com", "name": "Anil", "role": "Manager", "teams": "Audit",
+         "address": "Flat 4, Sai Residency\nBaner Road\nPune, Maharashtra 411045\nIndia", "location": "Pune"},
+        {"email": "beena@example.com", "name": "Beena", "role": "Employee", "teams": "Audti", "manager_email": "anil@example.com"},
+    ]
+    out = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows}))
+    assert out["saved"] is False and out["warnings"] == 1 and "unknown team: Audti" in out["rows"][1]["problems"]
+    emails = {p["user"]["email"] for p in ok(api.get(f"/workspaces/{ws}/people", "owner"))}
+    assert "anil@example.com" not in emails and "beena@example.com" not in emails
+
+    rows[1]["teams"] = "Audit"
+    out = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows}))
+    assert out["saved"] is True and out["added"] == 2
+    anil = by_email(api, ws, "anil@example.com")
+    assert anil["address"].startswith("Flat 4, Sai Residency") and anil["location"] == "Pune"
+    assert by_email(api, ws, "beena@example.com")["manager_id"] == anil["user"]["id"]
+
+
 def test_levels_employment_type_and_a_private_emergency_contact(api, ws):
     rows = [{"email": "asha@example.com", "name": "Asha", "level": 6, "employment_type": "article",
              "emergency_contact_name": "Ramesh (father)", "emergency_contact_phone": "+91 98200 54321"},
             {"email": "odd@example.com", "employment_type": "Freelancer"}]
-    out = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows}))
+    out = ok(api.post(f"/workspaces/{ws}/people/import", "owner", {"rows": rows, "all_or_nothing": False}))
     assert out["added"] == 2 and "unknown employment type" in out["rows"][1]["problems"][0]
     asha = by_email(api, ws, "asha@example.com")
     assert (asha["level"], asha["employment_type"]) == (6, "Article")  # written however; stored one way

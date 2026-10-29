@@ -126,7 +126,7 @@ export const DaySheet: React.FC<{
                       className="block max-w-full truncate text-left text-[15px] font-medium text-gray-900 disabled:text-gray-700"
                     >
                       {row.task.name}
-                      {row.running && <span className="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-red-500 align-middle" title="Timer running" />}
+                      {row.running && <span className="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-red-500 align-middle" aria-label="Timer running" />}
                     </button>
                     {row.task.status && (
                       <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] text-gray-500">

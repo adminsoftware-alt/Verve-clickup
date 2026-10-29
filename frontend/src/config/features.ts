@@ -41,13 +41,6 @@ const DEFAULTS = {
   // and the service behind it are untouched -- turn this on and both come straight back.
   listCustomFields: false,
 
-  // Automations: "when this happens here, do that", on a Space, Folder or List. Six triggers
-  // against six actions, all built and all tested. It comes off the menu because a rule you
-  // cannot trace or silence from the notification it sent is a rule people end up muting
-  // wholesale -- see the plan for moving it into the Inbox. The service, the routes and the
-  // scheduled due-soon/overdue runs are untouched; no rule exists yet to be affected.
-  automations: false,
-
   // The watch toggle on a task header -- the eye, and the little row of watcher faces beside
   // it. Watching still happens: being assigned a task, commenting on it, being mentioned in
   // one or having it shared with you all start it, and those notifications still arrive. This
@@ -100,35 +93,6 @@ const DEFAULTS = {
   taskTagsField: false,
   taskCustomFields: false,
   taskTimeInStatus: false,
-
-  // --- the Spaces menu ------------------------------------------------------------------------
-  // Entries taken off the Space / Folder / List menu. Every one of them still works: Favourites
-  // still drive the Favourites row, settings and statuses are reachable from the location's own
-  // page, and archiving is still what the Archived page restores from.
-  spaceMenuFavourites: false,
-  spaceMenuSettings: false,
-  spaceMenuHide: false,
-  spaceMenuClickApps: false,
-  spaceMenuSections: false,
-  // The Space's tag library. Tags are created by typing one on a task, which is where people
-  // actually reach for them; a separate library to curate first is a second place to keep the
-  // same list in step. The dialog and the API behind it are untouched.
-  // "Email to this List": forward mail to a List's own address and it becomes a task, with the
-  // sender's words as the description and their attachments attached. Unlike the two below, this
-  // one is not a bad fit -- it is simply not plugged in. It needs a catch-all mailbox with
-  // plus-addressing on the firm's domain and four values in backend/.env (INBOUND_EMAIL_ADDRESS,
-  // IMAP_HOST, IMAP_USER, IMAP_PASSWORD). Until then everyone who opens it is told it is not set
-  // up, which is a worse answer than not offering it. Set up the mailbox and turn this back on.
-  listEmail: false,
-
-  spaceMenuTags: false,
-  // Sprint Folders: fixed-length iterations with rollover and burndown. An advisory firm's work
-  // is dated by statute and by the client, not by a two-week cadence someone chose, so the whole
-  // idea imports a shape this work does not have. The service, the settings dialog and the
-  // Sprint dashboard card all still work -- this only takes it off the Folder menu.
-  sprintFolders: false,
-  spaceMenuStatuses: false,
-  spaceMenuArchive: false,
 
   // --- My Tasks -------------------------------------------------------------------------------
   // The Sort control. Sorting inside a group is by due date; the Table view's column headers
@@ -192,15 +156,7 @@ const DEFAULTS = {
   plannerRow: false,
   // The separate "All Tasks" row. Everything you can open is a tab inside My Tasks.
   allTasksRow: false,
-  // The separate "All Spaces" page. The Spaces tree in the sidebar already shows the Spaces you
-  // are in and the ones shared with you, so there is only one place to look.
-  allSpacesPage: false,
   compliance: false,
-  // The leave request and approval workflow: the policy, the chain from a person to their manager
-  // to HR, the balances, and the approver seeing what is due before they say yes.
-  //
-  archived: false,
-  templates: false,
 
   // The "Blocked addresses" list in Admin, and the "Offboard and block" option it existed to undo.
   // Off: barring an email was a second way of saying somebody had left, and offboarding already

@@ -1,5 +1,4 @@
-"""Phase D: ClickApps, All Spaces and join requests, sidebar sections, duplicating Spaces and Space templates,
-public links, tasks in several Lists, time in status, sprints, Email-to-List, and the Doc, Chat and Embed views."""
+"""Phase D: duplicating Spaces and Space templates, public links, tasks in several Lists, time in status, sprints, Email-to-List, and the Doc, Chat and Embed views."""
 
 from datetime import date, datetime, timedelta, timezone
 
@@ -25,81 +24,11 @@ def _names(api, list_id, who="owner"):
     return [t["name"] for t in ok(api.get(f"/lists/{list_id}/tasks", who))["tasks"]]
 
 
-# --- ClickApps ------------------------------------------------------------------------------------
-
-
-def test_clickapps_switch_features_off_per_space(api, workspace, space, folderless_list):
-    lst = folderless_list["id"]
-    assert ok(api.get(f"/spaces/{space['id']}", "owner"))["clickapps"]["sprint_points"] is False
-    assert api.post(f"/lists/{lst}/tasks", "owner", {"name": "x", "points": 3}).status_code == 400
-    assert api.patch(f"/spaces/{space['id']}", "member", {"clickapps": {"sprint_points": True}}).status_code in (200, 403)
-    out = ok(api.patch(f"/spaces/{space['id']}", "owner", {"clickapps": {"sprint_points": True, "priorities": False, "time_tracking": False}}))
-    assert out["clickapps"]["sprint_points"] and not out["clickapps"]["priorities"]
-    t = _task(api, lst, "Estimate", points=5)
-    assert t["points"] == 5
-    assert api.patch(f"/tasks/{t['id']}", "owner", {"priority": 1}).status_code == 400
-    assert api.post(f"/tasks/{t['id']}/timer", "owner", {}).status_code == 400
-    tree = ok(api.get(f"/workspaces/{workspace['id']}/hierarchy", "owner"))
-    assert tree["spaces"][0]["clickapps"]["priorities"] is False
-    ok(api.patch(f"/spaces/{space['id']}", "owner", {"clickapps": {"multiple_assignees": False}}))
-    assert api.post(f"/lists/{lst}/tasks", "owner", {"name": "Two people", "assignees": ["owner", "member"]}).status_code == 400
-    ok(api.patch(f"/spaces/{space['id']}", "owner", {"clickapps": {"custom_fields": False}}))
-    assert api.post(f"/lists/{lst}/fields", "owner", {"name": "Client", "type": "text"}).status_code == 400
-
-
-# --- All Spaces, join requests ---------------------------------------------------------------------
-
-
-def test_all_spaces_join_leave_and_ask_to_join_a_private_space(api, workspace):
-    ws = workspace["id"]
-    open_space = ok(api.post(f"/workspaces/{ws}/spaces", "owner", {"name": "Clients"}), 201)
-    secret = ok(api.post(f"/workspaces/{ws}/spaces", "owner", {"name": "Partners", "is_private": True}), 201)
-    hidden = ok(api.post(f"/workspaces/{ws}/spaces", "owner", {"name": "Board", "is_private": True}), 201)
-    ok(api.patch(f"/spaces/{secret['id']}", "owner", {"discoverable": True}))
-
-    seen = {x["name"]: x for x in ok(api.get(f"/workspaces/{ws}/all-spaces", "member"))}
-    assert set(seen) == {"Clients", "Partners"}  # "Board" isn't discoverable
-    assert seen["Clients"]["joined"] and seen["Partners"]["permission_level"] is None
-    assert ok(api.get(f"/workspaces/{ws}/all-spaces", "guest")) == []
-
-    ok(api.put(f"/workspaces/{ws}/all-spaces/{open_space['id']}/joined?joined=false", "member", {}), 204)
-    tree = ok(api.get(f"/workspaces/{ws}/hierarchy", "member"))
-    assert [x["hidden"] for x in tree["spaces"] if x["name"] == "Clients"] == [True]
-    assert api.put(f"/workspaces/{ws}/all-spaces/{hidden['id']}/joined", "member", {}).status_code == 403
-
-    assert api.post(f"/workspaces/{ws}/all-spaces/{hidden['id']}/request", "member", {}).status_code == 404
-    ok(api.post(f"/workspaces/{ws}/all-spaces/{secret['id']}/request", "member", {"message": "I handle their filings"}), 201)
-    assert ok(api.get(f"/workspaces/{ws}/all-spaces", "member"))[1]["requested"] is True
-    inbox = ok(api.get(f"/workspaces/{ws}/inbox", "admin"))
-    assert inbox[0]["kind"] == "space_join_request" and inbox[0]["data"]["space"] == "Partners"
-    assert ok(api.get(f"/workspaces/{ws}/join-requests", "member")) == []
-    req = ok(api.get(f"/workspaces/{ws}/join-requests", "owner"))[0]
-    assert req["message"] == "I handle their filings"
-    assert api.post(f"/workspaces/{ws}/join-requests/{req['id']}", "member", {"approve": True}).status_code == 403
-    ok(api.post(f"/workspaces/{ws}/join-requests/{req['id']}", "owner", {"approve": True, "level": "edit"}), 204)
-    assert ok(api.get(f"/spaces/{secret['id']}", "member"))["permission_level"] == "edit"
-    assert ok(api.get(f"/workspaces/{ws}/inbox", "member"))[0]["kind"] == "space_join_decision"
-    assert api.post(f"/workspaces/{ws}/join-requests/{req['id']}", "owner", {"approve": False}).status_code == 400
-
-
-def test_sidebar_sections_are_personal_and_hold_each_space_once(api, workspace, space):
-    ws = workspace["id"]
-    other = ok(api.post(f"/workspaces/{ws}/spaces", "owner", {"name": "HR"}), 201)
-    a = ok(api.post(f"/workspaces/{ws}/sidebar-sections", "member", {"name": "Clients", "space_ids": [space["id"]]}), 201)
-    b = ok(api.post(f"/workspaces/{ws}/sidebar-sections", "member", {"name": "Internal", "space_ids": [other["id"], space["id"]]}), 201)
-    got = {x["name"]: x["space_ids"] for x in ok(api.get(f"/workspaces/{ws}/sidebar-sections", "member"))}
-    assert got == {"Clients": [], "Internal": [other["id"], space["id"]]}
-    ok(api.patch(f"/workspaces/{ws}/sidebar-sections/{a['id']}", "member", {"space_ids": [space["id"]], "collapsed": True}))
-    tree = ok(api.get(f"/workspaces/{ws}/hierarchy", "member"))
-    assert {x["name"]: x["space_ids"] for x in tree["sections"]} == {"Clients": [space["id"]], "Internal": [other["id"]]}
-    assert ok(api.get(f"/workspaces/{ws}/sidebar-sections", "owner")) == []
-    assert api.delete(f"/workspaces/{ws}/sidebar-sections/{b['id']}", "owner").status_code == 404
-    ok(api.delete(f"/workspaces/{ws}/sidebar-sections/{b['id']}", "member"), 204)
+# --- duplicating Spaces, Space templates ----------------------------------------------------------
 
 
 def test_duplicate_space_and_space_templates(api, workspace, space, folderless_list):
     ws, lst = workspace["id"], folderless_list["id"]
-    ok(api.patch(f"/spaces/{space['id']}", "owner", {"clickapps": {"sprint_points": True}}))
     folder = ok(api.post(f"/spaces/{space['id']}/folders", "owner", {"name": "Payroll"}), 201)
     field = ok(api.post(f"/spaces/{space['id']}/fields", "owner", {"name": "Client code", "type": "text"}), 201)
     t = _task(api, lst, "Monthly close", tags=["finance"], points=3, assignees=["member"])
@@ -107,7 +36,7 @@ def test_duplicate_space_and_space_templates(api, workspace, space, folderless_l
     assert api.post(f"/spaces/{space['id']}/duplicate", "guest", {}).status_code == 404
 
     copy = ok(api.post(f"/spaces/{space['id']}/duplicate", "owner", {"name": "Operations 2"}), 201)
-    assert copy["name"] == "Operations 2" and copy["clickapps"]["sprint_points"]
+    assert copy["name"] == "Operations 2"
     tree = ok(api.get(f"/workspaces/{ws}/hierarchy", "owner"))
     node = next(x for x in tree["spaces"] if x["id"] == copy["id"])
     assert [f["name"] for f in node["folders"]] == [folder["name"]] and [x["name"] for x in node["lists"]] == ["Backlog"]
@@ -189,8 +118,6 @@ def test_a_task_can_live_in_several_lists(api, workspace, space, folderless_list
     ok(api.put(f"/tasks/{task['id']}/lists/{home}", "owner", {}))
     ok(api.delete(f"/tasks/{task['id']}/lists/{home}", "owner"))
     assert _names(api, home) == []
-    ok(api.patch(f"/spaces/{clients['id']}", "owner", {"clickapps": {"multiple_lists": False}}))
-    assert api.put(f"/tasks/{task['id']}/lists/{home}", "owner", {}).status_code == 400
 
 
 # --- time in status -------------------------------------------------------------------------------
@@ -221,7 +148,6 @@ def test_time_in_status_from_history(api, space, folderless_list):
 
 
 def test_sprints_roll_over_and_report(api, workspace, space):
-    ok(api.patch(f"/spaces/{space['id']}", "owner", {"clickapps": {"sprint_points": True}}))
     folder = ok(api.post(f"/spaces/{space['id']}/folders", "owner", {"name": "Engineering"}), 201)
     monday = _today() - timedelta(days=_today().weekday())
     assert api.put(f"/folders/{folder['id']}/sprints", "guest", {}).status_code == 404
@@ -285,7 +211,7 @@ def test_email_to_list(api, space, folderless_list, monkeypatch):
     lst = folderless_list["id"]
     monkeypatch.setattr(settings, "INBOUND_EMAIL_ADDRESS", "tasks@verve.test")
     monkeypatch.setattr(settings, "INBOUND_EMAIL_SECRET", "s3cret")
-    assert ok(api.get(f"/lists/{lst}/email", "owner")) == {"address": None, "configured": True, "enabled": True}
+    assert ok(api.get(f"/lists/{lst}/email", "owner")) == {"address": None, "configured": True}
     assert api.post(f"/lists/{lst}/email", "guest", {}).status_code == 404
     address = ok(api.post(f"/lists/{lst}/email", "owner", {}))["address"]
     assert address.startswith("tasks+") and address.endswith("@verve.test")
@@ -307,8 +233,6 @@ def test_email_to_list(api, space, folderless_list, monkeypatch):
     with db_session.new_session() as db:
         assert email_to_list.ingest(db, _mail(address, "member@example.com", message_id="<m4@x>")) == "unknown_list"
         db.commit()
-    ok(api.patch(f"/spaces/{space['id']}", "owner", {"clickapps": {"email_to_list": False}}))
-    assert send(_mail(new, "member@example.com", message_id="<m5@x>")).json() == {"outcome": "turned_off"}
 
 
 # --- Doc, Chat, Embed, Map --------------------------------------------------------------------------

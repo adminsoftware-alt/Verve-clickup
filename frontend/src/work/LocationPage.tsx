@@ -3,13 +3,9 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { Activity, Calendar, CalendarRange, ChevronRight, ClipboardList, Columns3, FileSpreadsheet, FileText, Folder, GanttChart, Globe, History, Home, LayoutDashboard, List as ListIcon, ListPlus, Lock, Map as MapIcon, MessagesSquare, Network, PenTool, Plus, Share2, Table2, Upload, Users } from 'lucide-react';
 import { useWork, useMe } from './WorkContext';
 import { pathFor } from './SpacesSidebar';
-import { peek, workApi, type CustomField, type Dependency, type FolderNode, type ListNode, type LocationKind, type Recurrence, type SpaceNode, type Status, type Task, type TaskGroup, type TaskInput, type UserRef, type View, type ViewType } from './api';
-import { DateField } from './DateField';
-import { FieldEditor } from './fields/FieldValue';
+import { peek, workApi, type CustomField, type Dependency, type FolderNode, type ListNode, type LocationKind, type SpaceNode, type Status, type Task, type TaskGroup, type TaskInput, type View, type ViewType } from './api';
 import { TaskRowsSkeleton } from './Skeleton';
-import { DownloadIcon, Menu, NameDialog, PRIORITIES, Portal, StatusDot, formatDue, fromDateInput } from './ui';
-import { DurationInput } from './DurationInput';
-import { Select } from './Select';
+import { DownloadIcon, Menu, NameDialog, formatDue } from './ui';
 import { TaskPanel } from './TaskPanel';
 import { ListView } from './views/ListView';
 import { CalendarView } from './views/CalendarView';
@@ -23,8 +19,7 @@ import { rememberPlace } from './recent';
 import { ShareDialog } from './ShareDialog';
 import { useLeadership } from './dashboards/dialogs';
 import { GroupsDialog } from './GroupsDialog';
-import { AssigneePicker } from './task/AssigneePicker';
-import { RecurrenceEditor } from './RecurrenceEditor';
+import { NewTaskDialog } from './task/NewTaskDialog';
 import { NO_GROUP, buildGroups, type GroupBy } from './views/grouping';
 import { applyFilters, readSettings, sortTasks, COLUMNS, type ViewSettings } from './views/viewSettings';
 import { FilterPanel } from './views/FilterPanel';
@@ -39,7 +34,6 @@ import { ActivityView } from './views/ActivityView';
 import { FormBuilder } from './views/FormView';
 import { FieldsDialog } from './fields/FieldsDialog';
 import { ImportDialog } from './templates/ImportDialog';
-import { TemplateCenter } from './templates/Templates';
 import { FEATURES } from '../config/features';
 import { notify } from '../components/notify';
 import { DocView } from './views/DocView';
@@ -107,6 +101,8 @@ export const LocationPage: React.FC = () => {
   const [openTask, setOpenTask] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [newTaskList, setNewTaskList] = useState<string | null>(null);
+  // What a quick-add row typed, to start the New task dialog from.
+  const [newTaskStart, setNewTaskStart] = useState<(TaskInput & { name: string }) | null>(null);
   const [creatingList, setCreatingList] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [groups, setGroups] = useState<TaskGroup[]>([]);
@@ -115,7 +111,6 @@ export const LocationPage: React.FC = () => {
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
   const [managingFields, setManagingFields] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [templatesFor, setTemplatesFor] = useState<string | null>(null);
   const [publicView, setPublicView] = useState<View | null>(null);
   const me = useMe();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -225,12 +220,6 @@ export const LocationPage: React.FC = () => {
   // Every Space, Folder and List page counts as visited, whether it was opened from the sidebar,
   // a link in a message or a bookmark -- the place shows up under Recent in search either way.
   useEffect(() => { if (reachable) rememberPlace(kind, id); }, [reachable, kind, id]);
-  // Statuses edited from the sidebar: re-read them (tasks may have been remapped too).
-  useEffect(() => {
-    const again = () => { if (reachable) loadTasks(); };
-    window.addEventListener('timetriq:statuses', again);
-    return () => window.removeEventListener('timetriq:statuses', again);
-  }, [reachable, loadTasks]);
   // "?task=<id>" (from Home's Recents) opens that task over the List.
   const linkedTask = searchParams.get('task');
   // Closing a task opened by link drops ?task= from the address, so the same link works again.
@@ -353,13 +342,18 @@ export const LocationPage: React.FC = () => {
     setOpenTask(task.id);
   };
 
+  /** A quick-add row (List, Board, Calendar, Table). A task needs its who, when, how big and how
+   *  urgent before it is made: when the row brought all of them (the List's own inline row
+   *  does), it is made here; otherwise what was typed opens the New task dialog, filled in. */
   const createInList = async (listId: string, input: TaskInput & { name: string }) => {
-    try {
-      await workApi.createTask(listId, input.assignees || !autoAssignees.length ? input : { ...input, assignees: autoAssignees });
+    const complete = !!input.assignees?.length && !!input.start_date && !!input.due_date && !!input.time_estimate_seconds && !!input.priority;
+    if (complete && kind === 'list') {
+      await workApi.createTask(listId, input);
       changed();
-    } catch (e) {
-      notify.error(e);
+      return;
     }
+    setNewTaskStart(input);
+    setNewTaskList(listId);
   };
 
   if (!located) {
@@ -394,12 +388,12 @@ export const LocationPage: React.FC = () => {
       )}
       <div className="mt-0.5 flex min-w-0 items-center gap-2.5">
         <span className="loc-head-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"><HereIcon size={16} /></span>
-        <h1 title={here.name} className="min-w-0 truncate text-xl font-semibold tracking-tight text-gray-900">{here.name}</h1>
+        <h1 aria-label={here.name} className="min-w-0 truncate text-xl font-semibold tracking-tight text-gray-900">{here.name}</h1>
         {located.node.is_private && <Lock size={14} className="shrink-0 text-gray-400" aria-label="Private" />}
         {kind === 'list' && (() => {
           const lst = located.node as ListNode;
           return (lst.start_date || lst.due_date) ? (
-            <span className="hidden shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 sm:inline" title="List dates">
+            <span className="hidden shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 sm:inline" aria-label="List dates">
               {lst.start_date ? formatDue(lst.start_date) : '…'} → {lst.due_date ? formatDue(lst.due_date) : '…'}
             </span>
           ) : null;
@@ -497,7 +491,7 @@ export const LocationPage: React.FC = () => {
             {writableLists.length > 0 && (
               <button
                 type="button"
-                onClick={() => setNewTaskList(kind === 'list' ? id : writableLists[0].id)}
+                onClick={() => { setNewTaskStart(null); setNewTaskList(kind === 'list' ? id : writableLists[0].id); }}
                 className="btn-accent ml-1 flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-semibold shadow-sm"
               >
                 <Plus size={14} /> Task
@@ -637,6 +631,7 @@ export const LocationPage: React.FC = () => {
             groupBy={groupBy}
             makeGroups={makeGroups}
             canAddIn={canAddIn}
+            inlineAdd={kind === 'list'}
             onCreate={(name, key, extra) => createInList(id, { name, ...inputForGroup(key), ...extra })}
             onOpenTask={setOpenTask}
             // Rows are dragged into place only where place means something: one List, in its own order.
@@ -670,12 +665,13 @@ export const LocationPage: React.FC = () => {
           lists={kind === 'list' ? [] : listChoices}
           listId={newTaskList}
           startAssignees={autoAssignees}
-          onClose={() => setNewTaskList(null)}
+          initial={newTaskStart ?? undefined}
+          onClose={() => { setNewTaskList(null); setNewTaskStart(null); }}
           onCreate={async (listId, input) => {
             await createAndOpen(listId, input);
             setNewTaskList(null);
+            setNewTaskStart(null);
           }}
-          onTemplate={(listId) => { setNewTaskList(null); setTemplatesFor(listId); }}
         />
       )}
       {creatingList && (
@@ -709,7 +705,6 @@ export const LocationPage: React.FC = () => {
       {importing && kind === 'list' && (
         <ImportDialog listId={id} listName={located.node.name} fields={viewFields} onClose={() => setImporting(false)} onDone={changed} />
       )}
-      {templatesFor && <TemplateCenter kind="task" target={`l:${templatesFor}`} onClose={() => setTemplatesFor(null)} />}
       {FEATURES.listCustomFields && managingFields && (
         <FieldsDialog kind={kind} id={id} name={located.node.name} canEdit={located.node.permission_level === 'edit' || located.node.permission_level === 'full'}
           onClose={() => setManagingFields(false)} onChanged={() => { loadTasks(); }} />
@@ -732,445 +727,3 @@ export const LocationPage: React.FC = () => {
   );
 };
 
-/** Today in the viewer's own calendar, as the date inputs write it. */
-const isoDayOf = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-/** ClickUp's "+ Task". A task has to carry an owner, dates, a size and a priority before the
- *  Dashboards can say anything true about it -- so the dialog asks for all of them, and answers
- *  as many as it can from what this List has done before. The person corrects what is wrong
- *  rather than filling in a blank form. */
-const NewTaskDialog: React.FC<{
-  lists: { id: string; label: string }[];
-  listId: string;
-  onClose: () => void;
-  onCreate: (listId: string, input: TaskInput & { name: string }) => Promise<void>;
-  onTemplate: (listId: string) => void;
-  /** Who it starts assigned to (Me mode, the Assignee filter); you, when nobody is given. */
-  startAssignees?: string[];
-}> = ({ lists, listId, onClose, onCreate, onTemplate, startAssignees }) => {
-  const meId = useMe();
-  const { members: people, locate, taskTypes, hierarchy } = useWork();
-  const [name, setName] = useState('');
-  const [target, setTarget] = useState(listId);
-  const [start, setStart] = useState<string | null>(null);
-  const [due, setDue] = useState<string | null>(null);
-  const [estimateSeconds, setEstimateSeconds] = useState<number | null>(null);
-  const [priority, setPriority] = useState<number>(3);
-  const [assignees, setAssignees] = useState<string[]>(startAssignees?.length ? startAssignees : [meId]);
-  const [repeat, setRepeat] = useState<Recurrence | null>(null);
-  const [description, setDescription] = useState('');
-  const [statusId, setStatusId] = useState<string | null>(null);
-  const [statuses, setStatuses] = useState<Status[] | null>(null);
-  // Who can already open the List, so the picker can say who would need it shared first.
-  const [assignable, setAssignable] = useState<UserRef[] | null>(null);
-  const [tags, setTags] = useState<string[]>([]);
-  const [tagDraft, setTagDraft] = useState('');
-  const [knownTags, setKnownTags] = useState<string[]>([]);
-  const [typeId, setTypeId] = useState<string | null>(null);
-  const [points, setPoints] = useState('');
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [fields, setFields] = useState<CustomField[]>([]);
-  const [fieldValues, setFieldValues] = useState<Record<string, unknown>>({});
-  const [more, setMore] = useState(false);
-  // Set by the first try at saving: from then on each missing field says so under itself.
-  const [tried, setTried] = useState(false);
-  const nameBox = useRef<HTMLInputElement>(null);
-  const [hint, setHint] = useState<string | null>(null);
-  const [touched, setTouched] = useState({ dates: false, estimate: false, priority: false });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // What this List usually does. Anything the person has already edited is left alone.
-  useEffect(() => {
-    let live = true;
-    workApi.taskDefaults(target, name.trim() || undefined)
-      .then((d) => {
-        if (!live) return;
-        const day = 86_400_000;
-        setStart((prev) => (touched.dates || prev ? prev : fromDateInput(isoDayOf(new Date()))));
-        setDue((prev) => (touched.dates || prev ? prev : fromDateInput(isoDayOf(new Date(Date.now() + d.days_to_due * day)))));
-        if (!touched.priority && d.priority) setPriority(d.priority);
-        if (!touched.estimate && d.time_estimate_seconds) {
-          setEstimateSeconds(d.time_estimate_seconds);
-          setHint(d.estimate_basis === 'similar'
-            ? `Suggested from ${d.estimate_from} similar task${d.estimate_from === 1 ? '' : 's'} in this List.`
-            : `Suggested from the ${d.estimate_from} sized tasks in this List.`);
-        } else if (!touched.estimate) {
-          setHint(null);
-        }
-      })
-      .catch(() => undefined);
-    return () => { live = false; };
-    // Re-asks once the name settles, so "File GSTR-3B" can find its own history.
-  }, [target, name.trim()]);
-
-  // What the List it is going into brings with it: its statuses, its Space's tags and fields.
-  useEffect(() => {
-    let live = true;
-    workApi.statuses('list', target)
-      .then((set) => { if (live) { setStatuses(set.statuses); setStatusId((prev) => prev ?? set.statuses[0]?.id ?? null); } })
-      .catch(() => undefined);
-    workApi.assignable('list', target).then((a) => { if (live) setAssignable(a); }).catch(() => undefined);
-    workApi.fields('list', target)
-      .then((f) => { if (live) setFields(f); })
-      .catch(() => undefined);
-    const space = locate('list', target)?.path?.[0];
-    if (space) workApi.spaceTags(space.id).then((t) => { if (live) setKnownTags(t.map((x) => x.name)); }).catch(() => undefined);
-    return () => { live = false; };
-  }, [target, locate]);
-
-  // The Space's ClickApps decide which fields it uses; a missing one is the ClickUp default.
-  const apps = hierarchy?.spaces.find((sp) => sp.id === locate('list', target)?.path?.[0]?.id)?.clickapps ?? {};
-  const uses = (name: keyof typeof apps, fallback = true) => apps[name] ?? fallback;
-
-  const backwards = !!start && !!due && new Date(due) < new Date(start);
-  const needsEstimate = uses('time_estimates');
-  // What is still missing, field by field. Shown under each one once saving has been tried.
-  const problems = {
-    name: name.trim() ? null : 'Give the task a name.',
-    status: statusId ? null : 'Pick a status.',
-    priority: !uses('priorities') || priority ? null : 'Pick a priority.',
-    assignees: assignees.length ? null : 'Choose an assignee.',
-    start: start ? null : 'Pick a start date.',
-    due: !due ? 'Pick an end date.' : backwards ? 'The end date is before the start date.' : null,
-    estimate: !needsEstimate || (estimateSeconds !== null && estimateSeconds > 0) ? null : 'Say how long it will take, e.g. 3, 2.30 or 45m.',
-  };
-  const ready = Object.values(problems).every((p) => p === null);
-  const problem = (key: keyof typeof problems) => (tried ? problems[key] : null);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (busy) return;
-    setTried(true);
-    if (!ready) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await onCreate(target, {
-        name: name.trim(), start_date: start, due_date: due, time_estimate_seconds: estimateSeconds,
-        priority, assignees,
-        ...(repeat ? { recurrence: repeat } : {}),
-        ...(description.trim() ? { description: description.trim() } : {}),
-        ...(statusId ? { status_id: statusId } : {}),
-        ...(tags.length && uses('tags') ? { tags } : {}),
-        ...(typeId ? { type_id: typeId } : {}),
-        ...(points.trim() && uses('sprint_points', false) ? { points: Number(points) } : {}),
-        ...(isPrivate ? { is_private: true } : {}),
-        ...(Object.keys(fieldValues).length && uses('custom_fields') ? { custom_fields: fieldValues } : {}),
-      });
-    } catch (err) {
-      setError((err as Error).message);
-      setBusy(false);
-    }
-  };
-
-  // One label style, one control height, one focus treatment. A create dialog that mixes three
-  // of each reads as three dialogs stitched together, whatever the individual fields look like.
-  const label = 'block text-[13px] font-medium text-gray-700';
-  const ring = (bad: string | null) => (bad
-    ? 'border-red-400 hover:border-red-500 focus-within:border-red-500 focus-within:ring-red-500/15 focus:border-red-500 focus:ring-red-500/15'
-    : 'border-gray-300 hover:border-gray-400 focus-within:border-brand-500 focus-within:ring-brand-500/15 focus:border-brand-500 focus:ring-brand-500/15');
-  const box = (bad: string | null) => `mt-1.5 flex h-9 items-center rounded-lg border px-2 transition-colors focus-within:ring-2 ${ring(bad)}`;
-  const Req = () => <span className="ml-0.5 text-red-500" aria-hidden>*</span>;
-  const Err: React.FC<{ text: string | null }> = ({ text }) => (text ? <p role="alert" className="mt-1 text-xs text-red-600">{text}</p> : null);
-  return (
-    <Portal>
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 p-4" onMouseDown={onClose}>
-        <form
-          role="dialog"
-          aria-label="New task"
-          onMouseDown={(e) => e.stopPropagation()}
-          onSubmit={submit}
-          className="flex max-h-[88vh] w-[34rem] max-w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5"
-        >
-          <header className="shrink-0 border-b border-gray-100 px-5 py-3.5">
-            <h3 className="text-[15px] font-semibold text-gray-900">New task</h3>
-            <p className="mt-0.5 text-xs text-gray-500">Filled in from what this List usually does — change whatever is wrong.</p>
-          </header>
-
-          {/* The body scrolls; the header and the buttons do not. On a laptop the old dialog ran
-              off both ends of the screen, so "Create task" was below the fold. */}
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          <div>
-            <label className={label}>
-              Task name<Req />
-              <input
-                ref={nameBox}
-                autoFocus value={name} onChange={(e) => setName(e.target.value)}
-                aria-required aria-invalid={!!problem('name')}
-                placeholder="e.g. Aditi Jain Monthly Review"
-                className={`mt-1.5 h-10 w-full rounded-lg border px-3 text-sm transition-colors placeholder:text-gray-400 focus:outline-none focus:ring-2 ${ring(problem('name'))}`}
-              />
-            </label>
-            <Err text={problem('name')} />
-          </div>
-
-          {/* From here the fields run in the order the task panel shows them, so what someone
-              fills in now is where they will look for it afterwards. */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <span className={label}>Status<Req /></span>
-              <div className="mt-1.5">
-                <Select
-                  label="Status"
-                  value={statusId ?? ''}
-                  onChange={(v) => setStatusId(v || null)}
-                  choices={(statuses ?? []).map((st) => ({
-                    value: st.id,
-                    label: st.name,
-                    icon: <StatusDot status={st} size={11} />,
-                    display: (
-                      <>
-                        <StatusDot status={st} size={11} />
-                        <span className="truncate text-xs font-semibold uppercase tracking-wide">{st.name}</span>
-                      </>
-                    ),
-                  }))}
-                />
-              </div>
-              <Err text={problem('status')} />
-            </div>
-            <div hidden={!uses('priorities')}>
-              <span className={label}>Priority<Req /></span>
-              <div className="mt-1.5">
-                <Select
-                  label="Priority"
-                  value={String(priority)}
-                  onChange={(v) => { setPriority(Number(v)); setTouched((t) => ({ ...t, priority: true })); }}
-                  choices={Object.entries(PRIORITIES).map(([value, p]) => ({
-                    value,
-                    label: p.label,
-                    icon: <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: p.color }} />,
-                    display: (
-                      <>
-                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: p.color }} />
-                        <span className="truncate" style={{ color: p.color }}>{p.label}</span>
-                      </>
-                    ),
-                  }))}
-                />
-              </div>
-              <Err text={problem('priority')} />
-            </div>
-          </div>
-
-          <div>
-            <span className={label}>Assignee<Req /></span>
-            <div className={`mt-1.5 min-h-9 rounded-lg border py-1 transition-colors focus-within:ring-2 ${ring(problem('assignees'))}`}>
-              <AssigneePicker
-                listId={target}
-                assignees={people.filter((m) => assignees.includes(m.user.id)).map((m) => m.user)}
-                assignable={assignable}
-                editable
-                canShare
-                multiple
-                onChange={setAssignees}
-                onShared={() => workApi.assignable('list', target).then(setAssignable).catch(() => undefined)}
-              />
-            </div>
-            <Err text={problem('assignees')} />
-          </div>
-
-          {/* Start and end each under their own name, so nobody has to guess which half of a
-              range they are setting. */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <span className={label}>Start date<Req /></span>
-              <div className={box(problem('start'))}>
-                <DateField
-                  label="Start date" placeholder="Pick a start date" value={start} className="w-full"
-                  onChange={(iso) => { setStart(iso); setTouched((t) => ({ ...t, dates: true })); }}
-                />
-              </div>
-              <Err text={problem('start')} />
-            </div>
-            <div>
-              <span className={label}>End date<Req /></span>
-              <div className={box(problem('due'))}>
-                <DateField
-                  label="End date" placeholder="Pick an end date" value={due} overdue={backwards} className="w-full"
-                  onChange={(iso) => { setDue(iso); setTouched((t) => ({ ...t, dates: true })); }}
-                />
-              </div>
-              <Err text={problem('due') ?? (backwards ? 'The end date is before the start date.' : null)} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div hidden={!uses('time_estimates')}>
-              <span className={label}>Time estimate<Req /></span>
-              {/* The same input as the task panel, so "3" offers 3h and 3m here too rather than
-                  silently picking one of them. */}
-              <div className="mt-1.5">
-                <DurationInput
-                  label="Time estimate"
-                  value={estimateSeconds}
-                  placeholder="3, 2.30, 45m"
-                  onChange={(seconds) => { setEstimateSeconds(seconds); setTouched((t) => ({ ...t, estimate: true })); setHint(null); }}
-                  className={`h-9 w-full rounded-lg border px-3 text-sm transition-colors placeholder:text-gray-400 focus:outline-none focus:ring-2 ${ring(problem('estimate'))}`}
-                />
-              </div>
-              <Err text={problem('estimate')} />
-              {hint && !problem('estimate') && <p className="mt-1 text-xs text-gray-500">{hint}</p>}
-            </div>
-            {/* A field of its own rather than a row hidden at the foot of the date picker, where
-                it opened a panel taller than the space left below the dialog. */}
-            <div>
-              <span className={label}>Recurring <span className="font-normal text-gray-400">optional</span></span>
-              <div className="mt-1.5 flex h-9 items-center rounded-lg border border-gray-300 px-1 transition-colors hover:border-gray-400">
-                <RecurrenceEditor value={repeat} dueDate={due ?? start} statuses={statuses} disabled={false} onSave={async (value) => { setRepeat(value); }} />
-                {repeat && (
-                  <button type="button" aria-label="Stop recurring" title="Stop recurring" onClick={() => setRepeat(null)}
-                    className="shrink-0 rounded px-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600">&times;</button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div hidden={!FEATURES.taskTagsField || !uses('tags')}>
-            <span className={label}>Tags <span className="font-normal text-gray-400">optional</span></span>
-            <div className="mt-1.5 flex min-h-9 flex-wrap items-center gap-1.5 rounded-lg border border-gray-300 px-2 py-1 transition-colors hover:border-gray-400 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/15">
-              {tags.map((t) => (
-                <span key={t} className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-xs text-teal-800">
-                  {t}
-                  <button type="button" aria-label={`Remove ${t}`} onClick={() => setTags(tags.filter((x) => x !== t))} className="text-teal-600 hover:text-teal-900">&times;</button>
-                </span>
-              ))}
-              <input
-                aria-label="Add a tag"
-                value={tagDraft}
-                onChange={(e) => setTagDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  // Enter adds the tag rather than submitting the form, which would create the
-                  // task while someone was still typing its tags.
-                  if (e.key === 'Enter' || e.key === ',') {
-                    e.preventDefault();
-                    const t = tagDraft.trim();
-                    if (t && !tags.includes(t)) setTags([...tags, t]);
-                    setTagDraft('');
-                  }
-                }}
-                list="new-task-tags"
-                placeholder={tags.length ? 'Add another…' : 'Type a tag and press Enter'}
-                className="min-w-32 flex-1 bg-transparent text-sm focus:outline-none"
-              />
-              <datalist id="new-task-tags">
-                {knownTags.filter((t) => !tags.includes(t)).map((t) => <option key={t} value={t} />)}
-              </datalist>
-            </div>
-          </div>
-
-          {/* Last, as it is in the panel: the long one, and the one nobody is blocked on. */}
-          <label className={label}>
-            Description <span className="font-normal text-gray-400">optional</span>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={2}
-              placeholder="What actually needs doing, and anything whoever picks it up will need."
-              className="mt-1.5 w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm transition-colors placeholder:text-gray-400 hover:border-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/15"
-            />
-          </label>
-
-          {/* Everything else a task can carry. Behind a disclosure, because asking eleven
-              questions at once is how a create dialog becomes a form nobody finishes. */}
-          <button
-            type="button"
-            onClick={() => setMore(!more)}
-            className="flex w-full items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-brand-700 transition-colors hover:border-brand-300 hover:bg-brand-50/60"
-          >
-            <ChevronRight size={13} className={`shrink-0 text-gray-400 transition-transform ${more ? 'rotate-90' : ''}`} />
-            {more ? 'Fewer fields' : 'More fields'}
-            <span className="text-gray-400">
-              {more ? '' : `— private${uses('custom_fields') && fields.length ? `, ${fields.length} of this Space's own fields` : ''}`}
-            </span>
-          </button>
-
-          {more && (
-            <div className="space-y-4 rounded-xl border border-gray-200 bg-gray-50/70 p-4">
-              <div className="grid grid-cols-2 gap-4">
-                {taskTypes.length > 0 && (
-                  <div>
-                    <span className={label}>Task type</span>
-                    <div className="mt-1.5">
-                      <Select
-                        label="Task type"
-                        value={typeId ?? ''}
-                        onChange={(v) => setTypeId(v || null)}
-                        choices={[{ value: '', label: 'Task' }, ...taskTypes.map((t) => ({ value: t.id, label: t.name }))]}
-                      />
-                    </div>
-                  </div>
-                )}
-                {uses('sprint_points', false) && (
-                <label className={label}>
-                  Sprint points <span className="font-normal text-gray-400">optional</span>
-                  <input
-                    value={points}
-                    onChange={(e) => setPoints(e.target.value.replace(/[^0-9]/g, ''))}
-                    inputMode="numeric"
-                    placeholder="—"
-                    className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                  />
-                </label>
-                )}
-              </div>
-
-              <label className="flex items-start gap-2 text-sm text-gray-700">
-                <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} className="mt-0.5" />
-                <span>
-                  Private
-                  <span className="block text-xs text-gray-500">Only you and the people on it will see this task.</span>
-                </span>
-              </label>
-
-              {fields.length > 0 && uses('custom_fields') && (
-                <div>
-                  <span className={label}>This Space's own fields</span>
-                  <div className="mt-1 space-y-2">
-                    {fields.map((f) => (
-                      <label key={f.id} className="grid grid-cols-[9rem_minmax(0,1fr)] items-center gap-2 text-xs text-gray-600">
-                        <span className="truncate">{f.name}</span>
-                        <span className="rounded-md border border-gray-300 bg-white px-1.5 py-1">
-                          <FieldEditor
-                            field={f}
-                            value={fieldValues[f.id]}
-                            people={people.map((m) => m.user)}
-                            onChange={(v: unknown) => setFieldValues((prev) => ({ ...prev, [f.id]: v }))}
-                          />
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {lists.length > 1 && (
-            <div>
-              <span className={label}>In List</span>
-              <div className="mt-1.5">
-                <Select label="In List" value={target} onChange={setTarget}
-                  choices={lists.map((l) => ({ value: l.id, label: l.label }))} />
-              </div>
-            </div>
-          )}
-          {lists.length === 1 && <p className="-mt-1 text-xs text-gray-500">In {lists[0].label}</p>}
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-          </div>
-
-          <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-gray-100 bg-gray-50/70 px-5 py-3">
-            {FEATURES.templates && <button type="button" onClick={() => onTemplate(target)} className="mr-auto rounded-md px-2 py-1.5 text-sm text-brand-600 hover:bg-brand-50">Use a template</button>}
-            <span className={`${FEATURES.templates ? '' : 'mr-auto '}text-[11px] text-gray-400`}><span className="text-red-500">*</span> required</span>
-            <button type="button" onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-200/70">Cancel</button>
-            <button type="submit" disabled={busy} className="btn-accent rounded-lg px-4 py-1.5 text-sm font-semibold shadow-sm transition-opacity disabled:opacity-50">
-              {busy ? 'Saving…' : 'Create task'}
-            </button>
-          </footer>
-        </form>
-      </div>
-    </Portal>
-  );
-};

@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Diamond, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { spaceIconSrc, workApi, type LocationKind, type TagUsage, type TaskType } from './api';
-import { Portal, fromDateInput, toDateInput, useEscapeToClose } from './ui';
-import { useIsAdmin, useWork } from './WorkContext';
+import { Diamond, Pencil, Trash2, X } from 'lucide-react';
+import { workApi, type TaskType } from './api';
+import { Portal, useEscapeToClose } from './ui';
+import { useWork } from './WorkContext';
 import { ask } from '../components/ask';
-import { LinesSkeleton } from './Skeleton';
 
 const Shell: React.FC<{ title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }> = ({ title, onClose, children, wide }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -16,7 +15,7 @@ const Shell: React.FC<{ title: string; onClose: () => void; children: React.Reac
           className={`flex max-h-[88vh] ${wide ? 'w-[34rem]' : 'w-[28rem]'} max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white p-5 shadow-xl`}>
           <div className="mb-3 flex items-center">
             <h3 className="font-semibold text-gray-900">{title}</h3>
-            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            <button aria-label="Close" type="button" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </div>
           {children}
         </div>
@@ -26,171 +25,6 @@ const Shell: React.FC<{ title: string; onClose: () => void; children: React.Reac
 };
 
 const COLORS = ['#7c3aed', '#0ea5e9', '#16a34a', '#ea580c', '#db2777', '#4f46e5', '#0d9488', '#b45309', '#dc2626', '#64748b'];
-const ICONS = ['', '📁', '🧑‍💼', '💼', '📊', '💰', '🧾', '🏢', '⚙️', '🚀', '📣', '🎯', '📚', '🛠️', '🤝'];
-const input = 'mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm font-normal';
-
-/** Space, Folder or List settings: name, colour, icon, description; the task ID prefix; List dates. */
-export const LocationSettingsDialog: React.FC<{ kind: LocationKind; id: string; onClose: () => void }> = ({ kind, id, onClose }) => {
-  const { refresh, workspace } = useWork();
-  const isAdmin = useIsAdmin();
-  const [uploading, setUploading] = useState(false);
-  const [form, setForm] = useState<Record<string, unknown> | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => { workApi.location(kind, id).then(setForm).catch((e) => setError(e.message)); }, [kind, id]);
-  const set = (patch: Record<string, unknown>) => setForm((f) => ({ ...(f ?? {}), ...patch }));
-  const save = async () => {
-    if (!form) return;
-    const body: Record<string, unknown> = { name: form.name, color: form.color ?? null };
-    if (kind !== 'folder') body.description = (form.description as string) || null;
-    if (kind === 'space') { body.icon = (form.icon as string) || null; if (form.task_prefix) body.task_prefix = form.task_prefix; }
-    if (kind === 'list') { body.start_date = form.start_date ?? null; body.due_date = form.due_date ?? null; }
-    try {
-      await workApi.updateLocation(kind, id, body);
-      await refresh();
-      // Open pages re-read their tasks (a new prefix changes every task's ID).
-      window.dispatchEvent(new Event('timetriq:statuses'));
-      onClose();
-    } catch (e) { setError((e as Error).message); }
-  };
-  const label = kind === 'space' ? 'Space' : kind === 'folder' ? 'Folder' : 'List';
-  return (
-    <Shell title={`${label} settings`} onClose={onClose}>
-      {!form ? <p className="text-sm text-gray-400">{error ?? <LinesSkeleton />}</p> : (
-        <div className="min-h-0 space-y-3 overflow-auto">
-          <label className="block text-xs font-medium text-gray-600">Name
-            <input aria-label="Name" value={(form.name as string) ?? ''} onChange={(e) => set({ name: e.target.value })} className={input} />
-          </label>
-          <div>
-            <p className="text-xs font-medium text-gray-600">Colour</p>
-            <div className="mt-1 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Colour">
-              {COLORS.map((c) => (
-                <button key={c} type="button" role="radio" aria-checked={form.color === c} aria-label={c} onClick={() => set({ color: c })}
-                  className={`h-6 w-6 rounded-full ${form.color === c ? 'ring-2 ring-gray-400 ring-offset-2' : ''}`} style={{ backgroundColor: c }} />
-              ))}
-            </div>
-          </div>
-          {kind === 'space' && (
-            <div>
-              <p className="text-xs font-medium text-gray-600">Icon</p>
-              <div className="mt-1 flex flex-wrap gap-1" role="radiogroup" aria-label="Icon">
-                {ICONS.map((ic) => (
-                  <button key={ic || 'letter'} type="button" role="radio" aria-checked={(form.icon ?? '') === ic} aria-label={ic || 'First letter'} onClick={() => set({ icon: ic || null })}
-                    className={`flex h-8 w-8 items-center justify-center rounded-md border text-base ${(form.icon ?? '') === ic ? 'border-brand-400 bg-brand-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                    {ic || <span className="text-xs font-bold text-gray-500">Aa</span>}
-                  </button>
-                ))}
-              </div>
-              {isAdmin && workspace && (
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  {spaceIconSrc(form.icon as string) && (
-                    <img src={spaceIconSrc(form.icon as string)!} alt="Space picture" className="h-8 w-8 rounded-md border border-gray-200 object-cover" />
-                  )}
-                  <label className="cursor-pointer rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50">
-                    {uploading ? 'Uploading…' : spaceIconSrc(form.icon as string) ? 'Change picture' : 'Upload picture'}
-                    <input
-                      type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={uploading}
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        e.target.value = '';
-                        if (!file) return;
-                        setUploading(true);
-                        setError(null);
-                        try {
-                          const r = await workApi.setSpaceIcon(workspace.id, id, file);
-                          set({ icon: r.icon });
-                          await refresh();
-                        } catch (err) { setError((err as Error).message); }
-                        setUploading(false);
-                      }}
-                    />
-                  </label>
-                  {spaceIconSrc(form.icon as string) && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try { await workApi.removeSpaceIcon(workspace.id, id); set({ icon: null }); await refresh(); }
-                        catch (err) { setError((err as Error).message); }
-                      }}
-                      className="rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
-                    >
-                      Remove
-                    </button>
-                  )}
-                  <span className="text-[11px] text-gray-400">PNG, JPG or WebP, up to 1 MB</span>
-                </div>
-              )}
-            </div>
-          )}
-          {kind !== 'folder' && (
-            <label className="block text-xs font-medium text-gray-600">Description
-              <textarea aria-label="Description" rows={3} value={(form.description as string) ?? ''} onChange={(e) => set({ description: e.target.value })} className={input}
-                placeholder={kind === 'space' ? 'What is this Space for?' : 'What is this List for?'} />
-            </label>
-          )}
-          {kind === 'space' && (
-            <label className="block text-xs font-medium text-gray-600">Task ID prefix
-              <input aria-label="Task ID prefix" value={(form.task_prefix as string) ?? ''} onChange={(e) => set({ task_prefix: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) })} className={`${input} w-32 uppercase`} />
-              <span className="mt-1 block font-normal text-gray-400">Tasks here get short IDs like {(form.task_prefix as string) || 'HR'}-12. Changing it updates every task.</span>
-            </label>
-          )}
-          {kind === 'list' && (
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block text-xs font-medium text-gray-600">Start date
-                <input aria-label="List start date" type="date" value={toDateInput((form.start_date as string) ?? null)} onChange={(e) => set({ start_date: fromDateInput(e.target.value) })} className={input} />
-              </label>
-              <label className="block text-xs font-medium text-gray-600">Due date
-                <input aria-label="List due date" type="date" value={toDateInput((form.due_date as string) ?? null)} onChange={(e) => set({ due_date: fromDateInput(e.target.value) })} className={input} />
-              </label>
-            </div>
-          )}
-          {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-          <div className="flex justify-end gap-2 pt-1">
-            <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
-            <button type="button" onClick={save} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">Save</button>
-          </div>
-        </div>
-      )}
-    </Shell>
-  );
-};
-
-/** ClickUp's Tag Manager for a Space: rename (renaming onto another tag merges them), recolour, delete. */
-export const TagManagerDialog: React.FC<{ spaceId: string; spaceName: string; canEdit: boolean; onClose: () => void }> = ({ spaceId, spaceName, canEdit, onClose }) => {
-  const [tags, setTags] = useState<TagUsage[] | null>(null);
-  const [draft, setDraft] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const load = () => workApi.spaceTags(spaceId).then(setTags).catch((e) => setError(e.message));
-  useEffect(() => { load(); }, [spaceId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const run = async (action: () => Promise<unknown>) => { setError(null); try { await action(); await load(); } catch (e) { setError((e as Error).message); } };
-  return (
-    <Shell title={`Tags in ${spaceName}`} onClose={onClose}>
-      {error && <p className="mb-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      <ul className="min-h-0 flex-1 overflow-auto" aria-label="Tags">
-        {tags === null ? <li className="text-sm text-gray-400"><LinesSkeleton /></li> : tags.length === 0 ? <li className="py-6 text-center text-sm text-gray-400">No tags yet.</li> : tags.map((t) => (
-          <li key={t.id} className="group flex items-center gap-2 border-t border-gray-100 py-1.5 first:border-t-0">
-            <label className="relative h-5 w-5 shrink-0 cursor-pointer rounded" style={{ backgroundColor: t.bg_color }} title="Colour">
-              {canEdit && <input type="color" aria-label={`Colour of ${t.name}`} value={t.bg_color} onChange={(e) => run(() => workApi.updateTag(t.id, { bg_color: e.target.value }))} className="absolute inset-0 opacity-0" />}
-            </label>
-            <span className="rounded px-1.5 py-px text-xs font-medium" style={{ backgroundColor: t.bg_color, color: t.fg_color }}>{t.name}</span>
-            <span className="text-xs text-gray-400">{t.task_count} task{t.task_count === 1 ? '' : 's'}</span>
-            {canEdit && (
-              <span className="ml-auto flex gap-1 opacity-60 group-hover:opacity-100">
-                <button aria-label={`Rename ${t.name}`} type="button" title={`Rename ${t.name}`} onClick={async () => { const n = await ask.prompt('Rename tag (use another tag’s name to merge them)', t.name); if (n && n.trim() && n.trim() !== t.name) run(() => workApi.updateTag(t.id, { name: n.trim() })); }} className="rounded p-1 text-gray-400 hover:text-gray-700"><Pencil size={13} /></button>
-                <button type="button" title={`Delete ${t.name}`} onClick={async () => await ask.confirm({ danger: true, title: `Delete the tag “${t.name}” from every task in ${spaceName}?` }) && run(() => workApi.deleteTag(t.id))} className="rounded p-1 text-gray-300 hover:text-red-600"><Trash2 size={13} /></button>
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-      {canEdit && (
-        <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (draft.trim()) run(() => workApi.createTag(spaceId, { name: draft.trim() })).then(() => setDraft('')); }}>
-          <input aria-label="New tag" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="New tag" className="flex-1 rounded-md border border-gray-300 px-2 py-1 text-sm" />
-          <button type="submit" disabled={!draft.trim()} className="flex items-center gap-1 rounded-md bg-brand-600 px-3 py-1 text-sm font-medium text-white disabled:opacity-50"><Plus size={13} /> Add</button>
-        </form>
-      )}
-    </Shell>
-  );
-};
 
 /** Workspace task types (ClickUp's "Task Types"): Task is built in; others get an icon; milestones show as diamonds. */
 export const TaskTypesDialog: React.FC<{ onClose: () => void; onChanged: () => void }> = ({ onClose, onChanged }) => {
@@ -216,8 +50,8 @@ export const TaskTypesDialog: React.FC<{ onClose: () => void; onChanged: () => v
             <span className="flex-1 text-sm text-gray-800">{t.name}{t.is_milestone && <span className="ml-2 text-xs text-gray-400">milestone</span>}</span>
             {isAdmin && (
               <>
-                <button aria-label={`Rename ${t.name}`} type="button" title={`Rename ${t.name}`} onClick={async () => { const n = await ask.prompt('Rename type', t.name); if (n && n.trim()) run(() => workApi.updateTaskType(workspace.id, t.id, { name: n.trim() })); }} className="text-gray-300 hover:text-gray-700"><Pencil size={13} /></button>
-                <button type="button" title={`Delete ${t.name}`} onClick={async () => await ask.confirm({ danger: true, title: `Delete the type “${t.name}”? Its tasks become plain tasks.` }) && run(() => workApi.deleteTaskType(workspace.id, t.id))} className="text-gray-300 hover:text-red-600"><Trash2 size={13} /></button>
+                <button aria-label={`Rename ${t.name}`} type="button" onClick={async () => { const n = await ask.prompt('Rename type', t.name); if (n && n.trim()) run(() => workApi.updateTaskType(workspace.id, t.id, { name: n.trim() })); }} className="text-gray-300 hover:text-gray-700"><Pencil size={13} /></button>
+                <button type="button" aria-label={`Delete ${t.name}`} onClick={async () => await ask.confirm({ danger: true, title: `Delete the type “${t.name}”? Its tasks become plain tasks.` }) && run(() => workApi.deleteTaskType(workspace.id, t.id))} className="text-gray-300 hover:text-red-600"><Trash2 size={13} /></button>
               </>
             )}
           </li>
@@ -240,5 +74,5 @@ export const TaskTypesDialog: React.FC<{ onClose: () => void; onChanged: () => v
 export const TypeIcon: React.FC<{ type: TaskType; size?: number }> = ({ type, size = 13 }) => (
   type.is_milestone
     ? <Diamond size={size} style={{ color: type.color }} fill={type.color} aria-label={type.name} />
-    : <span className="inline-block rounded-full" style={{ width: size - 3, height: size - 3, backgroundColor: type.color }} title={type.name} aria-label={type.name} />
+    : <span className="inline-block rounded-full" style={{ width: size - 3, height: size - 3, backgroundColor: type.color }} aria-label={type.name} />
 );

@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Download, FileSpreadsheet, LogOut, MinusCircle, X } from 'lucide-react';
 import { Portal, useEscapeToClose } from '../ui';
 import { parseLevel } from './levels';
+import { formatAddress } from './AddressField';
 import { peopleApi, personName, type ImportResult, type ImportRow, type ImportTeam, type JoinerStep, type OffboardPreview, type Person } from './peopleApi';
 import { LinesSkeleton } from '../Skeleton';
 
@@ -19,7 +20,7 @@ const Dialog: React.FC<{ title: string; onClose: () => void; width?: string; chi
           className={`flex max-h-[90vh] ${width} max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white shadow-xl`}>
           <header className="flex items-center border-b border-gray-100 px-5 py-3">
             <h3 className="font-semibold text-gray-900">{title}</h3>
-            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            <button aria-label="Close" type="button" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </header>
           <div className="min-h-0 flex-1 overflow-auto px-5 py-4">{children}</div>
         </div>
@@ -199,7 +200,7 @@ const COLUMNS: [keyof ImportRow, string[]][] = [
   ['date_of_birth', ['date of birth', 'dob', 'birthday']],
   ['marriage_anniversary', ['marriage anniversary', 'anniversary']],
   ['phone', ['phone', 'mobile', 'contact']],
-  ['location', ['location', 'city', 'office', 'office location']],
+  ['location', ['location', 'office', 'office location']],
   ['level', ['level']],
   ['employment_type', ['employment type', 'employment']],
   ['emergency_contact_name', ['emergency contact name', 'emergency contact']],
@@ -212,7 +213,13 @@ const pad = (n: number) => String(n).padStart(2, '0');
 
 /** Spreadsheet dates: real dates, "DD/MM/YYYY" (as written in India) or "YYYY-MM-DD". */
 function toIsoDate(v: unknown): string | undefined {
-  if (v instanceof Date && !Number.isNaN(v.getTime())) return `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    // A real Excel date can arrive a few seconds or minutes short of local midnight (the sheet and
+    // the browser disagree about old time-zone offsets, India's among them), which read as the day
+    // before. Midday is never near a day's edge, so the date is read from there.
+    const d = new Date(v.getTime() + 12 * 3600 * 1000);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
   const text = String(v ?? '').trim();
   if (!text) return undefined;
   let m = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
@@ -225,10 +232,18 @@ function toIsoDate(v: unknown): string | undefined {
   return text; // let the server say what's wrong with it
 }
 
+/** The address columns, put together the way the address box writes an address. */
+const ADDRESS_COLUMNS = {
+  line1: ['address line 1', 'address 1', 'house / flat', 'address'], line2: ['address line 2', 'address 2', 'street / area'],
+  landmark: ['landmark'], city: ['city', 'town'], state: ['state'], pincode: ['pincode', 'pin code', 'pin', 'postal code', 'zip'],
+  country: ['country'],
+} as const;
+
 export function rowsFromSheet(records: Record<string, unknown>[]): { rows: ImportRow[]; missing: string[] } {
   if (!records.length) return { rows: [], missing: ['email'] };
   const headers = Object.keys(records[0]);
-  const find = (aliases: string[]) => headers.find((h) => aliases.includes(headerKey(h)));
+  const find = (aliases: readonly string[]) => headers.find((h) => aliases.includes(headerKey(h)));
+  const addressCols = Object.fromEntries(Object.entries(ADDRESS_COLUMNS).map(([k, aliases]) => [k, find(aliases)])) as Record<keyof typeof ADDRESS_COLUMNS, string | undefined>;
   const map = COLUMNS.map(([field, aliases]) => [field, find(aliases)] as const).filter(([, h]) => h);
   const missing = map.some(([f]) => f === 'email') ? [] : ['email'];
   const rows = records.map((rec) => {
@@ -243,6 +258,12 @@ export function rowsFromSheet(records: Record<string, unknown>[]): { rows: Impor
       }
       const value = DATE_FIELDS.has(field) ? toIsoDate(raw) : (raw == null ? '' : String(raw).trim());
       if (value) (row as unknown as Record<string, string>)[field] = value;
+    }
+    const part = (k: keyof typeof ADDRESS_COLUMNS) => { const h = addressCols[k]; return h ? String(rec[h] ?? '').trim() : ''; };
+    const parts = { line1: part('line1'), line2: part('line2'), landmark: part('landmark'), city: part('city'), state: part('state'), pincode: part('pincode'), country: part('country') };
+    if (Object.values(parts).some(Boolean)) {
+      row.address = formatAddress({ ...parts, country: parts.country || 'India' });
+      if (!row.location && parts.city) row.location = parts.city;
     }
     return row;
   }).filter((r) => r.email);
@@ -309,9 +330,16 @@ export const ImportPeopleDialog: React.FC<{ ws: string; onClose: () => void; onD
   const go = async () => {
     setBusy(true);
     setError(null);
-    try { setResult(await peopleApi.importPeople(ws, { rows, teams, dry_run: false, ...options })); onDone(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    try {
+      const out = await peopleApi.importPeople(ws, { rows, teams, dry_run: false, all_or_nothing: true, ...options });
+      if (out.saved === false) { setCheck(out); setError('Nothing was saved: the file still has problems. Fix the rows marked below and choose the file again.'); return; }
+      setResult(out);
+      onDone();
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
   const shown = result ?? check;
+  // The whole file goes in, or none of it: Import waits until every row and Team checks out.
+  const problems = check ? check.errors + (check.warnings ?? check.rows.filter((r) => r.outcome !== 'error' && r.problems.length).length) + check.team_problems.length : 0;
   return (
     <Dialog title="Import people from Excel" onClose={onClose} width="w-[48rem]">
       {!result && (
@@ -333,7 +361,8 @@ export const ImportPeopleDialog: React.FC<{ ws: string; onClose: () => void; onD
       {shown && (
         <>
           <p className="mb-2 text-sm text-gray-700" role="status">
-            {result ? 'Imported: ' : 'Ready to import: '}<b>{shown.added}</b> new, <b>{shown.updated}</b> updated{shown.errors ? <>, <b className="text-red-700">{shown.errors}</b> with problems (skipped)</> : ''}.
+            {result ? 'Imported: ' : problems ? 'Checked: ' : 'Ready to import: '}<b>{shown.added}</b> new, <b>{shown.updated}</b> updated.
+            {!result && problems > 0 && <> <b className="text-red-700">{problems} problem{problems === 1 ? '' : 's'} to fix first</b>: the whole file goes in at once, so nothing is imported until every row checks out.</>}
             {shown.teams_created.length > 0 && <> {result ? 'Teams created' : 'Teams to create'}: <b>{shown.teams_created.join(', ')}</b>.</>}
           </p>
           {shown.team_problems.length > 0 && (
@@ -347,7 +376,7 @@ export const ImportPeopleDialog: React.FC<{ ws: string; onClose: () => void; onD
                   <tr key={r.row} className="border-t border-gray-100">
                     <td className="px-3 py-1.5 text-gray-400">{r.row + 1}</td>
                     <td className="px-3 py-1.5 text-gray-800">{r.email}</td>
-                    <td className="px-3 py-1.5"><span className="flex items-center gap-1 capitalize">{ROW_ICON[r.outcome]} {r.outcome === 'error' ? 'Problem' : r.outcome}</span></td>
+                    <td className="px-3 py-1.5"><span className="flex items-center gap-1 capitalize">{r.outcome !== 'error' && r.problems.length ? <><AlertTriangle size={14} className="text-amber-600" /> Fix</> : <>{ROW_ICON[r.outcome]} {r.outcome === 'error' ? 'Problem' : r.outcome}</>}</span></td>
                     <td className="px-3 py-1.5 text-xs text-gray-600">{r.problems.join('; ')}</td>
                   </tr>
                 ))}
@@ -358,7 +387,7 @@ export const ImportPeopleDialog: React.FC<{ ws: string; onClose: () => void; onD
       )}
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" onClick={onClose} className={secondary}>{result ? 'Close' : 'Cancel'}</button>
-        {!result && <button type="button" disabled={busy || !check || check.added + check.updated === 0} onClick={go} className={primary}>{busy ? 'Working…' : `Import ${check ? check.added + check.updated : ''} people`}</button>}
+        {!result && <button type="button" disabled={busy || !check || problems > 0 || check.added + check.updated === 0} onClick={go} className={primary}>{busy ? 'Working…' : `Import ${check ? check.added + check.updated : ''} people`}</button>}
       </div>
     </Dialog>
   );

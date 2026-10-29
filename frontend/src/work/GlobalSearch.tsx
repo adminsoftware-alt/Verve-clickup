@@ -27,7 +27,7 @@ const PAGES: { label: string; path: string; icon: React.ReactNode; words: string
   { label: 'Reminders', path: '/reminders', icon: <Bell size={15} />, words: 'reminders' },
   { label: 'Dashboards', path: '/dashboards', icon: <BarChart3 size={15} />, words: 'dashboards reports charts' },
   { label: 'Timesheet', path: '/timesheets', icon: <Clock size={15} />, words: 'timesheets time tracking hours' },
-  { label: 'People & Teams', path: '/people', icon: <Users size={15} />, words: 'people teams members', managers: true },
+  { label: 'My team / People', path: '/people', icon: <Users size={15} />, words: 'people teams members', managers: true },
 ];
 
 const matches = (text: string, q: string) => text.toLowerCase().includes(q);

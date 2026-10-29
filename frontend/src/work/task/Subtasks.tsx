@@ -43,7 +43,7 @@ function peopleItems(people: UserRef[], chosen: Set<string>, onToggle: (id: stri
 }
 
 const Chip: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
-  <span title={title} className="flex items-center gap-1 rounded px-1 py-0.5 text-xs text-gray-500 hover:bg-gray-100">{children}</span>
+  <span aria-label={title} className="flex items-center gap-1 rounded px-1 py-0.5 text-xs text-gray-500 hover:bg-gray-100">{children}</span>
 );
 
 /** One subtask: everything on it can be set without opening it. */
@@ -57,7 +57,7 @@ const Row: React.FC<{
     <div className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-50">
       {editable && statuses.length ? (
         <Menu label={`Status of ${sub.name}`} items={statusItems(statuses, (id) => onSave({ status_id: id }))}
-          trigger={<span className="rounded p-0.5 hover:bg-gray-200" title={sub.status.name}><StatusDot status={sub.status} size={12} /></span>} />
+          trigger={<span className="rounded p-0.5 hover:bg-gray-200" aria-label={sub.status.name}><StatusDot status={sub.status} size={12} /></span>} />
       ) : <StatusDot status={sub.status} size={12} />}
 
       <button type="button" onClick={onOpen} className={`min-w-0 flex-1 truncate text-left ${closed ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
@@ -79,7 +79,7 @@ const Row: React.FC<{
       {editable ? (
         <Menu align="right" label={`Assignees of ${sub.name}`} width={220}
           items={peopleItems(people, chosen, (id) => onSave({ assignees: chosen.has(id) ? [...chosen].filter((x) => x !== id) : [...chosen, id] }))}
-          trigger={<span className="flex items-center rounded p-0.5 hover:bg-gray-200" title="Assignees">
+          trigger={<span className="flex items-center rounded p-0.5 hover:bg-gray-200" aria-label="Assignees">
             {sub.assignees.length
               ? <span className="flex -space-x-1">{sub.assignees.slice(0, 3).map((a) => <Avatar key={a.id} user={a} size={20} />)}</span>
               : <UserPlus size={14} className="text-gray-400" />}
@@ -138,7 +138,7 @@ const AddRow: React.FC<{
       <div className="flex items-center gap-2">
         {status && (
           <Menu label="Status of the new subtask" items={statusItems(statuses, setStatusId)}
-            trigger={<span className="rounded p-0.5 hover:bg-gray-200" title={status.name}><StatusDot status={status} size={12} /></span>} />
+            trigger={<span className="rounded p-0.5 hover:bg-gray-200" aria-label={status.name}><StatusDot status={status} size={12} /></span>} />
         )}
         <input
           autoFocus aria-label="Subtask name" value={name} onChange={(e) => setName(e.target.value)}

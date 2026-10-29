@@ -100,7 +100,7 @@ export const TaskRelations: React.FC<{ task: TaskDetail; editable: boolean; onCh
                 <Link to={`/l/${l.list_id}?task=${l.id}`} className={`min-w-0 flex-1 truncate text-sm no-underline hover:underline ${l.finished ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{l.name}</Link>
                 {l.due_date && <span className="text-xs text-gray-400">{formatDue(l.due_date)}</span>}
                 {kind === 'waiting_on' && !l.finished && <Ban size={12} className="text-red-500" aria-label="Not finished yet" />}
-                {editable && <button type="button" title="Remove" onClick={() => run(() => workApi.removeLink(l.link_id))} className="text-gray-300 opacity-0 hover:text-red-600 group-hover:opacity-100"><X size={13} /></button>}
+                {editable && <button type="button" aria-label="Remove" onClick={() => run(() => workApi.removeLink(l.link_id))} className="text-gray-300 opacity-0 hover:text-red-600 group-hover:opacity-100"><X size={13} /></button>}
               </li>
             ))}
           </ul>
@@ -133,7 +133,7 @@ export const MergeDialog: React.FC<{ task: TaskDetail; onClose: () => void; onDo
             {picked.map((p) => (
               <li key={p.id} className="flex items-center gap-2 rounded-md bg-gray-50 px-2 py-1 text-sm">
                 <StatusDot status={p.status} size={10} /><span className="min-w-0 flex-1 truncate">{p.name}</span>
-                <button type="button" title="Remove" onClick={() => setPicked((x) => x.filter((y) => y.id !== p.id))} className="text-gray-400 hover:text-red-600"><Trash2 size={13} /></button>
+                <button type="button" aria-label="Remove" onClick={() => setPicked((x) => x.filter((y) => y.id !== p.id))} className="text-gray-400 hover:text-red-600"><Trash2 size={13} /></button>
               </li>
             ))}
           </ul>

@@ -86,7 +86,7 @@ export const TimesheetsPage: React.FC<{ tab: Tab }> = ({ tab }) => {
           </>
         )}
         <span className="ml-auto flex shrink-0 items-center gap-2">
-          <span className="ts-head-today" title="Today">
+          <span className="ts-head-today" aria-label="Today">
             <CalendarDays size={14} />
             {new Date().toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
           </span>
@@ -244,7 +244,7 @@ const SheetPage: React.FC = () => {
         {whose && <span className="flex items-center gap-2 text-lg font-medium text-gray-900"><Avatar user={sheet.user} size={28} /> {sheet.user.display_name || sheet.user.email}</span>}
         <WeekNav start={sheet.period_start} end={sheet.period_end} onGo={go} />
         {FEATURES.timesheetFillFromPlanner && editable && !sheet.locked && (
-          <button type="button" title="Log the week's finished Planner blocks as time" onClick={() => run(async () => {
+          <button type="button" aria-label="Log the week's finished Planner blocks as time" onClick={() => run(async () => {
             const out = await sheetApi.prefill(workspace!.id, sheet.period_start, whose);
             setNote(out.entries ? `Added ${out.entries} ${out.entries === 1 ? 'entry' : 'entries'} (${hours(out.seconds)}) from the Planner.` : 'Nothing new to add from the Planner this week.');
           })} className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><CalendarDays size={14} /> Fill from Planner</button>
@@ -295,7 +295,7 @@ const SheetPage: React.FC = () => {
               type="button"
               role="tab"
               aria-selected={on}
-              title={v.hint}
+              aria-label={v.hint}
               onClick={() => setView(v.key)}
               className={`-mb-px flex items-center gap-1.5 border-b-2 px-2.5 py-2 text-sm transition-colors ${
                 on ? `${v.tint} font-semibold` : 'border-transparent text-gray-600 hover:text-gray-900'}`}

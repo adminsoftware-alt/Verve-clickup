@@ -140,7 +140,7 @@ export const DashboardsHub: React.FC = () => {
               <button
                 key={t.key}
                 type="button"
-                title={t.hint}
+                aria-label={t.hint}
                 onClick={() => setParams(t.key === 'all' ? {} : { tab: t.key })}
                 className={`rounded-lg px-2.5 py-1 text-sm transition-colors ${
                   tab === t.key ? 'bg-brand-50 font-medium text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`}
@@ -151,7 +151,7 @@ export const DashboardsHub: React.FC = () => {
           </div>
         )}
         {FEATURES.dashboardPreview && (
-          <Link to="/dashboards/preview" className="mb-3 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm text-teal-700 no-underline hover:bg-teal-50">
+          <Link to="/dashboards/preview" className="mb-3 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm text-brand-700 no-underline hover:bg-brand-50">
             <Sparkles size={14} /> Card previews
           </Link>
         )}

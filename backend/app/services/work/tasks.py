@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, inspect, select, update
 from sqlalchemy.orm import Session, aliased
 
 from app.db.models import (
@@ -244,23 +244,6 @@ def _group_of(db: Session, status_id: uuid.UUID):
     return status.group
 
 
-def _check_clickapps(db: Session, space_id: uuid.UUID, data, fields) -> None:
-    """Refuse values for features this Space has switched off (its ClickApps)."""
-    from app.services.work import space_admin
-
-    apps = space_admin.clickapps(db.get(Space, space_id))
-    checks = (
-        ("priority", "priorities", lambda v: v is not None),
-        ("points", "sprint_points", lambda v: v is not None),
-        ("time_estimate_seconds", "time_estimates", lambda v: v is not None),
-        ("tags", "tags", lambda v: bool(v)),
-        ("assignees", "multiple_assignees", lambda v: v is not None and len(set(v)) > 1),
-    )
-    for field, app, used in checks:
-        if field in fields and not apps[app] and used(getattr(data, field)):
-            raise Invalid(f"{space_admin.CLICKAPP_LABELS[app]} is turned off for this Space")
-
-
 # --- create ------------------------------------------------------------------
 
 
@@ -312,7 +295,6 @@ def create_task(
         if _depth(db, parent) + 1 > MAX_SUBTASK_DEPTH:
             raise Invalid(f"Subtasks can be nested at most {MAX_SUBTASK_DEPTH} levels deep")
 
-    _check_clickapps(db, lst.space_id, data, data.model_fields_set | {"assignees", "tags"})
     statuses = effective_statuses(db, lst)
     status = _status_in(statuses, data.status_id) if data.status_id else default_status(statuses)
     assignees = _check_assignees(
@@ -424,7 +406,6 @@ def update_task(db: Session, opened: Opened[Task], data: s.TaskUpdate) -> Task:
 
     lst = db.get(TaskList, task.list_id)
     assert lst is not None
-    _check_clickapps(db, lst.space_id, data, fields)
     before = _snapshot(db, task)
 
     for name in ("name", "description", "priority", "time_estimate_seconds", "orderindex", "points"):
@@ -670,7 +651,15 @@ def serialise_tasks(
     if not tasks:
         return []
     ids = [t.id for t in tasks]
-    statuses = {st.id: st for st in db.scalars(select(Status).where(Status.id.in_({t.status_id for t in tasks})))}
+    # Statuses this request already read (a Dashboard reads them to filter its cards) are reused.
+    statuses: Dict[uuid.UUID, Status] = {}
+    for status_id in {t.status_id for t in tasks}:
+        known = db.identity_map.get(Session.identity_key(Status, status_id))
+        if known is not None and not inspect(known).expired:  # an expired one would be re-read one by one
+            statuses[status_id] = known
+    missing = {t.status_id for t in tasks} - set(statuses)
+    if missing:
+        statuses.update((st.id, st) for st in db.scalars(select(Status).where(Status.id.in_(missing))))
 
     assignees: Dict[uuid.UUID, List[User]] = {}
     for task_id, user in db.execute(

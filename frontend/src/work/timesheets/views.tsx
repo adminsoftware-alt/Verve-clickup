@@ -13,8 +13,9 @@ import { Popover, dayLabel, hours } from './pieces';
 
 // --- filters -------------------------------------------------------------------------------------
 
+// The same pill as the Filter button beside them, so the row reads as one set of controls.
 const chip = (active: boolean) =>
-  `flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm ${active ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`;
+  `cf-pill flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium ${active ? '!border-[#C9D5EA] !bg-[#F5F8FD] !text-[#142B57]' : ''}`;
 
 export const FilterBar: React.FC<{
   query: SheetQuery; onChange: (q: SheetQuery) => void; tags: TimeTag[];
@@ -227,7 +228,7 @@ export const FilterBar: React.FC<{
 
       {FEATURES.timesheetSortChip && (
       <Popover width={200} trigger={(open) => (
-        <button type="button" onClick={open} className={chip(false)} title="Sort">
+        <button type="button" onClick={open} className={chip(false)} aria-label="Sort">
           {query.descending ? <ArrowDown size={13} /> : <ArrowUp size={13} />} {sortLabel}
         </button>
       )}>

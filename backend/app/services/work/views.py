@@ -65,22 +65,6 @@ def add_required_views(db: Session, owner: Owner, user_id: str, existing: Sequen
         )
 
 
-def add_default_views(db: Session, owner: Owner, space: Space, user_id: str) -> None:
-    """The Space's chosen default views, after the required ones, on a new Space or Folder.
-
-    Never on a List: a List shows its List view and nothing else (the firm's call, 2026-10-16).
-    """
-    if isinstance(owner, TaskList):
-        return
-    required = set(_required_types(owner))
-    for position, name in enumerate(space.default_views or []):
-        view_type = ViewType(name)
-        if view_type in required:
-            continue
-        db.add(View(type=view_type, name=DEFAULT_NAMES[view_type], orderindex=float(position), created_by=user_id,
-                    **{_parent_column(owner).key: owner.id}))
-
-
 def list_views(db: Session, opened: Opened) -> List[View]:
     """The views here, without other people's private views; the default view comes first."""
     column = _parent_column(opened.obj)

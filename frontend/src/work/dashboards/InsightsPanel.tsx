@@ -29,7 +29,7 @@ type Group = 'day' | 'team' | 'firm';
 
 const GROUPS: { key: Group; title: (x: Insights) => string }[] = [
   // "Your day" on your own board; on anyone else's it is their work, not your day.
-  { key: 'day', title: (x) => (x.who === 'me' ? 'For you' : x.who === 'person' ? `${x.who_name || 'Their'}'s work` : x.who === 'team' ? "The team's work" : 'The work') },
+  { key: 'day', title: (x) => (x.who === 'me' ? 'For you' : x.who === 'person' ? `${x.who_name || 'Their'}'s work` : x.who === 'everyone' ? 'Work and people' : 'The work') },
   { key: 'team', title: (x) => (x.who === 'everyone' ? 'People' : 'Your team') },
   { key: 'firm', title: () => 'Around the firm' },
 ];
@@ -373,6 +373,8 @@ const EMPTY: Record<Group, string> = {
   firm: 'No birthdays, work anniversaries or holidays this week.',
 };
 
+const EMPTY_MERGED = 'All on track: nothing is late, everyone logged time and no timesheet is waiting.';
+
 export const InsightsPanel: React.FC<{
   insights: Insights | null; error?: string | null; onOpenTask: (id: string) => void;
   /** Findings from elsewhere on the board -- the Workload band's capacity check -- said first. */
@@ -413,7 +415,11 @@ export const InsightsPanel: React.FC<{
       </section>
     );
   }
-  const all = insights ? points(insights, extra, onOpenPerson, acts) : [];
+  // On a Team or Company board the work and the people behind it are the same people, so they
+  // read as one list, worst first, instead of two tabs to flip between.
+  const merged = insights?.who === 'team' || insights?.who === 'everyone';
+  const all = (insights ? points(insights, extra, onOpenPerson, acts) : [])
+    .map((p) => (merged && p.group === 'team' ? { ...p, group: 'day' as Group } : p));
   const shown = all
     .filter((p) => !hidden.includes(kindOf(p.key)) && !snoozed[kindOf(p.key)])
     .sort((a, b) => RANK[a.tone] - RANK[b.tone]);
@@ -421,7 +427,7 @@ export const InsightsPanel: React.FC<{
 
   // Each board keeps to its own people: an Employee's own board has only their work; a Manager's
   // own board adds their team; a Team board its team; the Company board everyone and the firm's news.
-  const hasTeam = !!insights && (insights.who === 'team' || insights.who === 'everyone' || all.some((p) => p.group === 'team'));
+  const hasTeam = !merged && all.some((p) => p.group === 'team');
   const tabs = GROUPS.filter((g) => (g.key === 'team' ? hasTeam : g.key === 'firm' ? insights?.who === 'everyone' : true));
   const inTab = (g: Group) => shown.filter((p) => p.group === g);
   const needs = (g: Group) => inTab(g).some((p) => p.tone === 'danger' || p.tone === 'warning');
@@ -463,7 +469,7 @@ export const InsightsPanel: React.FC<{
         ) : (
           <>
             {rows.length === 0
-              ? <p className="px-2 py-6 text-center text-sm text-gray-500">{EMPTY[current]}</p>
+              ? <p className="px-2 py-6 text-center text-sm text-gray-500">{merged && current === 'day' ? EMPTY_MERGED : EMPTY[current]}</p>
               : <ul role="tabpanel">{rows.map((p) => <PointRow key={p.key} point={p} onOpenTask={onOpenTask} onHide={() => hide(p.key)} onSnooze={() => snooze(p.key)} />)}</ul>}
             {quiet > 0 && (
               <p className="flex items-center gap-2 border-t border-gray-100 px-2 py-2.5 text-xs text-gray-400">

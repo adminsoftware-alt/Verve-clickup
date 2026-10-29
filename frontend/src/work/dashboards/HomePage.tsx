@@ -9,6 +9,7 @@ import { peopleApi } from '../teams/peopleApi';
 import { peek, type UserRef } from '../api';
 import { dashApi } from './api';
 import { DashboardPage } from './DashboardPage';
+import { ReviewBar } from '../review/MonthlyReview';
 import { DailyThought } from './DailyThought';
 import { FirstRun } from './FirstRun';
 import { LinesSkeleton } from '../Skeleton';
@@ -91,6 +92,7 @@ export const HomePage: React.FC = () => {
       intro={(
         <>
           <DailyThought greeting={hello} />
+          <ReviewBar />
           {firstRun && <FirstRun name={firstName(mine?.user.display_name, mine?.user.email ?? '')} manager={manager} />}
         </>
       )}

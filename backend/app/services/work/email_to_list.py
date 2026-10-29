@@ -26,7 +26,7 @@ from app.core.config import settings
 from app.db.models import InboundEmail, PermissionLevel, TaskList, User
 from app.schemas import spaces as sp
 from app.schemas import work as s
-from app.services.work import extras, space_admin
+from app.services.work import extras
 from app.services.work import tasks as task_service
 from app.services.work.access import Opened, open_list
 from app.services.work.errors import Forbidden, Invalid, NotFound
@@ -50,7 +50,7 @@ def info(db: Session, opened: Opened[TaskList]) -> sp.ListEmailOut:
     lst = opened.obj
     return sp.ListEmailOut(
         address=address_for(lst.email_token) if lst.email_token and opened.level == PermissionLevel.full else None,
-        configured=configured(), enabled=space_admin.enabled(db, lst.space_id, "email_to_list"),
+        configured=configured(),
     )
 
 
@@ -58,7 +58,6 @@ def make_address(db: Session, opened: Opened[TaskList], rotate: bool = False) ->
     """Give the List an address (or a new one, which stops the old one working)."""
     if opened.level != PermissionLevel.full:
         raise Forbidden("You need full access to the List to get its email address")
-    space_admin.require(db, opened.obj.space_id, "email_to_list")
     if opened.obj.email_token is None or rotate:
         opened.obj.email_token = secrets.token_hex(8)
         db.flush()
@@ -129,9 +128,6 @@ def ingest(db: Session, raw: bytes) -> str:
     if lst is None:
         _record(db, message_id, "unknown_list", sender)
         return "unknown_list"
-    if not space_admin.enabled(db, lst.space_id, "email_to_list"):
-        _record(db, message_id, "turned_off", sender, lst.id)
-        return "turned_off"
     user = db.scalar(select(User).where(func.lower(User.email) == sender)) if sender else None
     try:
         if user is None:

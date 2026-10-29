@@ -204,3 +204,39 @@ def test_admins_are_untouched(api, workspace):
     assert ok(api.get(f"/tasks/{other['id']}", "admin"))["permission_level"] == "full"
     assert api.delete(f"/tasks/{other['id']}", "admin").status_code == 204
     assert api.delete(f"/lists/{lst['id']}", "admin").status_code == 204
+
+
+# --- what the List lets you change in place ------------------------------------------------------
+
+def test_the_list_marks_which_rows_can_be_edited_in_place(api, workspace):
+    """The List draws a row's values as editors only where the row says edit or full, so the
+    level it carries is the whole story: an employee's own task is editable, a colleague's is not."""
+    ws = workspace["id"]
+    _space, lst = area(api, ws)
+    mine = ok(api.post(f"/lists/{lst['id']}/tasks", "owner", {"name": "My audit", "assignees": ["member"]}), 201)
+    theirs = ok(api.post(f"/lists/{lst['id']}/tasks", "owner", {"name": "Their audit", "assignees": ["admin"]}), 201)
+
+    rows = {t["id"]: t for t in ok(api.get(f"/lists/{lst['id']}/tasks", "member"))["tasks"]}
+    assert rows[mine["id"]]["permission_level"] in ("edit", "full")
+    assert rows[theirs["id"]]["permission_level"] == "comment"
+    # An admin edits everything in place.
+    rows = {t["id"]: t for t in ok(api.get(f"/lists/{lst['id']}/tasks", "admin"))["tasks"]}
+    assert all(t["permission_level"] in ("edit", "full") for t in rows.values())
+
+
+def test_every_in_place_field_saves_on_an_employees_own_task(api, workspace):
+    """Status, priority, start and due dates, estimate and people -- each cell the List edits."""
+    ws = workspace["id"]
+    _space, lst = area(api, ws)
+    task = ok(api.post(f"/lists/{lst['id']}/tasks", "owner", {"name": "Quarterly review", "assignees": ["member"]}), 201)
+    statuses = ok(api.get(f"/lists/{lst['id']}/statuses", "member"))["statuses"]
+    doing = next(st for st in statuses if st["group"] == "active")
+
+    url = f"/tasks/{task['id']}"
+    assert ok(api.patch(url, "member", {"status_id": doing["id"]}))["status"]["id"] == doing["id"]
+    assert ok(api.patch(url, "member", {"priority": 2}))["priority"] == 2
+    assert ok(api.patch(url, "member", {"start_date": "2026-11-02T00:00:00Z"}))["start_date"].startswith("2026-11-02")
+    assert ok(api.patch(url, "member", {"due_date": "2026-11-06T00:00:00Z"}))["due_date"].startswith("2026-11-06")
+    assert ok(api.patch(url, "member", {"time_estimate_seconds": 7200}))["time_estimate_seconds"] == 7200
+    people = ok(api.patch(url, "member", {"assignees": ["member", "owner"]}))["assignees"]
+    assert {u["id"] for u in people} == {"member", "owner"}

@@ -13,10 +13,11 @@ import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import {
   Bell, Briefcase, Building2, Cake, Calendar, Camera, CheckCircle2, Clock, Hash, Lock, Mail, MapPin, Pencil, Phone,
-  PhoneCall, Sparkles, Trash2, User, UserRound, Users,
+  PhoneCall, Sparkles, Trash2, User, UserRound, Users, Volume2, VolumeX,
 } from 'lucide-react';
 
 import { ask } from '../components/ask';
+import { ALERT_SOUNDS, playAlertSound, setAlertSound, useAlertSound } from '../components/alertSound';
 import { StatusSelector } from '../components/StatusSelector';
 import { SELF_COLOR } from '../components/HeaderBits';
 import { useTopBarSlot } from '../components/topBarSlot';
@@ -64,32 +65,49 @@ const SectionTitle: React.FC<{ icon: React.ReactNode; children: React.ReactNode 
   </h3>
 );
 
-/** The look of the bell in the top bar: each choice drawn as it will look, and the bar's own bell
- *  changes the moment one is picked. Pointing at a choice rings its bell. */
-const BellStylePicker: React.FC = () => {
-  const current = useBellStyle();
+/** The bell's look and the sound of a new notification, in one card: two rows of small chips.
+ *  A bell chip shows that bell; a sound chip plays its sound as it is picked. Both are kept in
+ *  this browser and take effect at once. */
+const BellAndSound: React.FC = () => {
+  const bell = useBellStyle();
+  const sound = useAlertSound();
+  const chip = (on: boolean) => `flex h-9 items-center gap-2 rounded-lg border px-3 text-[13px] transition-colors ${
+    on ? 'border-[#234788] bg-[#F5F8FD] font-medium text-[#1C3A70] shadow-[0_0_0_2px_rgba(35,71,136,0.08)]' : 'border-gray-200 text-gray-700 hover:border-[#B3C3DF] hover:bg-[#FAFBFD]'}`;
+  const row = (label: string, hint: string, body: React.ReactNode) => (
+    <div className="grid gap-2 py-4 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-6">
+      <div><p className="text-sm font-medium text-[#1B2A4A]">{label}</p><p className="text-xs text-gray-500">{hint}</p></div>
+      {body}
+    </div>
+  );
   return (
     <section className={card}>
-      <div className="mb-1"><SectionTitle icon={<Bell size={15} />}>Bell style</SectionTitle></div>
-      <p className="mb-4 text-sm text-gray-500">How the bell in the top bar looks. It rings when a new notification arrives.</p>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5" role="radiogroup" aria-label="Bell style">
-        {BELL_STYLES.map((b) => {
-          const on = b.key === current;
-          return (
-            <button key={b.key} type="button" role="radio" aria-checked={on} onClick={() => setBellStyle(b.key)}
-              className={`bell-pick flex flex-col items-center gap-2 rounded-xl border px-3 pb-3 pt-4 text-center transition-colors ${on ? 'border-[#234788] bg-[#F8FAFD] shadow-[0_0_0_3px_rgba(35,71,136,0.10)]' : 'border-gray-200 hover:border-[#B3C3DF]'}`}>
-              <span className={`header-bell bell-${b.key}`}>
-                <BellIcon />
-                <span className="bell-count">3</span>
-              </span>
-              <span className="text-sm font-medium text-[#1B2A4A]">{b.name}</span>
-              <span className="text-[11px] leading-tight text-gray-500">{b.note}</span>
-              <span className={`mt-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 ${on ? 'border-[#234788] bg-[#234788]' : 'border-gray-300'}`}>
-                {on && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
-              </span>
-            </button>
-          );
-        })}
+      <SectionTitle icon={<Bell size={15} />}>Bell &amp; sound</SectionTitle>
+      <p className="mt-1 text-sm text-gray-500">How the bell in the top bar looks, and what you hear when a notification or a reminder arrives.</p>
+      <div className="mt-2 divide-y divide-[#EEF1F5]">
+        {row('Bell', 'Rings when something new arrives', (
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Bell style">
+            {BELL_STYLES.map((b) => (
+              <button key={b.key} type="button" role="radio" aria-checked={b.key === bell} onClick={() => setBellStyle(b.key)} className={chip(b.key === bell)}>
+                {/* The real bell, drawn small. */}
+                <span className="relative h-5 w-5 shrink-0" aria-hidden>
+                  <span className={`header-bell bell-${b.key} absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 scale-[0.55]`}><BellIcon /></span>
+                </span>
+                {b.name}
+              </button>
+            ))}
+          </div>
+        ))}
+        {row('Sound', 'Pick one to hear it', (
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Notification sound">
+            {ALERT_SOUNDS.map((snd) => (
+              <button key={snd.key} type="button" role="radio" aria-checked={snd.key === sound}
+                onClick={() => { setAlertSound(snd.key); playAlertSound(snd.key); }} className={chip(snd.key === sound)}>
+                {snd.key === 'off' ? <VolumeX size={14} className="shrink-0 text-gray-400" /> : <Volume2 size={14} className={`shrink-0 ${snd.key === sound ? 'text-[#234788]' : 'text-gray-400'}`} />}
+                {snd.name}
+              </button>
+            ))}
+          </div>
+        ))}
       </div>
     </section>
   );
@@ -256,7 +274,7 @@ const ProfilePage: React.FC = () => {
         )}
 
         {tab === 'notifications' ? (<>
-          <BellStylePicker />
+          <BellAndSound />
           <section className={card}>
             <div className="mb-4"><SectionTitle icon={<Bell size={15} />}>Notifications</SectionTitle></div>
             <NotificationSettingsPanel />

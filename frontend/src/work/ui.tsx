@@ -24,11 +24,11 @@ function colorFor(id: string): string {
 /** A person's photo, or their initials on their colour. `color` overrides that colour -- your own
  *  avatar is drawn in the navy wherever it stands for you. */
 export const Avatar: React.FC<{ user: UserRef; size?: number; color?: string }> = ({ user, size = 24, color }) => (user.avatar ? (
-  <img src={`${API_V2}/${user.avatar}`} alt="" title={user.display_name || user.email}
+  <img src={`${API_V2}/${user.avatar}`} alt="" aria-label={user.display_name || user.email}
     className="inline-block shrink-0 rounded-full object-cover ring-2 ring-white" style={{ width: size, height: size }} />
 ) : (
   <span
-    title={user.display_name || user.email}
+    aria-label={user.display_name || user.email}
     className="inline-flex items-center justify-center rounded-full font-semibold text-white ring-2 ring-white shrink-0"
     style={{ width: size, height: size, fontSize: size * 0.4, backgroundColor: color ?? colorFor(user.id) }}
   >

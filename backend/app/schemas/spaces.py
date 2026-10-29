@@ -1,4 +1,4 @@
-"""Phase D: All Spaces and join requests, sidebar sections, public links, sprints, time in status,
+"""Phase D: duplicating Spaces, public links, sprints, time in status,
 Email-to-List, tasks in several Lists, and the Doc, Whiteboard, Mind map, Chat and Embed views."""
 
 import uuid
@@ -13,40 +13,7 @@ from app.schemas.work import UserOut
 Short = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
 
 
-# --- All Spaces -------------------------------------------------------------------------------
-
-
-class BrowseSpace(BaseModel):
-    id: uuid.UUID
-    name: str
-    color: Optional[str]
-    icon: Optional[str]
-    description: Optional[str]
-    is_private: bool
-    permission_level: Optional[PermissionLevel]  # None: private, you can ask to join
-    joined: bool  # in your sidebar
-    requested: bool  # you asked to join and are waiting
-    list_count: int
-    owner: Optional[UserOut]
-    can_approve: bool
-
-
-class JoinIn(BaseModel):
-    message: Optional[Annotated[str, StringConstraints(max_length=500)]] = None
-
-
-class JoinRequestOut(BaseModel):
-    id: uuid.UUID
-    space_id: uuid.UUID
-    space_name: str
-    user: UserOut
-    message: Optional[str]
-    created_at: datetime
-
-
-class JoinDecision(BaseModel):
-    approve: bool
-    level: PermissionLevel = PermissionLevel.edit
+# --- duplicating a Space ---------------------------------------------------------------------
 
 
 class SpaceDuplicate(BaseModel):
@@ -60,25 +27,6 @@ class SpaceDuplicate(BaseModel):
     dates: bool = True
     checklists: bool = True
     custom_fields: bool = True
-
-
-# --- sidebar sections ---------------------------------------------------------------------------
-
-
-class SectionIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: Short
-    space_ids: List[uuid.UUID] = Field(default_factory=list, max_length=500)
-
-
-class SectionUpdate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: Optional[Short] = None
-    orderindex: Optional[float] = None
-    collapsed: Optional[bool] = None
-    space_ids: Optional[List[uuid.UUID]] = Field(default=None, max_length=500)
 
 
 # --- public links -------------------------------------------------------------------------------
@@ -237,7 +185,6 @@ class SprintCompleteOut(BaseModel):
 class ListEmailOut(BaseModel):
     address: Optional[str]
     configured: bool  # the server has an inbox to read from
-    enabled: bool  # the Email-to-List ClickApp is on in this Space
 
 
 # --- Doc, Whiteboard, Mind map, Chat, Embed -----------------------------------------------------

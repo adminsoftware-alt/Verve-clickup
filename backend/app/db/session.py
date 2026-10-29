@@ -113,3 +113,30 @@ def new_session() -> Session:
     get_engine()
     assert _session_factory is not None
     return _session_factory()
+
+
+# --- remembered reads ----------------------------------------------------------------------
+
+_MEMO_KEY = "memo"
+
+
+def memo(db: Session) -> dict:
+    """Reads worth keeping for the rest of this session (one request), such as the team tree that
+    several permission checks need. It is emptied whenever the session writes, commits or rolls
+    back, so nothing in it can be older than the last change this request made."""
+    return db.info.setdefault(_MEMO_KEY, {})
+
+
+def _forget(session: Session, *args) -> None:
+    session.info.pop(_MEMO_KEY, None)
+
+
+for _name in ("after_flush", "after_commit", "after_soft_rollback"):
+    event.listen(Session, _name, _forget)
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _forget_on_write(state) -> None:
+    # Bulk update()/delete() statements change rows without a flush.
+    if not state.is_select:
+        _forget(state.session)

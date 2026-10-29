@@ -11,8 +11,8 @@ const book = XLSX.read(template.slice(template.indexOf(',') + 1), { type: 'base6
 const headers = (sheet: string) => (XLSX.utils.sheet_to_json<string[]>(book.Sheets[sheet], { header: 1 })[0] ?? []) as string[];
 
 describe('the onboarding workbook', () => {
-  it('has Read me, Teams and People sheets', () => {
-    expect(book.SheetNames).toEqual(['Read me', 'Teams', 'People']);
+  it('has Read me, Teams and People sheets, an Example and the hidden Lists', () => {
+    expect(book.SheetNames).toEqual(['Read me', 'Teams', 'People', 'Example', 'Lists']);
   });
 
   it('maps every People column to an importer field', () => {
@@ -23,12 +23,24 @@ describe('the onboarding workbook', () => {
     const { rows, missing } = rowsFromSheet([record]);
     expect(missing).toEqual([]);
     expect(Object.keys(rows[0]).sort()).toEqual([
-      'date_of_birth', 'date_of_joining', 'department', 'designation', 'email', 'emergency_contact_name',
+      'address', 'date_of_birth', 'date_of_joining', 'department', 'designation', 'email', 'emergency_contact_name',
       'emergency_contact_phone', 'employee_code', 'employment_type', 'level', 'location',
       'manager_email', 'marriage_anniversary', 'name', 'phone', 'role', 'teams',
     ]);
     expect(rows[0].date_of_joining).toBe('2024-09-01'); // DD/MM/YYYY, as written in India
     expect(rows[0].level).toBe(4); // "L4" from the dropdown
+  });
+
+  it('reads the Example rows whole, address included', () => {
+    const example = XLSX.utils.sheet_to_json<Record<string, unknown>>(book.Sheets.Example, { defval: '', raw: true });
+    const { rows } = rowsFromSheet(example);
+    expect(rows).toHaveLength(3);
+    const priya = rows[1];
+    expect(priya).toMatchObject({
+      name: 'Priya Nair', email: 'priya.nair@verveadvisory.com', role: 'Employee', level: 5, employment_type: 'Full-time',
+      teams: 'Tax, GST', manager_email: 'anil.mehta@verveadvisory.com', date_of_joining: '2024-07-01', location: 'Mumbai',
+    });
+    expect(priya.address).toBe('B-7, Green Park Society\nAndheri East\nMumbai, Maharashtra - 400069\nIndia');
   });
 
   it('reads the Teams sheet', () => {

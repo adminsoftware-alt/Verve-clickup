@@ -59,6 +59,8 @@ class Standing:
             standing.my_teams.add(team_id)
             if is_lead:
                 standing.led_teams.add(team_id)
+        # The same rows Access.my_teams starts from, so it needn't read them again.
+        access.direct_teams = set(standing.my_teams)
         if standing.led_teams:
             standing.led_people = set(
                 db.scalars(select(TeamMember.user_id).where(TeamMember.team_id.in_(team_tree.descendants(db, standing.led_teams))))

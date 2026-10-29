@@ -74,6 +74,9 @@ export interface Dashboard extends DashboardSummary { filters: Filters; auto_ref
 export interface PersonBoard {
   user: UserRef; designation: string | null; department: string | null; teams: string[]; pending: boolean;
   open: number; overdue: number; due_today: number; dashboard_id: string | null;
+  /** This week in seconds: hours they can work, open work planned into them, hours logged so far.
+   *  Read separately (peopleWeek) and filled in once it arrives, so these start out missing. */
+  planned?: number; capacity?: number; logged?: number;
 }
 
 /** One task named in a highlight. */
@@ -153,6 +156,14 @@ export interface ReportRun {
   subject: string; error: string | null; created_at: string;
 }
 
+/** Filters someone with view-only access set for themselves: sent with each read, never saved. */
+export interface ViewLens {
+  filters?: Filters;
+  cards: Record<string, { filters?: Filters; period?: Period }>;
+  card_ids?: string[];
+}
+export const lensIsOn = (lens: ViewLens) => lens.filters !== undefined || Object.keys(lens.cards).length > 0;
+
 export const viewerTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const tz = () => ({ tz: viewerTimezone() });
 
@@ -174,6 +185,9 @@ export const dashApi = {
   data: (id: string) => request<CardData[]>('GET', `/dashboards/${id}/data`, undefined, tz()),
   /** Whose own Dashboards the viewer may open -- admins: everyone; Team leads: their people. */
   people: (workspaceId: string) => request<PersonBoard[]>('GET', `/workspaces/${workspaceId}/dashboards/people`, undefined, tz()),
+  /** This week's hours for the same people, by user id: slower to work out, so asked for after the list. */
+  peopleWeek: (workspaceId: string) =>
+    request<Record<string, { planned: number; capacity: number; logged: number }>>('GET', `/workspaces/${workspaceId}/dashboards/people/week`, undefined, tz()),
   /** Someone's own Dashboard, read-only, exactly as they see it; made now if they have never opened it. */
   personBoard: (workspaceId: string, userId: string) =>
     request<Dashboard>('GET', `/workspaces/${workspaceId}/people/${encodeURIComponent(userId)}/dashboard`),
@@ -188,6 +202,10 @@ export const dashApi = {
   removeCard: (id: string, cardId: string) => request('DELETE', `/dashboards/${id}/cards/${cardId}`),
   duplicateCard: (id: string, cardId: string) => request<Card>('POST', `/dashboards/${id}/cards/${cardId}/duplicate`),
   cardData: (id: string, cardId: string) => request<CardData>('GET', `/dashboards/${id}/cards/${cardId}/data`, undefined, tz()),
+  /** The cards (or the ones in card_ids) under a viewer's own unsaved filters. */
+  viewData: (id: string, lens: ViewLens) => request<CardData[]>('POST', `/dashboards/${id}/view-data`, lens, tz()),
+  viewTasks: (id: string, cardId: string, lens: ViewLens, segment?: string) =>
+    request<TaskPage>('POST', `/dashboards/${id}/cards/${cardId}/view-tasks`, lens, { ...tz(), segment }),
   cardTasks: (id: string, cardId: string, segment?: string) =>
     request<TaskPage>('GET', `/dashboards/${id}/cards/${cardId}/tasks`, undefined, { ...tz(), segment }),
 

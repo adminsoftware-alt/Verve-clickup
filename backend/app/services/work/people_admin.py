@@ -88,7 +88,9 @@ def import_people(db: Session, access: Access, data: s.PersonImportIn) -> s.Pers
     """Add (or update) many people at once. Managers may appear later in the same file.
 
     Everything runs in one transaction; a dry run rolls it back and just reports what would happen.
-    Rows with problems are skipped, the rest go ahead.
+    All-or-nothing (the default): if any row has a problem -- an error, or a Team or manager that is
+    not found -- or a Team on the Teams sheet cannot be made, nothing is saved at all. Otherwise rows
+    with problems are skipped and the rest go ahead.
     """
     _require_admin(access, "import people")
     teams = {t.name.lower(): t.id for t in db.scalars(select(Team).where(Team.workspace_id == access.workspace_id))}
@@ -193,7 +195,10 @@ def import_people(db: Session, access: Access, data: s.PersonImportIn) -> s.Pers
             membership.is_lead = word == "manager" and membership.team_id in row_teams.get(email, [])
         db.flush()
     email_problem = None
-    if data.dry_run:
+    warnings = sum(1 for r in results if r.outcome != "error" and r.problems)
+    clean = not team_problems and all(r.outcome != "error" and not r.problems for r in results)
+    saved = not data.dry_run and (clean or not data.all_or_nothing)
+    if not saved:
         outer.rollback()
     else:
         outer.commit()
@@ -210,7 +215,8 @@ def import_people(db: Session, access: Access, data: s.PersonImportIn) -> s.Pers
     added = sum(r.outcome == "added" for r in results)
     updated = sum(r.outcome == "updated" for r in results)
     return s.PersonImportResult(dry_run=data.dry_run, added=added, updated=updated, errors=sum(r.outcome == "error" for r in results),
-                          rows=results, email_problem=email_problem, teams_created=teams_created, team_problems=team_problems)
+                          rows=results, email_problem=email_problem, teams_created=teams_created, team_problems=team_problems,
+                          saved=saved, warnings=warnings)
 
 
 # --- offboarding --------------------------------------------------------------------------------------------
@@ -619,3 +625,38 @@ def remove_avatar(db: Session, access: Access, user_id: str) -> None:
             pass
         user.avatar_key = None
         db.flush()
+
+
+def hand_over(db: Session, access: Access, data: s.HandOverIn) -> s.HandOverResult:
+    """Move the open tasks of some people to one other person -- cover for leave, or a reshuffle.
+
+    An admin may do it for anyone; a Manager for the people of the Teams they lead, handing to one
+    of those people or to themselves. Each task still needs edit access, exactly as when it is
+    reassigned by hand: tasks the caller can't edit are left where they are and listed as skipped.
+    """
+    from app.services.work import bulk
+    from app.services.work.dashboards.access import Standing
+
+    standing = Standing.load(db, access)
+    if not standing.is_admin:
+        mine = set(standing.led_people) | {access.user_id}
+        if not standing.led_people:
+            raise Forbidden("Only admins and Managers can hand over someone's work")
+        if not set(data.from_ids) <= mine or data.to_id not in mine:
+            raise Forbidden("You can only hand over work between the people in your team")
+    if data.to_id in data.from_ids:
+        raise Invalid("Choose someone else to take the work over")
+    target = db.get(WorkspaceMember, (access.workspace_id, data.to_id))
+    if target is None or target.deactivated_at is not None:
+        raise Invalid("The person taking over must be an active member of the workspace")
+    moved: list = []
+    skipped: list = []
+    for user_id in data.from_ids:
+        ids = onboarding.open_task_ids(db, access.workspace_id, user_id)
+        for start in range(0, len(ids), 500):
+            out = bulk.bulk_edit(db, access.user_id, s.BulkEdit(
+                task_ids=ids[start:start + 500], add_assignees=[data.to_id], remove_assignees=[user_id]))
+            moved += out.updated
+            skipped += out.skipped
+    return s.HandOverResult(moved=len(set(moved)), skipped=skipped)
+

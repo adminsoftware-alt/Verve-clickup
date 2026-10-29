@@ -96,13 +96,13 @@ export const ChatView: React.FC<{
             </div>
             <span className="flex shrink-0 items-start gap-0.5 opacity-0 group-hover:opacity-100">
               {!m.task_id && canPost && (
-                <button type="button" title="Make it a task" aria-label="Make it a task" onClick={() => makeTask(m)} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><CheckSquare size={13} /></button>
+                <button type="button" aria-label="Make it a task" onClick={() => makeTask(m)} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><CheckSquare size={13} /></button>
               )}
               {m.mine && (
-                <button type="button" title="Edit" aria-label="Edit message" onClick={() => { setEditing(m.id); setDraft(m.body); box.current?.focus(); }} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Pencil size={13} /></button>
+                <button type="button" aria-label="Edit message" onClick={() => { setEditing(m.id); setDraft(m.body); box.current?.focus(); }} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Pencil size={13} /></button>
               )}
               {(m.mine || canManage) && (
-                <button type="button" title="Delete" aria-label="Delete message" onClick={async () => { if (await ask.confirm({ danger: true, title: 'Delete this message?' })) spacesApi.deleteChat(m.id).then(load); }}
+                <button type="button" aria-label="Delete message" onClick={async () => { if (await ask.confirm({ danger: true, title: 'Delete this message?' })) spacesApi.deleteChat(m.id).then(load); }}
                   className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={13} /></button>
               )}
             </span>

@@ -218,6 +218,8 @@ class PersonImportRow(BaseModel):
     date_of_birth: Optional[date] = None
     marriage_anniversary: Optional[date] = None
     location: Optional[ShortText] = None
+    # The whole address as the app keeps it: lines, then "City, State Pincode", then the country.
+    address: Optional[Address] = None
     # Words, as typed in the sheet: matched to EMPLOYMENT_TYPES ignoring case.
     employment_type: Optional[ShortText] = None
     emergency_contact_name: Optional[ContactName] = None
@@ -241,6 +243,9 @@ class PersonImportIn(BaseModel):
     start_joiner_checklist: bool = False
     # Existing people in the file: update their profile, or leave them as they are.
     update_existing: bool = True
+    # The whole file or none of it: one row with a problem -- an unknown Team, a manager who is not
+    # there, a bad access word -- and nothing is saved, so the firm is never left half imported.
+    all_or_nothing: bool = True
 
 
 class PersonImportRowResult(BaseModel):
@@ -259,6 +264,11 @@ class PersonImportResult(BaseModel):
     email_problem: Optional[str] = None
     teams_created: List[str] = Field(default_factory=list)
     team_problems: List[str] = Field(default_factory=list)
+    # False when nothing was saved: a dry run, or an all-or-nothing import that found problems.
+    saved: bool = False
+    # Rows that would go in but carry a warning (a Team or manager not found), counted with errors
+    # when the import is all-or-nothing.
+    warnings: int = 0
 
 
 class OffboardPreview(BaseModel):
@@ -368,29 +378,19 @@ class LocationUpdate(BaseModel):
 class SpaceCreate(LocationCreate):
     description: Optional[str] = Field(default=None, max_length=5000)
     icon: Optional[str] = Field(default=None, max_length=64)
-    # Step two of ClickUp's Create a Space ("Define your workflow"). Left out, a Space gets the
-    # defaults: To do / In progress / Complete, the required views, and every ClickApp's default.
+    # The rest of the one-step Create Space. Left out, a Space gets the default statuses:
+    # To do / In progress / Complete.
     default_permission: Optional[PermissionLevel] = None
     statuses: Optional[List["StatusIn"]] = Field(default=None, min_length=2, max_length=50)
-    views: Optional[List[ViewType]] = Field(default=None, max_length=12, description="Views added after the required ones")
-    clickapps: Optional[Dict["ClickAppName", bool]] = None
 
 
 TaskPrefix = Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=10, pattern=r"^[A-Za-z0-9]+$")]
-
-
-ClickAppName = Literal[
-    "priorities", "tags", "time_tracking", "time_estimates", "custom_task_ids", "multiple_assignees",
-    "sprint_points", "multiple_lists", "email_to_list", "custom_fields",
-]
 
 
 class SpaceUpdate(LocationUpdate):
     description: Optional[str] = Field(default=None, max_length=5000)
     icon: Optional[str] = Field(default=None, max_length=64)
     task_prefix: Optional[TaskPrefix] = None
-    clickapps: Optional[Dict[ClickAppName, bool]] = None
-    discoverable: Optional[bool] = None
     default_permission: Optional[PermissionLevel] = None
 
 
@@ -446,8 +446,6 @@ class SpaceOut(LocationOut):
     description: Optional[str]
     icon: Optional[str]
     task_prefix: Optional[str] = None
-    clickapps: Dict[str, bool] = Field(default_factory=dict)
-    discoverable: bool = False
     default_permission: Optional[PermissionLevel] = None
 
 
@@ -517,8 +515,6 @@ class SpaceNode(BaseModel):
     archived: bool
     orderindex: float
     permission_level: PermissionLevel
-    hidden: bool = False  # left by the caller: kept out of their sidebar
-    clickapps: Dict[str, bool] = Field(default_factory=dict)
     folders: List[FolderNode] = []
     lists: List[ListNode] = []
 
@@ -538,21 +534,12 @@ class SharedWithMe(BaseModel):
     tasks: List[SharedTaskRef] = []
 
 
-class SidebarSectionOut(BaseModel):
-    id: uuid.UUID
-    name: str
-    orderindex: float
-    space_ids: List[uuid.UUID]
-    collapsed: bool
-
-
 class HierarchyOut(BaseModel):
     workspace_id: uuid.UUID
     role: WorkspaceRole
     spaces: List[SpaceNode]
     shared_with_me: SharedWithMe
     personal_list: Optional[ListNode] = None
-    sections: List[SidebarSectionOut] = []
 
 
 # --- statuses ----------------------------------------------------------------
@@ -1038,6 +1025,18 @@ class TemplateApplied(BaseModel):
     list_id: Optional[uuid.UUID] = None
 
 
+class HandOverIn(BaseModel):
+    """Whose open tasks move, and to whom."""
+
+    from_ids: List[str] = Field(min_length=1, max_length=100)
+    to_id: str
+
+
+class HandOverResult(BaseModel):
+    moved: int
+    skipped: List["BulkSkip"] = Field(default_factory=list)
+
+
 class BulkEdit(_DatesMixin):
     """One change applied to many tasks. Only fields present are changed; null clears
     priority, dates or group. Status is by name, since Lists can have different statuses."""
@@ -1472,3 +1471,5 @@ class RunningTimerOut(BaseModel):
 TaskDetailOut.model_rebuild()
 
 FormFieldOut.model_rebuild()
+
+HandOverResult.model_rebuild()

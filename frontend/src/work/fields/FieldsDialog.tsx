@@ -17,13 +17,13 @@ const OptionsEditor: React.FC<{ options: FieldOption[]; onChange: (o: FieldOptio
     <p className="mb-1 text-xs font-medium text-gray-600">Options</p>
     {options.map((o, i) => (
       <div key={o.id || i} className="mb-1 flex items-center gap-2">
-        <label className="relative h-4 w-4 shrink-0 cursor-pointer rounded-full" style={{ backgroundColor: o.color }} title="Colour">
+        <label className="relative h-4 w-4 shrink-0 cursor-pointer rounded-full" style={{ backgroundColor: o.color }} aria-label="Colour">
           <input type="color" value={o.color} onChange={(e) => onChange(options.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)))} className="absolute inset-0 opacity-0" aria-label={`Colour of ${o.name || 'option'}`} />
         </label>
         <input value={o.name} placeholder={`Option ${i + 1}`} aria-label="Option name" autoFocus={!o.name}
           onChange={(e) => onChange(options.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
           className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1 text-sm" />
-        <button type="button" title="Remove option" onClick={() => onChange(options.filter((_, j) => j !== i))} className="text-gray-300 hover:text-red-600"><Trash2 size={13} /></button>
+        <button type="button" aria-label="Remove option" onClick={() => onChange(options.filter((_, j) => j !== i))} className="text-gray-300 hover:text-red-600"><Trash2 size={13} /></button>
       </div>
     ))}
     <button type="button" onClick={() => onChange([...options, { id: '', name: '', color: SWATCHES[options.length % SWATCHES.length] }])}
@@ -78,9 +78,9 @@ export const FieldsDialog: React.FC<{
         <div role="dialog" aria-label="Custom fields" onMouseDown={(e) => e.stopPropagation()}
           className="flex max-h-[85vh] w-[34rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl bg-white p-5 shadow-xl">
           <div className="mb-3 flex items-center gap-2">
-            {draft && <button aria-label="Back" type="button" title="Back" onClick={() => setDraft(null)} className="rounded p-1 text-gray-400 hover:bg-gray-100"><ArrowLeft size={16} /></button>}
+            {draft && <button aria-label="Back" type="button" onClick={() => setDraft(null)} className="rounded p-1 text-gray-400 hover:bg-gray-100"><ArrowLeft size={16} /></button>}
             <h3 className="font-semibold text-gray-900">{draft ? (draft.id ? `Edit ${draft.name}` : 'New custom field') : `Custom fields · ${name}`}</h3>
-            <button aria-label="Close" type="button" title="Close" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            <button aria-label="Close" type="button" onClick={onClose} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
           </div>
           {error && <p className="mb-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
@@ -162,8 +162,8 @@ export const FieldsDialog: React.FC<{
                       </span>
                       {canEdit && (
                         <>
-                          <button aria-label={`Edit ${f.name}`} type="button" title={`Edit ${f.name}`} onClick={() => setDraft({ id: f.id, name: f.name, type: f.type, config: f.config })} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Pencil size={13} /></button>
-                          <button type="button" title={`Delete ${f.name}`} onClick={() => remove(f)} className="rounded p-1 text-gray-300 hover:bg-gray-100 hover:text-red-600"><Trash2 size={13} /></button>
+                          <button aria-label={`Edit ${f.name}`} type="button" onClick={() => setDraft({ id: f.id, name: f.name, type: f.type, config: f.config })} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Pencil size={13} /></button>
+                          <button type="button" aria-label={`Delete ${f.name}`} onClick={() => remove(f)} className="rounded p-1 text-gray-300 hover:bg-gray-100 hover:text-red-600"><Trash2 size={13} /></button>
                         </>
                       )}
                     </li>

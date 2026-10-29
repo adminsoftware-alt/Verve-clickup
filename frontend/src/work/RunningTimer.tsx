@@ -1,15 +1,16 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Square } from 'lucide-react';
 import { useAuth } from '../components/AuthContext';
-import { workApi, type RunningTimer } from './api';
+import { workApi, type RunningTimer, type UserRef } from './api';
 import { notify } from '../components/notify';
 
 interface TimerContextValue {
   timer: RunningTimer | null;
   /** Bumps whenever a timer starts or stops, so views can refresh their totals. */
   version: number;
-  start: (taskId: string) => Promise<void>;
+  /** Pass the task's name and List where they are known, and the header shows the timer at once. */
+  start: (taskId: string, task?: { name: string; list_id: string }) => Promise<void>;
   stop: () => Promise<void>;
 }
 
@@ -50,16 +51,44 @@ export const RunningTimerProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   useEffect(() => { if (user) refresh(); }, [user, refresh]);
 
-  const start = useCallback(async (taskId: string) => {
-    await workApi.startTimer(taskId);
-    await refresh();
-    setVersion((v) => v + 1);
-  }, [refresh]);
+  const current = useRef(timer);
+  current.current = timer;
+
+  // Starting and stopping show at once; the server is a long way off, and a click that waited
+  // for two round trips before anything moved felt broken. A refusal puts things back and says why.
+  const start = useCallback(async (taskId: string, task?: { name: string; list_id: string }) => {
+    const before = current.current;
+    if (task) {
+      setTimer({
+        entry: {
+          id: 'starting', task_id: taskId, user: { id: user?.uid ?? '' } as UserRef, started_at: new Date().toISOString(),
+          ended_at: null, duration_seconds: null, running: true, description: null, billable: false,
+        },
+        task_name: task.name, list_id: task.list_id,
+      });
+    }
+    try {
+      const entry = await workApi.startTimer(taskId);
+      // The server's own start time, so the clock agrees with the timesheet.
+      if (task) setTimer({ entry, task_name: task.name, list_id: task.list_id });
+      else await refresh();
+      setVersion((v) => v + 1);
+    } catch (e) {
+      setTimer(before);
+      throw e;
+    }
+  }, [refresh, user]);
 
   const stop = useCallback(async () => {
-    await workApi.stopTimer();
+    const before = current.current;
     setTimer(null);
-    setVersion((v) => v + 1);
+    try {
+      await workApi.stopTimer();
+      setVersion((v) => v + 1);
+    } catch (e) {
+      setTimer(before);
+      throw e;
+    }
   }, []);
 
   const value = useMemo(() => ({ timer, version, start, stop }), [timer, version, start, stop]);
@@ -73,19 +102,21 @@ export const RunningTimerChip: React.FC = () => {
   if (!timer) return null;
   const elapsed = (now - new Date(timer.entry.started_at).getTime()) / 1000;
   return (
-    <div className="fresh-label flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-[#D9E1EF] bg-white py-1 pl-3 pr-1 text-[13px] shadow-[0_1px_2px_rgba(16,24,40,0.06)]">
+    // Compact: the dot, the clock (which goes to the task's List) and stop. The task's name joins
+    // them only on a wide screen, where there is room for it without crowding the bar.
+    <div className="fresh-label flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-[#D9E1EF] bg-white py-0.5 pl-2.5 pr-0.5 text-xs shadow-[0_1px_2px_rgba(16,24,40,0.06)]">
       {/* Recording: a red dot that breathes while the clock runs. */}
-      <span className="relative flex h-2 w-2 shrink-0">
+      <span className="relative flex h-1.5 w-1.5 shrink-0">
         <span className="absolute inset-0 animate-ping rounded-full bg-red-400 opacity-60" />
-        <span className="relative h-2 w-2 rounded-full bg-red-500" />
+        <span className="relative h-1.5 w-1.5 rounded-full bg-red-500" />
       </span>
-      <Link to={`/l/${timer.list_id}`} className="max-w-[9rem] truncate font-medium text-[#1B2A4A] no-underline hover:underline xl:max-w-[12rem]">
-        {timer.task_name}
+      <Link to={`/l/${timer.list_id}`} aria-label={`Timer on ${timer.task_name}`} className="flex min-w-0 items-center gap-1.5 text-[#1B2A4A] no-underline">
+        <span className="hidden max-w-[10rem] truncate font-medium 2xl:block">{timer.task_name}</span>
+        <span className="font-semibold tabular-nums text-[#234788]">{formatClock(elapsed)}</span>
       </Link>
-      <span className="font-semibold tabular-nums text-[#234788]">{formatClock(elapsed)}</span>
       <button aria-label="Stop timer" type="button" onClick={() => stop().catch((e) => notify.error(e))}
-        className="flex h-7 w-7 items-center justify-center rounded-full bg-red-50 text-red-600 ring-1 ring-red-200 hover:bg-red-100">
-        <Square size={10} fill="currentColor" />
+        className="flex h-6 w-6 items-center justify-center rounded-full bg-red-50 text-red-600 ring-1 ring-red-200 hover:bg-red-100">
+        <Square size={8} fill="currentColor" />
       </button>
     </div>
   );

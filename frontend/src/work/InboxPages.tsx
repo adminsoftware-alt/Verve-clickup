@@ -14,6 +14,7 @@ import { ReminderDialog } from './task/TaskActions';
 import { Composer, sendCommentFiles, type ComposerOutput } from './task/TaskFeed';
 import { notify } from '../components/notify';
 import { useBellStyle } from '../components/bellStyle';
+import { chimeForNewNotification } from '../components/alertSound';
 import { TwoStepFilter, type FilterField } from './views/TwoStepFilter';
 import { FEATURES } from '../config/features';
 import { LinesSkeleton } from './Skeleton';
@@ -73,8 +74,6 @@ function describe(item: InboxItem): string {
       return d.action === 'joined' ? `${d.person} joined your team ${d.team}`
         : d.action === 'offboarded' ? `${d.person} left the firm and your team ${d.team}`
         : `${d.person} left your team ${d.team}`;
-    case 'space_join_request': return `asked to join the ${d.space} Space${d.message ? `: “${d.message}”` : ''}`;
-    case 'space_join_decision': return d.status === 'approved' ? `let you into the ${d.space} Space` : `declined your request to join ${d.space}`;
     case 'chat_mention': return `mentioned you in ${d.view ?? 'a chat'}: “${d.body ?? ''}”`;
     case 'shared': {
       const what = d.what === 'list' ? 'List' : d.what === 'space' ? 'Space' : d.what === 'folder' ? 'Folder' : 'task';
@@ -235,8 +234,6 @@ export const InboxPage: React.FC = () => {
     else if (item.kind === 'team_change' && item.data.team_id) navigate(`/people/teams/${item.data.team_id}`);
     else if (item.task) { setFocusComment(item.comment?.id ?? null); setOpenTask(item.task.id); }
     else if (item.kind === 'timesheet_reminder') navigate('/timesheets');
-    else if (item.kind === 'space_join_request') navigate('/all-spaces');
-    else if (item.kind === 'space_join_decision' && item.data.space_id) navigate(`/s/${item.data.space_id}`);
     else if (item.kind === 'shared' && item.data.id) {
       // Open the very thing that was shared.
       const seg = item.data.what === 'space' ? 's' : item.data.what === 'folder' ? 'f' : 'l';
@@ -271,11 +268,11 @@ export const InboxPage: React.FC = () => {
       {workspace && tab !== 'cleared' && (
         // On a phone the two bulk actions are icons: their labels are half the header.
         <>
-          <button type="button" title="Mark all read" aria-label="Mark all read" onClick={() => collabApi.readAll(workspace.id, tab).then(load).then(inboxChanged)} className="tap flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><CheckCheck size={14} /> <span className="hidden sm:inline">Mark all read</span></button>
-          <button type="button" title="Clear all" aria-label="Clear all" onClick={() => collabApi.clearAll(workspace.id, tab).then(load).then(inboxChanged)} className="tap flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><Archive size={14} /> <span className="hidden sm:inline">Clear all</span></button>
+          <button type="button" aria-label="Mark all read" onClick={() => collabApi.readAll(workspace.id, tab).then(load).then(inboxChanged)} className="tap flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><CheckCheck size={14} /> <span className="hidden sm:inline">Mark all read</span></button>
+          <button type="button" aria-label="Clear all" onClick={() => collabApi.clearAll(workspace.id, tab).then(load).then(inboxChanged)} className="tap flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-sm text-gray-700 hover:bg-gray-50"><Archive size={14} /> <span className="hidden sm:inline">Clear all</span></button>
         </>
       )}
-      <button aria-label="Notification settings" type="button" title="Notification settings" onClick={() => setSettings(true)} className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><Settings size={16} /></button>
+      <button aria-label="Notification settings" type="button" onClick={() => setSettings(true)} className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100"><Settings size={16} /></button>
     </>}>
       <nav className="scroll-x flex gap-5 border-b border-gray-200 bg-white px-4 sm:px-6" aria-label="Inbox tabs">
         {TABS.map((t) => (
@@ -312,7 +309,7 @@ export const InboxPage: React.FC = () => {
                     {item.task.status && <StatusDot status={item.task.status} size={11} />}
                     <span className="min-w-0 break-words sm:truncate">{item.task.name}</span>
                     {item.task.priority ? (
-                      <span title={PRIORITIES[item.task.priority]?.label} className="shrink-0"><PriorityFlag priority={item.task.priority} withLabel={false} /></span>
+                      <span aria-label={PRIORITIES[item.task.priority]?.label} className="shrink-0"><PriorityFlag priority={item.task.priority} withLabel={false} /></span>
                     ) : null}
                     {item.task.due_date && (
                       <span className={`shrink-0 rounded px-1.5 text-[11px] font-normal ${new Date(item.task.due_date) < new Date() ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-500'}`}>
@@ -371,10 +368,10 @@ export const InboxPage: React.FC = () => {
                 />
               ) : (
                 <span className="flex shrink-0 items-center gap-0.5 opacity-60 group-hover:opacity-100">
-                  <button aria-label={item.read ? 'Mark unread' : 'Mark read'} type="button" title={item.read ? 'Mark unread' : 'Mark read'} onClick={() => act(item.id, { read: !item.read })} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Check size={14} /></button>
-                  {tab !== 'cleared' && <button aria-label="Snooze" type="button" title="Snooze" onClick={() => setSnoozing(snoozing === item.id ? null : item.id)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Clock size={14} /></button>}
-                  {tab === 'later' && item.snoozed_until && <button aria-label="Wake now" type="button" title="Wake now" onClick={() => act(item.id, { unsnooze: true })} className="rounded p-1 text-gray-500 hover:bg-gray-100"><BellOff size={14} /></button>}
-                  <button type="button" title={item.cleared ? 'Restore' : 'Clear'} onClick={() => act(item.id, { cleared: !item.cleared })} className="rounded p-1 text-gray-500 hover:bg-gray-100">{item.cleared ? <InboxIcon size={14} /> : <X size={14} />}</button>
+                  <button aria-label={item.read ? 'Mark unread' : 'Mark read'} type="button" onClick={() => act(item.id, { read: !item.read })} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Check size={14} /></button>
+                  {tab !== 'cleared' && <button aria-label="Snooze" type="button" onClick={() => setSnoozing(snoozing === item.id ? null : item.id)} className="rounded p-1 text-gray-500 hover:bg-gray-100"><Clock size={14} /></button>}
+                  {tab === 'later' && item.snoozed_until && <button aria-label="Wake now" type="button" onClick={() => act(item.id, { unsnooze: true })} className="rounded p-1 text-gray-500 hover:bg-gray-100"><BellOff size={14} /></button>}
+                  <button type="button" aria-label={item.cleared ? 'Restore' : 'Clear'} onClick={() => act(item.id, { cleared: !item.cleared })} className="rounded p-1 text-gray-500 hover:bg-gray-100">{item.cleared ? <InboxIcon size={14} /> : <X size={14} />}</button>
                 </span>
               )}
               {snoozing === item.id && (
@@ -400,7 +397,7 @@ const NotificationSettings: React.FC<{ onClose: () => void }> = ({ onClose }) =>
       <div role="dialog" aria-label="Notification settings" onMouseDown={(e) => e.stopPropagation()} className="max-h-[90vh] w-[30rem] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl bg-white p-5 shadow-xl">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-semibold text-gray-900">Notification settings</h3>
-          <button aria-label="Close" type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+          <button aria-label="Close" type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
         </div>
         <NotificationSettingsPanel />
       </div>
@@ -550,7 +547,7 @@ export const RemindersPage: React.FC = () => {
               <span className={`shrink-0 text-xs ${due && !r.done ? 'font-medium text-red-600' : 'text-gray-500'}`}>
                 {new Date(r.remind_at).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
               </span>
-              <button type="button" title="Delete reminder" onClick={() => workspace && collabApi.deleteReminder(workspace.id, r.id).then(load)} className="text-gray-300 hover:text-red-600"><Trash2 size={14} /></button>
+              <button type="button" aria-label="Delete reminder" onClick={() => workspace && collabApi.deleteReminder(workspace.id, r.id).then(load)} className="text-gray-300 hover:text-red-600"><Trash2 size={14} /></button>
             </li>
           );
         })}
@@ -608,6 +605,7 @@ export const HeaderInboxBell: React.FC = () => {
   const [ringing, setRinging] = useState(false);
   const stop = useRef<number | undefined>(undefined);
   const count = useInboxCount(() => {
+    chimeForNewNotification();
     // Off and on again, so a second arrival while it is still ringing rings it afresh.
     setRinging(false);
     window.clearTimeout(stop.current);

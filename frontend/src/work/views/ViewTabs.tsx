@@ -55,7 +55,7 @@ export const ViewTabs: React.FC<{
           type="button"
           role="tab"
           aria-selected={on}
-          title={v.hint}
+          aria-label={v.hint}
           onClick={() => onChange(v.key)}
           // One colour for every tab: blue for the one you are in, grey for the rest.
           className={`-mb-px flex items-center gap-1.5 border-b-2 px-2.5 py-2 text-sm transition-colors ${

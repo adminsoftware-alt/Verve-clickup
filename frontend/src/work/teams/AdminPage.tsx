@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ChevronLeft, ChevronRight, Clock, FileSpreadsheet, History, ListChecks, RotateCcw, Save, ShieldBan, ShieldCheck, Trash2,
+  ChevronLeft, ChevronRight, Clock, LayoutGrid, FileSpreadsheet, History, ListChecks, RotateCcw, Save, ShieldBan, ShieldCheck, Trash2,
   UserMinus, UserPlus, Wallet, X,
 } from 'lucide-react';
 import { Avatar, Portal } from '../ui';
 import { DrawInPlace } from './inlineDialog';
-import { peopleApi, type AuditEvent, type BlockedEmail, type JoinerPlan, type JoinerRule, type Person, type TeamFull } from './peopleApi';
+import { peopleApi, personName, type AuditEvent, type BlockedEmail, type JoinerPlan, type JoinerRule, type Person, type TeamFull } from './peopleApi';
 import { HubContext, useHub, type Hub } from './TeamsHub';
 import { useMe, useWork } from '../WorkContext';
 import type { Role } from '../api';
@@ -18,6 +18,7 @@ import { WorkingHoursSection } from './WorkingHours';
 import { ask } from '../../components/ask';
 import { FEATURES } from '../../config/features';
 import { LinesSkeleton } from '../Skeleton';
+import { currentReviewMonth, reviewApi, reviewMonthName } from '../review/MonthlyReview';
 
 const card = 'rounded-xl border border-gray-200 bg-white p-5';
 const input = 'rounded-md border border-gray-300 px-2 py-1.5 text-sm';
@@ -125,12 +126,241 @@ const options = (): Option[] => [
 
 // --- the full window -----------------------------------------------------------------------------------------
 
+/** What one option shows, wherever it is opened. */
+const OptionBody: React.FC<{ action: Action; onBack: () => void }> = ({ action, onBack }) => {
+  const { ws, people, teams, me, roles, reload } = useHub();
+  return (
+    <DrawInPlace.Provider value>
+      <InWindow.Provider value>
+        {action === 'add' && <AddPersonDialog ws={ws} people={people} teams={teams} roles={roles} onClose={onBack} onDone={() => { reload(); }} />}
+        {action === 'import' && <ImportPeopleDialog ws={ws} onClose={onBack} onDone={() => { reload(); }} />}
+        {action === 'remove' && <RemovePersonSection ws={ws} people={people} teams={teams} me={me} onChanged={reload} />}
+        {action === 'hours' && <WorkingHoursSection ws={ws} />}
+        {action === 'costs' && <RunningCosts ws={ws} />}
+        {action === 'audit' && <AuditSection ws={ws} />}
+        {action === 'blocked' && <BlockedSection ws={ws} />}
+        {action === 'joiner' && <JoinerPlanSection ws={ws} />}
+      </InWindow.Provider>
+    </DrawInPlace.Provider>
+  );
+};
+
+/** The firm in a few figures, read off the people and Teams already loaded. */
+function useFirm() {
+  const { people, teams } = useHub();
+  const active = people.filter((p) => !p.deactivated_at);
+  const managers = new Set(teams.flatMap((t) => t.lead_ids));
+  return {
+    people: active.length,
+    admins: active.filter((p) => p.role === 'owner' || p.role === 'admin').length,
+    managers: active.filter((p) => managers.has(p.user.id)).length,
+    pending: active.filter((p) => p.pending).length,
+    teams: teams.length,
+    left: people.length - active.length,
+  };
+}
+
+/** A small tile in the option's own colour, as everywhere else. */
+const Tile: React.FC<{ o: Option; size?: number }> = ({ o, size = 34 }) => (
+  <span className={`flex shrink-0 items-center justify-center rounded-lg ${TONES[o.tone].chip}`} style={{ width: size, height: size }}>
+    <o.Icon size={Math.round(size * 0.5)} />
+  </span>
+);
+
+const useEsc = (fn: () => void) => useEffect(() => {
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') fn(); };
+  document.addEventListener('keydown', onKey);
+  return () => document.removeEventListener('keydown', onKey);
+}, [fn]);
+
+// --- the console: one window, a navy menu down the left, an overview first ----------------------------
+
+/** "3 minutes ago", "yesterday", "12 Oct": how long ago, as people say it. */
+const ago = (iso: string) => {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} h ago`;
+  if (hrs < 48) return 'yesterday';
+  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+};
+
+/** The Overview: the firm in figures, what needs an admin, the latest changes, and every option. */
+const Overview: React.FC<{ go: (a: Action) => void }> = ({ go }) => {
+  const { ws, people, teams } = useHub();
+  const firm = useFirm();
+  const [recent, setRecent] = useState<AuditEvent[] | null>(null);
+  useEffect(() => { if (ws) peopleApi.audit(ws, { limit: 6 }).then(setRecent).catch(() => setRecent([])); }, [ws]);
+  // This month's review across the firm: how many have marked it done on the PMS.
+  const reviewMonth = currentReviewMonth();
+  const [reviews, setReviews] = useState<{ user_id: string; completed_at: string | null }[] | null>(null);
+  useEffect(() => { if (ws) reviewApi.team(ws, reviewMonth).then(setReviews).catch(() => setReviews([])); }, [ws, reviewMonth]);
+  const reviewsDone = reviews?.filter((r) => r.completed_at).length ?? 0;
+  const reviewsLeft = reviews ? reviews.length - reviewsDone : 0;
+  const pending = people.filter((p) => !p.deactivated_at && p.pending);
+  const leaderless = teams.filter((t) => t.lead_ids.length === 0);
+  const empty = teams.filter((t) => (t.all_member_ids?.length ?? t.members.length) === 0);
+  const figures: [string, number][] = [['People', firm.people], ['Admins', firm.admins], ['Managers', firm.managers], ['Teams', firm.teams], ['Invites pending', firm.pending]];
+  const reviewLabel = `${reviewMonthName(reviewMonth)} reviews done`;
+  const attention = [
+    pending.length > 0 && { text: <><b className="font-semibold text-gray-900">{pending.length} {pending.length === 1 ? 'person has' : 'people have'}</b> not signed in yet: {pending.slice(0, 3).map(personName).join(', ')}{pending.length > 3 ? ` and ${pending.length - 3} more` : ''}.</>, tone: 'bg-amber-500' },
+    leaderless.length > 0 && { text: <><b className="font-semibold text-gray-900">{leaderless.length} {leaderless.length === 1 ? 'team has' : 'teams have'}</b> no lead: {leaderless.map((t) => t.name).join(', ')}.</>, tone: 'bg-amber-500' },
+    empty.length > 0 && { text: <><b className="font-semibold text-gray-900">{empty.length} {empty.length === 1 ? 'team is' : 'teams are'}</b> empty: {empty.map((t) => t.name).join(', ')}.</>, tone: 'bg-gray-400' },
+    reviewsLeft > 0 && { text: <><b className="font-semibold text-gray-900">{reviewsLeft} {reviewsLeft === 1 ? 'person has' : 'people have'}</b> not marked their {reviewMonthName(reviewMonth)} review done. My team lists them, with Remind.</>, tone: 'bg-amber-500' },
+  ].filter(Boolean) as { text: React.ReactNode; tone: string }[];
+  const panel = 'rounded-xl border border-[#E4E8F0] bg-white';
+  const head = (text: string, action?: React.ReactNode) => (
+    <div className="flex items-center justify-between border-b border-[#EEF1F5] px-4 py-2.5">
+      <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">{text}</h3>{action}
+    </div>
+  );
+  return (
+    <div className="mx-auto max-w-5xl space-y-5">
+      <dl className={`${panel} grid grid-cols-2 sm:grid-cols-6`}>
+        {figures.map(([label, n], i) => (
+          <div key={label} className={`px-5 py-4 ${i ? 'sm:border-l sm:border-[#EEF1F5]' : ''}`}>
+            <dd className={`font-display text-[26px] font-bold leading-none tabular-nums ${label === 'Invites pending' && n ? 'text-amber-700' : 'text-[#142B57]'}`}>{n}</dd>
+            <dt className="mt-1.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-gray-500">{label}</dt>
+          </div>
+        ))}
+        <div className="px-5 py-4 sm:border-l sm:border-[#EEF1F5]">
+          <dd className="font-display text-[26px] font-bold leading-none tabular-nums text-[#142B57]">{reviews ? <>{reviewsDone}<span className="text-[15px] font-semibold text-gray-400"> / {reviews.length}</span></> : '…'}</dd>
+          <dt className="mt-1.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-gray-500">{reviewLabel}</dt>
+        </div>
+      </dl>
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <section className={panel} aria-label="Needs attention">
+          {head('Needs attention')}
+          {attention.length === 0
+            ? <p className="px-4 py-6 text-center text-[13px] text-gray-400">Nothing needs an admin right now.</p>
+            : (
+              <ul className="divide-y divide-[#EEF1F5]">
+                {attention.map((a, i) => (
+                  <li key={i} className="flex items-start gap-2.5 px-4 py-3 text-[13px] leading-relaxed text-gray-600">
+                    <span className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${a.tone}`} aria-hidden />{a.text}
+                  </li>
+                ))}
+              </ul>
+            )}
+        </section>
+        <section className={panel} aria-label="Recent changes">
+          {head('Recent changes', <button type="button" onClick={() => go('audit')} className="text-[12px] font-semibold text-[#234788] hover:underline">View all</button>)}
+          {!recent ? <div className="p-4"><LinesSkeleton /></div>
+            : recent.length === 0 ? <p className="px-4 py-6 text-center text-[13px] text-gray-400">No changes yet.</p>
+              : (
+                <ul className="divide-y divide-[#EEF1F5]">
+                  {recent.map((e) => (
+                    <li key={e.id} className="flex items-center gap-2.5 px-4 py-2.5">
+                      {e.actor ? <Avatar user={e.actor} size={24} /> : <span className="h-6 w-6 rounded-full bg-gray-100" />}
+                      <span className="min-w-0 flex-1 truncate text-[13px] text-gray-600">
+                        <b className="font-semibold text-gray-900">{e.actor?.display_name || e.actor?.email || 'Someone'}</b> {e.verb}{e.target_label ? <> <b className="font-medium text-gray-800">{e.target_label}</b></> : null}
+                      </span>
+                      <span className="shrink-0 text-[11.5px] tabular-nums text-gray-400">{ago(e.created_at)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+        </section>
+      </div>
+
+      <section className={panel} aria-label="All options">
+        {head('All options')}
+        <div className="grid sm:grid-cols-2">
+          {options().map((o, i) => (
+            <button key={o.key} type="button" onClick={() => go(o.key)}
+              className={`group/opt flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[#F7F9FC] ${i > 1 ? 'border-t border-[#EEF1F5]' : i === 1 ? 'border-t border-[#EEF1F5] sm:border-t-0' : ''} ${i % 2 ? 'sm:border-l sm:border-[#EEF1F5]' : ''}`}>
+              <Tile o={o} size={32} />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13.5px] font-semibold text-[#142B57]">{o.title}</span>
+                <span className="block truncate text-[12px] text-gray-500">{o.line}</span>
+              </span>
+              <ChevronRight size={15} className="shrink-0 text-gray-300 group-hover/opt:text-[#234788]" />
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+};
+
+const AdminConsole: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [at, setAt] = useState<Action | 'overview'>('overview');
+  const { workspace } = useWork();
+  useEsc(onClose);
+  const current = at === 'overview' ? null : options().find((o) => o.key === at)!;
+  /** One row of the navy menu: the active one lifted in a lighter navy with a thin sky edge. */
+  const row = (on: boolean) => `relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium transition-colors ${
+    on ? 'bg-white/[0.12] text-white' : 'text-white/70 hover:bg-white/[0.06] hover:text-white'}`;
+  const edge = (on: boolean) => on && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-[#A9C1E8]" aria-hidden />;
+  return (
+    <Portal>
+      <div className="admin-fade fixed inset-0 z-[125] bg-gray-900/45 backdrop-blur-sm" onMouseDown={onClose} />
+      <div role="dialog" aria-modal="true" aria-label="Admin"
+        className="admin-grow fixed inset-2 z-[126] flex overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 sm:inset-6 lg:inset-x-[max(1.5rem,calc((100vw-84rem)/2))]">
+        <aside className="hidden w-64 shrink-0 flex-col bg-[#142B57] md:flex">
+          <div className="flex items-center gap-3 px-5 pb-5 pt-6">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-white ring-1 ring-white/15"><ShieldCheck size={19} /></span>
+            <div className="min-w-0">
+              <p className="font-display text-[17px] font-bold leading-tight text-white">Admin</p>
+              <p className="truncate text-[11.5px] text-white/55">{workspace?.name ?? 'Your workspace'}</p>
+            </div>
+          </div>
+          <nav className="min-h-0 flex-1 overflow-y-auto px-3 pb-3" aria-label="Admin options">
+            <button type="button" onClick={() => setAt('overview')} className={row(at === 'overview')} aria-current={at === 'overview' ? 'page' : undefined}>
+              {edge(at === 'overview')}<LayoutGrid size={16} className="shrink-0 opacity-90" /> Overview
+            </button>
+            {(['People', 'Workspace'] as const).map((group) => (
+              <div key={group} className="mt-5">
+                <p className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/40">{group}</p>
+                {options().filter((o) => o.group === group).map((o) => {
+                  const on = at === o.key;
+                  return (
+                    <button key={o.key} type="button" onClick={() => setAt(o.key)} className={row(on)} aria-current={on ? 'page' : undefined}>
+                      {edge(on)}<o.Icon size={16} className="shrink-0 opacity-90" /> <span className="truncate">{o.title}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
+          <p className="border-t border-white/10 px-5 py-3 text-[11px] text-white/40">Esc closes Admin</p>
+        </aside>
+        <section className="flex min-w-0 flex-1 flex-col bg-[#FBFCFE]">
+          <header className="flex items-center gap-3 border-b border-[#E4E8F0] bg-white px-5 py-4 sm:px-8">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+                Admin{current ? <> <span className="text-gray-300">/</span> {current.group}</> : null}
+              </p>
+              <h2 className="mt-0.5 truncate font-display text-[20px] font-bold tracking-tight text-[#142B57]">{current ? current.title : 'Overview'}</h2>
+              <p className="truncate text-[12.5px] text-gray-500">{current ? current.line : 'The firm at a glance, what needs you, and every option.'}</p>
+            </div>
+            <select aria-label="Admin option" value={at} onChange={(e) => setAt(e.target.value as Action | 'overview')}
+              className="ml-auto rounded-md border border-gray-200 px-2 py-1 text-sm md:hidden">
+              <option value="overview">Overview</option>
+              {options().map((o) => <option key={o.key} value={o.key}>{o.title}</option>)}
+            </select>
+            <button type="button" aria-label="Close Admin" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 md:ml-auto"><X size={18} /></button>
+          </header>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-8">
+            {current ? (
+              <div className="mx-auto max-w-5xl rounded-xl border border-[#E4E8F0] bg-white p-5 sm:p-7">
+                <OptionBody action={current.key} onBack={() => setAt('overview')} />
+              </div>
+            ) : <Overview go={setAt} />}
+          </div>
+        </section>
+      </div>
+    </Portal>
+  );
+};
+
 /**
  * One option, opened across nearly the whole screen: room for the audit log's history, the costs
  * tables and the offboarding steps, rather than a pop-up that scrolls inside itself.
  */
 const AdminWindow: React.FC<{ action: Action; onBack: () => void; onClose: () => void }> = ({ action, onBack, onClose }) => {
-  const { ws, people, teams, me, roles, reload } = useHub();
   const option = options().find((o) => o.key === action)!;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onBack(); };
@@ -158,18 +388,7 @@ const AdminWindow: React.FC<{ action: Action; onBack: () => void; onClose: () =>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8">
           <div className="mx-auto max-w-5xl rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-7">
-            <DrawInPlace.Provider value>
-              <InWindow.Provider value>
-                {action === 'add' && <AddPersonDialog ws={ws} people={people} teams={teams} roles={roles} onClose={onBack} onDone={() => { reload(); }} />}
-                {action === 'import' && <ImportPeopleDialog ws={ws} onClose={onBack} onDone={() => { reload(); }} />}
-                {action === 'remove' && <RemovePersonSection ws={ws} people={people} teams={teams} me={me} onChanged={reload} />}
-                {action === 'hours' && <WorkingHoursSection ws={ws} />}
-                {action === 'costs' && <RunningCosts ws={ws} />}
-                {action === 'audit' && <AuditSection ws={ws} />}
-                {action === 'blocked' && <BlockedSection ws={ws} />}
-                {action === 'joiner' && <JoinerPlanSection ws={ws} />}
-              </InWindow.Provider>
-            </DrawInPlace.Provider>
+            <OptionBody action={action} onBack={onBack} />
           </div>
         </div>
       </div>
@@ -185,67 +404,12 @@ const AdminWindow: React.FC<{ action: Action; onBack: () => void; onClose: () =>
  */
 export const AdminLauncher: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { hub, error } = useAdminHub();
-  const [action, setAction] = useState<Action | null>(null);
   if (!hub.isAdmin) return null;
   return (
     <HubContext.Provider value={hub}>
-      {action
-        ? <AdminWindow action={action} onBack={() => setAction(null)} onClose={onClose} />
-        : <AdminMenu error={error} onPick={setAction} onClose={onClose} />}
+      {error && <Portal><p className="fixed left-1/2 top-3 z-[130] -translate-x-1/2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 shadow">{error}</p></Portal>}
+      <AdminConsole onClose={onClose} />
     </HubContext.Provider>
-  );
-};
-
-const AdminMenu: React.FC<{ error: string | null; onPick: (a: Action) => void; onClose: () => void }> = ({ error, onPick, onClose }) => {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  return (
-    <Portal>
-      <div className="admin-fade fixed inset-0 z-[125] flex items-center justify-center bg-gray-900/40 p-4 backdrop-blur-sm" onMouseDown={onClose}>
-        <div
-          role="dialog" aria-modal="true" aria-label="Admin"
-          onMouseDown={(e) => e.stopPropagation()}
-          className="admin-pop flex max-h-[90vh] w-[min(94vw,46rem)] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5"
-        >
-          <header className="bg-gradient-to-br from-brand-600 to-brand-700 px-6 pb-5 pt-5 text-white">
-            <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15"><ShieldCheck size={20} /></span>
-              <div>
-                <h2 className="text-lg font-semibold">Admin</h2>
-                <p className="text-sm text-white/75">What would you like to do?</p>
-              </div>
-              <button type="button" aria-label="Close" onClick={onClose} className="ml-auto rounded-lg p-1.5 text-white/70 hover:bg-white/10 hover:text-white"><X size={18} /></button>
-            </div>
-          </header>
-          {error && <p className="mx-6 mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-          <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
-            {(['People', 'Workspace'] as const).map((group) => (
-              <section key={group} aria-label={group} className="mb-3 last:mb-0">
-                <h3 className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400">{group}</h3>
-                <ul className="grid gap-1 sm:grid-cols-2">
-                  {options().filter((o) => o.group === group).map((o) => (
-                    <li key={o.key}>
-                      <button type="button" onClick={() => onPick(o.key)}
-                        className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-gray-50">
-                        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${TONES[o.tone].chip}`}><o.Icon size={18} /></span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-semibold text-gray-900">{o.title}</span>
-                          <span className="block truncate text-xs text-gray-500">{o.line}</span>
-                        </span>
-                        <ChevronRight size={16} className="shrink-0 text-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-500" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
-          </div>
-        </div>
-      </div>
-    </Portal>
   );
 };
 
@@ -361,7 +525,7 @@ const BlockedSection: React.FC<{ ws: string }> = ({ ws }) => {
                       {row.blocked_by ? ` by ${row.blocked_by.display_name || row.blocked_by.email}` : ''}
                     </span>
                   </span>
-                  <button type="button" onClick={() => lift(row)} title={`Lift the block on ${row.email}`}
+                  <button type="button" onClick={() => lift(row)} aria-label={`Lift the block on ${row.email}`}
                     className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 hover:text-red-600">
                     <Trash2 size={13} /> Lift
                   </button>
@@ -436,7 +600,7 @@ const RuleRow: React.FC<{ rule: JoinerRule; onChange: (r: JoinerRule) => void }>
                 · {rule.leaver === 'delete' ? 'deleted when they leave' : rule.leaver === 'retain_birthday' ? 'kept as “Ex – …”' : 'kept when they leave'}
               </span>
               {limit && (
-                <span className="rounded-full bg-amber-50 px-1.5 py-px text-[11px] text-amber-800" title="Not everyone gets this one">
+                <span className="rounded-full bg-amber-50 px-1.5 py-px text-[11px] text-amber-800" aria-label="Not everyone gets this one">
                   {limit}
                 </span>
               )}

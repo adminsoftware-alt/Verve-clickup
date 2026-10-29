@@ -65,7 +65,7 @@ const Bar: React.FC<{ pct: number; tone: string }> = ({ pct, tone }) => (
 const Note: React.FC<{ tone: 'ok' | 'warn' | 'bad'; children: React.ReactNode }> = ({ tone, children }) => {
   const skin = tone === 'bad' ? 'bg-red-50 text-red-700'
     : tone === 'warn' ? 'bg-amber-50 text-amber-800'
-    : 'bg-emerald-50 text-emerald-800';
+    : 'bg-[#EEF2F8] text-[#1C3A70]';
   return <p className={`mt-2.5 rounded-lg px-3 py-2 text-xs ${skin}`}>{children}</p>;
 };
 
@@ -90,7 +90,7 @@ const Pill: React.FC<{ tone?: 'late' | 'soon' | 'calm'; children: React.ReactNod
 const PlanMyDay: React.FC = () => {
   const [chosen, setChosen] = useState<Record<string, boolean>>({ t1: true, t3: true });
   const total = TODAY.reduce((n, t) => n + (chosen[t.id] ? t.est : 0), 0);
-  const tone = total > 8 ? 'bg-red-500' : total > 6.5 ? 'bg-amber-500' : 'bg-teal-500';
+  const tone = total > 8 ? 'bg-red-500' : total > 6.5 ? 'bg-amber-500' : 'bg-brand-500';
   return (
     <div>
       <div className="mb-2 flex items-baseline justify-between">
@@ -111,9 +111,9 @@ const PlanMyDay: React.FC = () => {
                 type="button" aria-pressed={on}
                 onClick={() => setChosen({ ...chosen, [t.id]: !on })}
                 className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm transition-colors ${
-                  on ? 'border-teal-400 bg-teal-50 text-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-300'}`}
+                  on ? 'border-brand-400 bg-brand-50 text-gray-900' : 'border-gray-200 text-gray-700 hover:border-gray-300'}`}
               >
-                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? 'border-teal-500 bg-teal-500 text-white' : 'border-gray-300'}`}>
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? 'border-brand-500 bg-brand-500 text-white' : 'border-gray-300'}`}>
                   {on && <Check size={11} strokeWidth={3} />}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{t.name}</span>
@@ -135,7 +135,7 @@ const WhatsNext: React.FC = () => (
     <p className="mt-1.5 text-base font-semibold text-gray-900">Prepare Cognivion TDS working</p>
     <p className="mt-1 text-sm text-gray-500">2h estimated · due 6 days ago · the oldest thing on you</p>
     <div className="mt-3 flex gap-2">
-      <span className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-medium text-white">Start timer</span>
+      <span className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white">Start timer</span>
       <span className="rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-600">Not now</span>
     </div>
   </div>
@@ -179,7 +179,7 @@ const Unlogged: React.FC = () => (
     <ul className="flex flex-col gap-2">
       <Row colour="bg-red-500" right={<Pill tone="late">5h 6m short</Pill>}>Mon 21 — 2h 54m of 8h</Row>
       <Row colour="bg-amber-500" right={<Pill tone="soon">2h 48m short</Pill>}>Tue 22 — 5h 12m of 8h</Row>
-      <Row colour="bg-emerald-500" right={<Pill>48m over</Pill>}>Wed 23 — 8h 48m of 8h</Row>
+      <Row colour="bg-brand-500" right={<Pill>48m over</Pill>}>Wed 23 — 8h 48m of 8h</Row>
     </ul>
     <Note tone="warn">Fill it in now, while you still remember. Timesheet gaps are always found at month end.</Note>
   </div>
@@ -194,14 +194,14 @@ const Accuracy: React.FC = () => {
     <div>
       <div className="mb-3 flex items-baseline gap-2">
         <span className="text-3xl font-semibold text-gray-900">+{off}%</span>
-        <span className="flex items-center gap-1 text-xs font-medium text-emerald-600"><ArrowDownRight size={13} />better than June</span>
+        <span className="flex items-center gap-1 text-xs font-medium text-brand-600"><ArrowDownRight size={13} />better than June</span>
       </div>
       <div className="flex items-end gap-3">
         {ACCURACY.map((m) => (
           <div key={m.month} className="flex flex-1 flex-col items-center gap-1">
             <div className="flex h-20 w-full items-end justify-center gap-1">
-              <div className="w-2.5 rounded-t bg-gray-200" style={{ height: `${(m.est / worst) * 100}%` }} title={`estimated ${m.est}h`} />
-              <div className="w-2.5 rounded-t bg-teal-500" style={{ height: `${(m.logged / worst) * 100}%` }} title={`logged ${m.logged}h`} />
+              <div className="w-2.5 rounded-t bg-gray-200" style={{ height: `${(m.est / worst) * 100}%` }} aria-label={`estimated ${m.est}h`} />
+              <div className="w-2.5 rounded-t bg-brand-500" style={{ height: `${(m.logged / worst) * 100}%` }} aria-label={`logged ${m.logged}h`} />
             </div>
             <span className="text-[11px] text-gray-500">{m.month}</span>
           </div>
@@ -217,8 +217,8 @@ const Shutdown: React.FC = () => (
   <div>
     <p className="text-sm text-gray-700">You logged <strong>5h 12m</strong> of the 6h you planned.</p>
     <ul className="mt-2.5 flex flex-col gap-2">
-      <Row colour="bg-emerald-500" right={<Pill>1h 12m</Pill>}>Collect Prism Logistics bank statements</Row>
-      <Row colour="bg-emerald-500" right={<Pill>4h</Pill>}>Enter Vertex Labs purchase invoices</Row>
+      <Row colour="bg-brand-500" right={<Pill>1h 12m</Pill>}>Collect Prism Logistics bank statements</Row>
+      <Row colour="bg-brand-500" right={<Pill>4h</Pill>}>Enter Vertex Labs purchase invoices</Row>
       <Row colour="bg-amber-500" right={<Pill tone="soon">moves to tomorrow</Pill>}>Prepare Cognivion TDS working</Row>
     </ul>
     <Note tone="ok">One tap rolls the unfinished work to tomorrow and closes the day. Tomorrow opens already planned.</Note>
@@ -235,7 +235,7 @@ const OnTime: React.FC = () => (
     <p className="mt-1 text-xs text-gray-500">of your finished work was on time this month</p>
     <div className="mt-3 flex gap-1">
       {[1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1].map((ok, i) => (
-        <span key={i} className={`h-7 flex-1 rounded ${ok ? 'bg-teal-500' : 'bg-red-300'}`} />
+        <span key={i} className={`h-7 flex-1 rounded ${ok ? 'bg-brand-500' : 'bg-red-300'}`} />
       ))}
     </div>
     <p className="mt-2 text-[11px] text-gray-400">Each block is one finished task, oldest first.</p>
@@ -264,8 +264,8 @@ const Timesheet: React.FC = () => {
               const short = !!d.cap && d.logged < d.cap;
               return (
                 <td key={d.day} className="py-2 pr-1">
-                  <div className="h-3 overflow-hidden rounded bg-gray-100" title={`${d.logged ? hrs(d.logged) : 'nothing'} of ${d.cap}h`}>
-                    <div className={`h-full ${over ? 'bg-orange-500' : 'bg-teal-500'}`} style={{ width: `${pct}%` }} />
+                  <div className="h-3 overflow-hidden rounded bg-gray-100" aria-label={`${d.logged ? hrs(d.logged) : 'nothing'} of ${d.cap}h`}>
+                    <div className={`h-full ${over ? 'bg-orange-500' : 'bg-brand-500'}`} style={{ width: `${pct}%` }} />
                   </div>
                   {short && <span className="mt-1 block text-[10px] text-amber-600">{hrs(d.cap - d.logged)} short</span>}
                 </td>
@@ -274,7 +274,7 @@ const Timesheet: React.FC = () => {
           </tr>
         </tbody>
       </table>
-      <button type="button" onClick={() => setOpen(!open)} className="mt-2 flex items-center gap-1 text-xs font-medium text-teal-700 hover:underline">
+      <button type="button" onClick={() => setOpen(!open)} className="mt-2 flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline">
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} 4 tasks
       </button>
       {open && (
@@ -313,7 +313,7 @@ const ToDo: React.FC = () => (
 const Battery: React.FC = () => (
   <div className="flex h-full flex-col justify-center gap-2">
     <div className="relative h-11 overflow-hidden rounded-lg border-2 border-gray-300 bg-gray-50">
-      <div className="h-full bg-teal-400" style={{ width: '20%' }} />
+      <div className="h-full bg-brand-400" style={{ width: '20%' }} />
       <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-lg font-semibold text-gray-900">20%</span>
     </div>
     <p className="text-center text-xs text-gray-500">6 of 30 tasks done</p>
@@ -326,7 +326,7 @@ const Battery: React.FC = () => (
 type Ready = 'ready' | 'seed' | 'schema';
 
 const READY: Record<Ready, { label: string; skin: string }> = {
-  ready: { label: 'data ready', skin: 'bg-emerald-50 text-emerald-700' },
+  ready: { label: 'data ready', skin: 'bg-brand-50 text-brand-700' },
   seed: { label: 'needs data', skin: 'bg-amber-50 text-amber-800' },
   schema: { label: 'needs backend work', skin: 'bg-violet-50 text-violet-700' },
 };
@@ -439,7 +439,7 @@ const CANDIDATES: Candidate[] = [
 ];
 
 const TAGS: Record<Tag, { label: string; skin: string }> = {
-  new: { label: 'new', skin: 'bg-teal-50 text-teal-700' },
+  new: { label: 'new', skin: 'bg-brand-50 text-brand-700' },
   improved: { label: 'improved', skin: 'bg-gray-100 text-gray-600' },
   drop: { label: 'drop', skin: 'bg-red-50 text-red-700' },
 };
@@ -477,7 +477,7 @@ export const PreviewPage: React.FC = () => {
             <section
               key={c.id}
               className={`flex flex-col rounded-xl border bg-white p-4 shadow-sm transition-colors ${
-                on ? 'border-teal-400 ring-1 ring-teal-200' : 'border-gray-200'} ${c.wide ? 'xl:col-span-2' : ''} ${c.tag === 'drop' ? 'opacity-75' : ''}`}
+                on ? 'border-brand-400 ring-1 ring-brand-200' : 'border-gray-200'} ${c.wide ? 'xl:col-span-2' : ''} ${c.tag === 'drop' ? 'opacity-75' : ''}`}
             >
               <div className="mb-0.5 flex items-start gap-2">
                 <Icon size={15} className="mt-0.5 shrink-0 text-gray-400" />
@@ -501,7 +501,7 @@ export const PreviewPage: React.FC = () => {
                   <button
                     type="button" aria-pressed={on} onClick={() => toggle(c.id)}
                     className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                      on ? 'bg-teal-600 text-white hover:bg-teal-700' : 'border border-gray-200 text-gray-600 hover:border-gray-300'}`}
+                      on ? 'bg-brand-600 text-white hover:bg-brand-700' : 'border border-gray-200 text-gray-600 hover:border-gray-300'}`}
                   >
                     {on && <Check size={12} strokeWidth={3} />}
                     {on ? 'Picked' : c.tag === 'drop' ? 'Agree, drop it' : 'Build this'}
@@ -522,10 +522,10 @@ export const PreviewPage: React.FC = () => {
       </div>
 
       {chosen.length > 0 && (
-        <div className="sticky bottom-4 mt-5 flex flex-wrap items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 shadow-sm">
-          <span className="text-sm font-medium text-teal-900">{chosen.length} picked:</span>
+        <div className="sticky bottom-4 mt-5 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 shadow-sm">
+          <span className="text-sm font-medium text-brand-900">{chosen.length} picked:</span>
           {chosen.map((c) => (
-            <span key={c.id} className="rounded-full bg-white px-2.5 py-1 text-xs text-teal-800">{c.title}</span>
+            <span key={c.id} className="rounded-full bg-white px-2.5 py-1 text-xs text-brand-800">{c.title}</span>
           ))}
         </div>
       )}

@@ -332,7 +332,7 @@ export const EntryDetails: React.FC<{ entry: SheetEntry; editable: boolean; acti
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
       <button aria-label={entry.billable ? 'Billable' : 'Not billable'}
         type="button"
-        title={entry.billable ? 'Billable' : 'Not billable'}
+
         disabled={!editable || entry.running}
         onClick={() => actions.onUpdate(entry, { billable: !entry.billable })}
         className={`rounded-full p-0.5 ${entry.billable ? 'bg-emerald-100 text-emerald-700' : 'text-gray-300 hover:text-gray-500'}`}
@@ -365,7 +365,7 @@ export const TagPicker: React.FC<{ entry: SheetEntry; actions: EntryActions }> =
   const chosen = new Set(entry.tags.map((t) => t.id));
   const toggle = (id: string) => actions.onUpdate(entry, { tag_ids: chosen.has(id) ? [...chosen].filter((x) => x !== id) : [...chosen, id] });
   return (
-    <Popover width={220} trigger={(open) => <button aria-label="Tags" type="button" title="Tags" onClick={open} className="rounded p-0.5 text-gray-300 hover:text-gray-600"><TagIcon size={12} /></button>}>
+    <Popover width={220} trigger={(open) => <button aria-label="Tags" type="button" onClick={open} className="rounded p-0.5 text-gray-300 hover:text-gray-600"><TagIcon size={12} /></button>}>
       {() => (
         <div>
           <div className="mb-1 text-xs font-medium text-gray-500">Time tags</div>

@@ -157,7 +157,7 @@ export const CardEditor: React.FC<{
         >
           <header className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
             <h3 className="font-semibold text-gray-900">{card ? `Edit “${card.title}”` : type ? `Add ${CARD_TYPES.find((c) => c.type === type)!.label}` : 'Add a card'}</h3>
-            <button type="button" title="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+            <button type="button" aria-label="Close" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
           </header>
 
           {!type ? (

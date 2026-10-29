@@ -49,7 +49,7 @@ export const COLUMNS: { key: ColumnKey; label: string; width: string }[] = [
   { key: 'custom_id', label: 'Task ID', width: '84px' },
   { key: 'assignee', label: 'Assignee', width: '110px' },
   { key: 'start_date', label: 'Start date', width: '96px' },
-  { key: 'due_date', label: 'Due date', width: '96px' },
+  { key: 'due_date', label: 'Due date', width: '124px' }, // room for the date and a late task's reschedule button
   { key: 'priority', label: 'Priority', width: '100px' },
   { key: 'time_tracked', label: 'Time tracked', width: '120px' },
   { key: 'time_estimate', label: 'Time estimate', width: '96px' },

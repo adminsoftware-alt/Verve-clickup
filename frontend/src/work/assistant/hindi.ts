@@ -199,6 +199,10 @@ const ROMAN: [RegExp, string][] = [
   // becomes "on" and leaves "CWC data fix on 2 hours".
   [new RegExp(String.raw`^(${LENGTH})\s+(.+?)\s+(?:par|pe)\b`, 'i'), '$1 on $2'],
   [new RegExp(String.raw`^(.+?)\s+(?:par|pe)\s+(${LENGTH})(?=\s|$)`, 'i'), '$2 on $1'],
+  // "Aarti ko payroll ka task do": give Aarti a task. The person comes first and "do" (give) last,
+  // and with "ko" dropped below it read as a task called "Aarti payroll task do" for nobody.
+  [/^(.+?)\s+ko\s+(.+?)\s+(?:ka|ki|ke)\s+(?:task|kaam)\s+(?:do|de\s*do|dedo|dena)\b/i, 'add $2 for $1'],
+  [/^(.+?)\s+ko\s+(?:ek\s+)?(?:task|kaam)\s+(?:do|de\s*do|dedo|dena)\b\s*(.*)$/i, 'add $2 for $1'],
   // "Ek task create karo" -- "create a task". First, before "banao" becomes "add" below.
   [/\b(?:ek|ik)\s+(?:nay[aie]\s+)?(?:task|kaam)\s+(?:create|add|bana(?:o|ao|na)?|jodo)\b/gi, 'create a task'],
   // "vah task ke liye" -- "for that task": it points at the task being made and names nothing.
@@ -240,6 +244,16 @@ const ROMAN: [RegExp, string][] = [
   // front, where the English rules look for a question -- otherwise "aaj kya due" read as a new
   // task called "Today kya".
   [/^(.+?)\s+kya\s+(.+?)\s*$/i, 'what is $2 $1'],
+  // And at the very end, which is where Hinglish most often puts it: "mera aaj ka kaam kya hai"
+  // was read as a new task called "My kaam kya", made on the spot because it had a day in it.
+  [/^(.+?)\s+kya\s*$/i, 'what is $1'],
+  // The other question words, moved to the front for the same reason: "mera manager kaun hai".
+  [/^(.+?)\s+kaun\b\s*(.*)$/i, 'who is $1 $2'],
+  [/^(.+?)\s+kab\b\s*(.*)$/i, 'when is $1 $2'],
+  [/^(.+?)\s+kaha+n?\b\s*(.*)$/i, 'where is $1 $2'],
+  [/^(.+?)\s+kaise\b\s*(.*)$/i, 'how do i $2 $1'],
+  [/^(.+?)\s+kyo+n?\b\s*(.*)$/i, 'why is $1 $2'],
+  [/^(.+?)\s+kyu+n?\b\s*(.*)$/i, 'why is $1 $2'],
 ];
 
 export interface Translated {

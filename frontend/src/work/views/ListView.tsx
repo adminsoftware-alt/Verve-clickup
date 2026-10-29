@@ -1,5 +1,6 @@
+import { InlineComposer } from '../task/InlineComposer';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Ban, CalendarClock, Check, CheckSquare, ChevronsDownUp, ChevronsUpDown, OctagonAlert, ChevronDown, ChevronRight, GitBranch, Hourglass, Layers3, MessageSquare, Paperclip, Play, Plus, Repeat, Square } from 'lucide-react';
+import { Ban, CalendarClock, Check, CheckSquare, ChevronsDownUp, ChevronsUpDown, OctagonAlert, ChevronDown, ChevronRight, GitBranch, Hourglass, Layers3, Lock, MoreHorizontal, MessageSquare, Paperclip, Play, Plus, Repeat, Square } from 'lucide-react';
 import { workApi, type CustomField, type Status, type Task, type TaskInput, type UserRef } from '../api';
 import { AvatarStack, Menu, PRIORITIES, PriorityFlag, StatusDot, StatusPill, formatDue, formatDuration, fromDateInput, parseDuration } from '../ui';
 import { DateField } from '../DateField';
@@ -12,7 +13,6 @@ import { FieldEditor, fieldApplies } from '../fields/FieldValue';
 import { useWork } from '../WorkContext';
 import { TypeIcon } from '../LocationSettings';
 import { notify } from '../../components/notify';
-import { ask } from '../../components/ask';
 import { RowMenu } from './RowMenu';
 import { parseQuickAdd } from './quickAdd';
 import { useUnreadTasks } from './useUnreadTasks';
@@ -43,6 +43,8 @@ export const ListView: React.FC<{
   makeGroups: (roots: Task[]) => StatusGroupOfTasks[];
   /** Opens the Task groups editor, when this person may make one. */
   onManageGroups?: () => void;
+  /** On a List's own page, "+ Add Task" writes the task in the row (InlineComposer) rather than opening the dialog. */
+  inlineAdd?: boolean;
   /** Whether "+ Add Task" is offered in a group; onCreate gets that group's key. */
   canAddIn: (groupKey: string) => boolean;
   /** Why there is nothing to show, so the empty state can say something true. */
@@ -63,7 +65,7 @@ export const ListView: React.FC<{
   onAddColumn?: () => void;
   /** Given, rows can be dragged: to a new place in their group, or into another group. */
   onMoveRow?: (taskId: string, orderindex: number, toGroupKey: string | null) => Promise<void>;
-}> = ({ tasks: incoming, statuses, listName, groupBy, makeGroups, canAddIn, onCreate, onManageGroups, onOpenTask, columns, fields, people, onSetField, selected, onSelect, onAddColumn, onChanged, emptyBecause, onMoveRow }) => {
+}> = ({ tasks: incoming, statuses, listName, groupBy, makeGroups, canAddIn, inlineAdd, onCreate, onManageGroups, onOpenTask, columns, fields, people, onSetField, selected, onSelect, onAddColumn, onChanged, emptyBecause, onMoveRow }) => {
   // An edit shows at once -- the list can take a while to come back -- and fresh data from the
   // server replaces it. A failed save puts the old value back and says why.
   const [local, setLocal] = useState<Record<string, Partial<Task>>>({});
@@ -134,7 +136,7 @@ export const ListView: React.FC<{
     else if (cellNote?.id === task.id) setCellNote(null);
     save(task, { [key]: iso }, { [key]: iso }, key);
   };
-  const [rowMenu, setRowMenu] = useState<{ task: Task; at: { x: number; y: number } } | null>(null);
+  const [rowMenu, setRowMenu] = useState<{ task: Task; at: { x: number; y: number; top?: number } } | null>(null);
   const unread = useUnreadTasks();
   // Dragging a row: which one, and which row (or group header) it would land above.
   const [dragId, setDragId] = useState<string | null>(null);
@@ -176,7 +178,7 @@ export const ListView: React.FC<{
   // Below `md` the grid is 1,058px of sideways dragging, so the rows become cards instead.
   const phone = usePhone();
   const shown = COLUMNS.filter((c) => columns.includes(c.key));
-  const template = `28px minmax(380px,1fr) ${shown.map((c) => c.width).join(' ')}${fields.map(() => ' 160px').join('')}${onAddColumn ? ' 36px' : ''}`;
+  const template = `28px minmax(380px,1fr) ${shown.map((c) => c.width).join(' ')}${fields.map(() => ' 160px').join('')} 36px`;
   const selecting = selected.size > 0;
 
   const toggle = (set: Set<string>, id: string, update: (s: Set<string>) => void) => {
@@ -192,20 +194,6 @@ export const ListView: React.FC<{
     await onCreate(q.name, key, q.input);
     setDraft('');
   };
-  /** Several lines pasted at once -- from Excel, an email -- become one task each. */
-  const pasteMany = async (e: React.ClipboardEvent<HTMLInputElement>, key: string) => {
-    const lines = e.clipboardData.getData('text').split(/\r?\n/).map((l) => l.split('\t')[0].trim()).filter(Boolean);
-    if (lines.length < 2) return;
-    e.preventDefault();
-    if (!(await ask.confirm({ title: `Add ${lines.length} tasks?`, body: lines.slice(0, 5).join('\n') + (lines.length > 5 ? `\n…and ${lines.length - 5} more` : '') }))) return;
-    for (const line of lines) {
-      const q = parseQuickAdd(line, people);
-      await onCreate(q.name, key, q.input);
-    }
-    setDraft('');
-    notify.ok(`Added ${lines.length} tasks`);
-  };
-
   const cell = (key: ColumnKey, task: Task): React.ReactNode => {
     // A task typed in as a name alone is a real task; it just is not finished being described.
     // The columns it still needs say so here, in place, rather than a dialog having refused to
@@ -215,7 +203,7 @@ export const ListView: React.FC<{
       <span
         data-wanted
         className="inline-flex items-center gap-0.5 rounded-md border border-dashed border-amber-300 bg-amber-50/70 px-1.5 py-0.5 text-[11px] font-medium text-amber-700"
-        title="Open the task to fill this in"
+        aria-label="Open the task to fill this in"
       >
         <Plus size={11} /> Add
       </span>
@@ -284,6 +272,7 @@ export const ListView: React.FC<{
         );
       }
     }
+    const plain = (): React.ReactNode => {
     switch (key) {
       case 'custom_id': return <div key={key} className="font-mono text-xs text-gray-500">{task.custom_id ?? ''}</div>;
       case 'assignee': return <div key={key}>{needed ? <Wanted /> : <AvatarStack users={task.assignees} />}</div>;
@@ -305,6 +294,20 @@ export const ListView: React.FC<{
       );
       case 'created_at': return <div key={key} className="text-gray-600">{formatDue(task.created_at)}</div>;
     }
+    };
+    // A colleague's task is shown, not edited (an employee changes only their own work). A click on
+    // one of its values says so under the cell, rather than the cell simply not answering.
+    if (onChanged && !editable(task) && (['assignee', 'start_date', 'due_date', 'priority', 'time_estimate'] as ColumnKey[]).includes(key)) {
+      const owner = task.assignees[0] ? (task.assignees[0].display_name || task.assignees[0].email).split(' ')[0] : null;
+      const why = owner ? `View only — this is ${owner}'s task. Ask ${owner} or your manager to change it.` : 'View only — ask whoever owns this task, or your manager, to change it.';
+      return (
+        <div key={key} className="relative min-w-0 cursor-default" onClick={(e) => { stay(e); flagCell(task.id, key, why, false); }}>
+          {plain()}
+          {noteFor(task.id, key)}
+        </div>
+      );
+    }
+    return plain();
   };
 
   /**
@@ -356,8 +359,8 @@ export const ListView: React.FC<{
               )}
               {!!task.comment_count && <span className="inline-flex items-center gap-0.5"><MessageSquare size={11} />{task.comment_count}</span>}
               {!!task.attachment_count && <span className="inline-flex items-center gap-0.5"><Paperclip size={11} />{task.attachment_count}</span>}
-              {!!task.waiting_on_open && <span title="Waiting on unfinished work" className="text-red-500"><Ban size={11} /></span>}
-              {task.recurrence && <span title="Repeats" className="text-brand-500"><Repeat size={11} /></span>}
+              {!!task.waiting_on_open && <span aria-label="Waiting on unfinished work" className="text-red-500"><Ban size={11} /></span>}
+              {task.recurrence && <span aria-label="Repeats" className="text-brand-500"><Repeat size={11} /></span>}
               {task.tags.map((tag) => (
                 <span key={tag.id} className="rounded px-1.5 py-px font-medium" style={{ backgroundColor: tag.bg_color, color: tag.fg_color }}>{tag.name}</span>
               ))}
@@ -459,18 +462,19 @@ export const ListView: React.FC<{
               <div className="flex min-w-0 items-center gap-2">
                 {unread.has(task.id) && <span role="img" aria-label="Unread comments" className="h-2 w-2 shrink-0 rounded-full bg-brand-600" />}
                 <span className={`truncate ${task.status.group === 'closed' ? 'text-gray-400 line-through' : unread.has(task.id) ? 'font-semibold text-gray-900' : 'text-gray-800'}`}>{task.name}</span>
+                {onChanged && !editable(task) && <Lock size={12} className="shrink-0 text-gray-400" aria-label="View only: someone else's task" />}
                 {location && <span data-list-chip className="max-w-[12rem] shrink-0 truncate rounded bg-gray-100 px-1.5 py-px text-[11px] text-gray-500">{location}</span>}
                 {task.subtask_count > 0 && (
                   <span className="inline-flex shrink-0 items-center gap-0.5 text-xs text-gray-400"><GitBranch size={12} />{task.subtask_count}</span>
                 )}
-                {task.recurrence && <span title="Repeats" className="shrink-0 text-brand-500"><Repeat size={12} /></span>}
-                {!!task.waiting_on_open && <span title={`Waiting on ${task.waiting_on_open} unfinished task${task.waiting_on_open === 1 ? '' : 's'}`} className="shrink-0 text-red-500"><Ban size={12} /></span>}
-                {!!task.blocking_count && <span title={`Blocking ${task.blocking_count} task${task.blocking_count === 1 ? '' : 's'}`} className="inline-flex shrink-0 items-center gap-0.5 text-xs text-amber-600"><OctagonAlert size={12} />{task.blocking_count}</span>}
+                {task.recurrence && <span aria-label="Repeats" className="shrink-0 text-brand-500"><Repeat size={12} /></span>}
+                {!!task.waiting_on_open && <span aria-label={`Waiting on ${task.waiting_on_open} unfinished task${task.waiting_on_open === 1 ? '' : 's'}`} className="shrink-0 text-red-500"><Ban size={12} /></span>}
+                {!!task.blocking_count && <span aria-label={`Blocking ${task.blocking_count} task${task.blocking_count === 1 ? '' : 's'}`} className="inline-flex shrink-0 items-center gap-0.5 text-xs text-amber-600"><OctagonAlert size={12} />{task.blocking_count}</span>}
                 {!!task.checklist_total && (
-                  <span title="Checklist items done" className={`inline-flex shrink-0 items-center gap-0.5 text-xs ${task.checklist_done === task.checklist_total ? 'text-emerald-600' : 'text-gray-400'}`}><CheckSquare size={12} />{task.checklist_done}/{task.checklist_total}</span>
+                  <span aria-label="Checklist items done" className={`inline-flex shrink-0 items-center gap-0.5 text-xs ${task.checklist_done === task.checklist_total ? 'text-emerald-600' : 'text-gray-400'}`}><CheckSquare size={12} />{task.checklist_done}/{task.checklist_total}</span>
                 )}
-                {!!task.comment_count && <span title="Comments" className="inline-flex shrink-0 items-center gap-0.5 text-xs text-gray-400"><MessageSquare size={12} />{task.comment_count}</span>}
-                {!!task.attachment_count && <span title="Attachments" className="inline-flex shrink-0 items-center gap-0.5 text-xs text-gray-400"><Paperclip size={12} />{task.attachment_count}</span>}
+                {!!task.comment_count && <span aria-label="Comments" className="inline-flex shrink-0 items-center gap-0.5 text-xs text-gray-400"><MessageSquare size={12} />{task.comment_count}</span>}
+                {!!task.attachment_count && <span aria-label="Attachments" className="inline-flex shrink-0 items-center gap-0.5 text-xs text-gray-400"><Paperclip size={12} />{task.attachment_count}</span>}
                 {groupBy !== 'group' && task.group && (
                   <span className="shrink-0 rounded-full border px-1.5 py-px text-[11px]" style={{ borderColor: task.group.color, color: task.group.color }}>{task.group.name}</span>
                 )}
@@ -491,6 +495,17 @@ export const ListView: React.FC<{
                 : <span className="text-xs text-gray-300">—</span>}
             </div>
           ))}
+            {/* The task's menu, at the very end of the row: always there, opening at the button. */}
+            <button type="button" aria-label={`Actions for ${task.name}`} aria-haspopup="menu"
+              onClick={(e) => {
+                e.stopPropagation();
+                const r = e.currentTarget.getBoundingClientRect();
+                loadStatuses(task);
+                setRowMenu({ task, at: { x: r.right - 248, y: r.bottom + 4, top: r.top - 4 } });
+              }}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700">
+              <MoreHorizontal size={15} />
+            </button>
         </div>
         {open && kids.map((kid) => renderRow(kid, depth + 1))}
       </React.Fragment>
@@ -562,7 +577,7 @@ export const ListView: React.FC<{
 
   return (
     <div className={phone ? 'px-3 pb-24' : 'scroll-x px-6 pb-24'} data-group-by={groupBy}>
-      <div style={phone ? undefined : { minWidth: 440 + shown.reduce((n, c) => n + parseInt(c.width, 10), 0) + fields.length * 160 + (onAddColumn ? 36 : 0) }}>
+      <div style={phone ? undefined : { minWidth: 440 + shown.reduce((n, c) => n + parseInt(c.width, 10), 0) + fields.length * 160 + 36 }}>
       {(groups.length > 1 || (emptyCount > 0 && allGroups.some((g) => g.tasks.length > 0))) && (
         <div className="mt-3 flex items-center justify-end gap-3">
           {emptyCount > 0 && allGroups.some((g) => g.tasks.length > 0) && (
@@ -624,15 +639,19 @@ export const ListView: React.FC<{
                       )}
                     </span>
                     <span className="pl-12">Name</span>{shown.map((c) => <span key={c.key}>{c.label}</span>)}{fields.map((f) => <span key={f.id} className="truncate pr-2">{f.name}</span>)}
-                    {onAddColumn && (
-                      <button type="button" title="Add a column" aria-label="Add a column" onClick={onAddColumn}
+                    {onAddColumn ? (
+                      <button type="button" aria-label="Add a column" onClick={onAddColumn}
                         className="flex h-5 w-5 items-center justify-center rounded-full text-brand-600 hover:bg-brand-50"><Plus size={14} /></button>
-                    )}
+                    ) : <span />}
                   </div>
                 )}
                 {group.tasks.map((t) => (phone ? renderCard(t, 0) : renderRow(t, 0)))}
                 {canAddIn(group.key) && (
-                  adding === group.key ? (
+                  adding === group.key && inlineAdd ? (
+                    <InlineComposer status={group.status} people={people}
+                      onSave={(name, input) => onCreate(name, group.key, input)}
+                      onCancel={() => setAdding(null)} />
+                  ) : adding === group.key ? (
                     <form onSubmit={(e) => submit(e, group.key)} className="border-b border-gray-100 py-2 pl-9 pr-4">
                       <div className="flex items-center gap-2">
                         <StatusDot status={group.status} />
@@ -641,10 +660,9 @@ export const ListView: React.FC<{
                           aria-label="New task name"
                           value={draft}
                           onChange={(e) => setDraft(e.target.value)}
-                          onPaste={(e) => pasteMany(e, group.key)}
                           onBlur={() => !draft && setAdding(null)}
                           onKeyDown={(e) => e.key === 'Escape' && setAdding(null)}
-                          placeholder="Task name — try “tomorrow !high @name 2h”, or paste several lines"
+                          placeholder="Task name — try “tomorrow !high @name 2h”"
                           className="flex-1 bg-transparent text-sm focus:outline-none"
                         />
                       </div>
@@ -682,6 +700,8 @@ export const ListView: React.FC<{
           at={rowMenu.at}
           statuses={statusesFor(rowMenu.task)}
           canEdit={editable(rowMenu.task)}
+          siblings={tasks}
+          onAddColumn={onAddColumn}
           onOpen={() => onOpenTask(rowMenu.task.id)}
           onStatus={(st) => save(rowMenu.task, { status_id: st.id }, { status: st })}
           onChanged={() => onChanged?.()}
@@ -770,7 +790,7 @@ export const TimeTrackedCell: React.FC<{ task: Task }> = ({ task }) => {
   if (mine && timer) {
     const elapsed = (now - new Date(timer.entry.started_at).getTime()) / 1000;
     return (
-      <button type="button" title="Stop timer" onClick={(e) => run(e, stop)} className="flex items-center gap-1.5 text-red-600">
+      <button type="button" aria-label="Stop timer" onClick={(e) => run(e, stop)} className="flex items-center gap-1.5 text-red-600">
         <span className="rounded-full bg-red-500 p-1 text-white"><Square size={8} fill="currentColor" /></span>
         <span className="font-mono text-xs tabular-nums">{formatClock(elapsed)}</span>
       </button>
@@ -779,9 +799,9 @@ export const TimeTrackedCell: React.FC<{ task: Task }> = ({ task }) => {
   return (
     <button
       type="button"
-      title={canTrack ? 'Start timer' : 'You need edit access to track time'}
+      aria-label={canTrack ? 'Start timer' : 'You need edit access to track time'}
       disabled={!canTrack}
-      onClick={(e) => run(e, () => start(task.id))}
+      onClick={(e) => run(e, () => start(task.id, task))}
       className="group/time flex items-center gap-1.5 text-gray-500 disabled:cursor-default"
     >
       <span className="rounded-full border border-gray-300 p-1 text-gray-400 group-hover/time:border-brand-400 group-hover/time:text-brand-600">

@@ -54,7 +54,7 @@ const same = (a: number[], b: number[]) => a.length === b.length && a.every((v, 
 const WeekStrip: React.FC<{ week: number[]; muted?: boolean }> = ({ week, muted }) => (
   <span className="inline-flex gap-1" aria-label={summary(week)}>
     {week.map((s, i) => (
-      <span key={i} title={`${DAYS[i]}: ${s ? fmt(s) : 'off'}`}
+      <span key={i} aria-label={`${DAYS[i]}: ${s ? fmt(s) : 'off'}`}
         className={`flex h-7 w-9 flex-col items-center justify-center rounded-md text-[10px] leading-none ${
           s ? (muted ? 'bg-gray-100 text-gray-600' : 'bg-brand-50 text-brand-800 ring-1 ring-inset ring-brand-100') : 'bg-gray-50 text-gray-300'}`}>
         <span className="text-[9px] uppercase tracking-wide opacity-70">{DAYS[i].slice(0, 2)}</span>
@@ -143,7 +143,7 @@ const WeekEditor: React.FC<{
             )}
             <button type="button" onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
             <button type="button" disabled={busy || totalOf(week) === 0} onClick={() => run(() => onSave(week))}
-              title={totalOf(week) === 0 ? 'A week needs at least one working day' : undefined}
+              aria-label={totalOf(week) === 0 ? 'A week needs at least one working day' : undefined}
               className="rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
               {busy ? 'Saving…' : 'Save'}
             </button>
@@ -239,7 +239,7 @@ export const WorkingHoursSection: React.FC<{ ws: string }> = ({ ws }) => {
 
       {tab === 'teams' && (
         data.teams.length === 0
-          ? <p className="py-10 text-center text-sm text-gray-500">No Teams yet. Teams are made in Teams &amp; People.</p>
+          ? <p className="py-10 text-center text-sm text-gray-500">No Teams yet. Teams are made in People.</p>
           : (
             <ul className="space-y-2">
               {data.teams.map((t) => (

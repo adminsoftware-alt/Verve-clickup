@@ -34,7 +34,7 @@ export const PlanCard: React.FC<{
   const hours = (seconds: number) => formatDuration(Math.abs(seconds)) || '0h';
   const capacity = capacity_seconds || 0;
   const full = capacity ? planned_seconds / capacity : 0;
-  const tone = full > 1 ? 'bg-red-500' : full > 0.85 ? 'bg-amber-500' : 'bg-teal-500';
+  const tone = full > 1 ? 'bg-red-500' : full > 0.85 ? 'bg-amber-500' : 'bg-brand-500';
 
   const note = capacity === 0
     ? { skin: 'bg-gray-50 text-gray-600', text: 'Not a working day for you.' }
@@ -42,7 +42,7 @@ export const PlanCard: React.FC<{
       ? { skin: 'bg-red-50 text-red-700', text: `${hours(planned_seconds - capacity)} more than a working day. Move something to tomorrow.` }
       : full > 0.85
         ? { skin: 'bg-amber-50 text-amber-800', text: `Nearly full — ${hours(capacity - planned_seconds)} left for anything that lands today.` }
-        : { skin: 'bg-emerald-50 text-emerald-800', text: `${hours(capacity - planned_seconds)} still free today.` };
+        : { skin: 'bg-[#EEF2F8] text-[#1C3A70]', text: `${hours(capacity - planned_seconds)} still free today.` };
 
   const toggle = async (task: PlanTask) => {
     if (!workspace) return;
@@ -91,7 +91,7 @@ export const PlanCard: React.FC<{
               disabled={busy === task.id}
               onClick={() => toggle(task)}
               className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${
-                task.picked ? 'border-teal-500 bg-teal-500 text-white' : 'border-gray-300 hover:border-teal-400'} disabled:opacity-50`}
+                task.picked ? 'border-brand-500 bg-brand-500 text-white' : 'border-gray-300 hover:border-brand-400'} disabled:opacity-50`}
             >
               {task.picked && <Check size={11} strokeWidth={3} />}
             </button>

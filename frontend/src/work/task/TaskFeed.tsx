@@ -174,7 +174,7 @@ export const Composer: React.FC<{
       )}
       <div className="flex items-center gap-2 border-t border-gray-100 px-2 py-1.5">
         <input ref={picker} type="file" multiple hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
-        <button type="button" title="Attach files" aria-label="Attach files" onClick={() => picker.current?.click()} className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Paperclip size={14} /></button>
+        <button type="button" aria-label="Attach files" onClick={() => picker.current?.click()} className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Paperclip size={14} /></button>
         <span className="hidden text-[11px] text-gray-400 sm:inline">@ to mention · **bold** · - list · Ctrl+Enter to send</span>
         {allowAssign && (
           <label className="ml-auto flex items-center gap-1 text-xs text-gray-500">
@@ -256,13 +256,13 @@ const CommentCard: React.FC<{
       )}
       <div className="mt-1 flex flex-wrap items-center gap-1 pl-7">
         {c.reactions.map((r) => (
-          <button key={r.emoji} type="button" title={r.users.join(', ')} onClick={() => run(collabApi.react(c.id, r.emoji))}
+          <button key={r.emoji} type="button" aria-label={r.users.join(', ')} onClick={() => run(collabApi.react(c.id, r.emoji))}
             className={`rounded-full border px-1.5 py-px text-xs ${r.mine ? 'border-brand-300 bg-brand-50' : 'border-gray-200'}`}>{r.emoji} {r.count}</button>
         ))}
         {canComment && (
           <span className="hidden gap-0.5 group-hover:inline-flex">
             <Menu label="Add reaction" items={EMOJIS.map((e) => ({ label: e, onClick: () => run(collabApi.react(c.id, e)) }))}
-              trigger={<span className="rounded p-0.5 text-gray-400 hover:bg-gray-100" title="React"><SmilePlus size={13} /></span>} />
+              trigger={<span className="rounded p-0.5 text-gray-400 hover:bg-gray-100" aria-label="React"><SmilePlus size={13} /></span>} />
           </span>
         )}
         {!isReply && canComment && (

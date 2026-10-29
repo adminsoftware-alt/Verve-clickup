@@ -11,6 +11,7 @@ one is AI_BASE_URL / AI_MODEL / AI_API_KEY in .env.
 """
 
 import json
+import logging
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -19,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import Task, TimeEntry, User
+from app.db.models import Task, Team, TeamMember, TimeEntry, User
 from app.services.work import goals, mywork, people, teams, viewdata
 from app.services.work.access import Access
 from app.services.work.errors import Invalid
@@ -31,6 +32,8 @@ MAX_ROUNDS = 5
 # Rows a tool hands back. Enough to count and name; more only costs tokens.
 MAX_ROWS = 60
 TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+
+log = logging.getLogger(__name__)
 
 
 def configured() -> bool:
@@ -44,10 +47,19 @@ def _name(u: User) -> str:
     return u.display_name or u.email
 
 
-def _access_label(db: Session, access: Access, p) -> str:
+def _lead_ids(db: Session, access: Access) -> set:
+    """Everyone who leads a Team here, in one query: asked person by person, a firm of 75 was 75
+    round trips to the database before the model saw a single row."""
+    return set(db.scalars(
+        select(TeamMember.user_id).join(Team, Team.id == TeamMember.team_id)
+        .where(Team.workspace_id == access.workspace_id, TeamMember.is_lead.is_(True))
+    ))
+
+
+def _access_label(p, leads: set) -> str:
     if can_manage_workspace(p.role):
         return "Admin"
-    return "Manager" if teams.led_team_ids(db, access.workspace_id, p.user.id) else "Employee"
+    return "Manager" if p.user.id in leads else "Employee"
 
 
 def _day(d: Optional[datetime]) -> Optional[str]:
@@ -96,7 +108,7 @@ def tool_who_am_i(db: Session, access: Access) -> Dict[str, Any]:
     names = {t.id: t.name for t in teams.list_teams(db, access)}
     boss = db.get(User, me.manager_id) if me.manager_id else None
     return {
-        "name": _name(me.user), "email": me.user.email, "access": _access_label(db, access, me),
+        "name": _name(me.user), "email": me.user.email, "access": _access_label(me, _lead_ids(db, access)),
         "designation": me.designation, "department": me.department,
         "teams": [names[t] for t in me.team_ids if t in names], "reports_to": _name(boss) if boss else None,
         "today": date.today().isoformat(),
@@ -115,6 +127,7 @@ def tool_people(db: Session, access: Access, search: Optional[str] = None, team:
         rows = [p for p in rows if q in " ".join(filter(None, [
             p.user.display_name, p.user.email, p.designation, p.department, p.location, p.employee_code])).lower()]
     by_id = {p.user.id: p for p in everyone}
+    leads = _lead_ids(db, access)
     return {
         "scope": _scope(access),
         "count": len(rows),
@@ -122,7 +135,7 @@ def tool_people(db: Session, access: Access, search: Optional[str] = None, team:
         "not_signed_in_yet": sum(1 for p in rows if p.pending),
         "people": [{
             "name": _name(p.user), "email": p.user.email, "designation": p.designation, "department": p.department,
-            "access": _access_label(db, access, p), "teams": [team_names[t] for t in p.team_ids if t in team_names],
+            "access": _access_label(p, leads), "teams": [team_names[t] for t in p.team_ids if t in team_names],
             "reports_to": _name(by_id[p.manager_id].user) if p.manager_id in by_id else None,
             "direct_reports": p.direct_reports, "location": p.location,
             "date_of_joining": p.date_of_joining.isoformat() if p.date_of_joining else None,
@@ -296,14 +309,20 @@ def run_tool(db: Session, access: Access, name: str, raw_args: str) -> str:
 # --- the conversation ----------------------------------------------------------------------------
 
 SYSTEM = (
-    "You are Verve Assistant inside Timetriq, the firm's task and time-tracking app. "
+    "You are the Verveflow Assistant inside Verveflow, the firm's task and time-tracking app. "
     "Answer questions about the firm's people, teams, tasks, time and goals using the tools; never guess numbers or names. "
     "The tools only return what the person asking is allowed to see; if something isn't there, say you can't see it. "
     "When a result's scope is not the whole firm, say so with the number (e.g. '24 people in your teams'). "
-    "Reply in the language the person used (English, Hindi or Hinglish; in Hindi always the polite aap form). Keep answers short: a sentence or two, "
-    "then a short list if it helps. You cannot change anything; if asked to create, edit or log, say they can type it "
+    "Reply in the language of the person's latest message: English gets English, Hindi or Hinglish gets the same "
+    "(in Hindi always the polite aap form). Keep answers short: a sentence or two, then a short list if it helps. "
+    "Write plain text only: no **bold**, no backticks, no headings, no tables; a list is lines starting with '- '. "
+    "You cannot change anything; if asked to create, edit or log, say they can type it "
     "as a command, e.g. 'create a task to file GST due Friday' or 'log 2h on payroll'. Today is {today}."
 )
+
+# Said to the person when the AI service fails. What actually went wrong goes to the server log: a
+# provider's own wording ("use this slug instead") means nothing to someone asking about their work.
+DOWN = "I can't answer questions right now. Commands still work, like 'log 1h on payroll' or 'mark GST filing done'."
 
 
 class AssistantError(Exception):
@@ -314,17 +333,20 @@ def _call_model(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     try:
         r = httpx.post(
             settings.AI_BASE_URL.rstrip("/") + "/chat/completions",
-            headers={"Authorization": f"Bearer {settings.AI_API_KEY}", "X-Title": "Timetriq"},
+            headers={"Authorization": f"Bearer {settings.AI_API_KEY}", "X-Title": "Verveflow"},
             json={"model": settings.AI_MODEL, "messages": messages, "tools": _tool_specs(), "temperature": 0.2},
             timeout=TIMEOUT,
         )
     except httpx.HTTPError as e:
-        raise AssistantError(f"Couldn't reach the AI service ({e.__class__.__name__}).")
+        log.warning("AI service unreachable: %r", e)
+        raise AssistantError(DOWN)
     body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
     if r.status_code == 429 or (body.get("error") or {}).get("code") == 429:
-        raise AssistantError("The AI service is busy right now. Try again in a minute.")
+        raise AssistantError("The assistant is busy right now. Try again in a minute.")
     if r.status_code >= 400 or "error" in body:
-        raise AssistantError("The AI service couldn't answer: " + str((body.get("error") or {}).get("message") or r.status_code))
+        log.warning("AI service error %s (model %s): %s", r.status_code, settings.AI_MODEL,
+                    (body.get("error") or {}).get("message") or r.text[:500])
+        raise AssistantError(DOWN)
     return body["choices"][0]["message"]
 
 

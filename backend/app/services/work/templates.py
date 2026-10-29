@@ -166,7 +166,7 @@ def _snap_folder(db: Session, folder: Folder, opts: s.TemplateSave, base: dateti
 
 def snapshot_space(db: Session, space: Space, opts: s.TemplateSave, base: Optional[datetime] = None,
                    count: Optional[_Counter] = None) -> Dict[str, Any]:
-    """A whole Space: its statuses, tags, ClickApps, groups, fields, Folders and folderless Lists."""
+    """A whole Space: its statuses, tags, groups, fields, Folders and folderless Lists."""
     base = base or _today()
     count = count or _Counter()
     setup = _own_setup(db, space, "space_id")
@@ -180,7 +180,6 @@ def snapshot_space(db: Session, space: Space, opts: s.TemplateSave, base: Option
         "color": space.color,
         "icon": space.icon,
         "is_private": space.is_private,
-        "clickapps": dict(space.clickapps or {}),
         **setup,
         "tags": [
             {"name": t.name, "fg_color": t.fg_color, "bg_color": t.bg_color}
@@ -444,15 +443,15 @@ def _build_folder(db: Session, access: Access, space: Space, parent: Optional[Fo
 
 
 def build_space(db: Session, access: Access, snap: Dict[str, Any], name: Optional[str], base: Optional[datetime] = None) -> Space:
-    """Create a new Space from a Space snapshot (a template, or a copy of another Space)."""
-    from app.services.work import space_admin
+    """Create a new Space from a Space snapshot (a template, or a copy of another Space).
 
+    Snapshots saved before ClickApps were removed still carry a "clickapps" entry; it is simply not read.
+    """
     base = base or _today()
     space = hierarchy.create_space(db, access, s.SpaceCreate(
         name=(name or snap["name"])[:100], description=snap.get("description"), color=snap.get("color"),
         icon=snap.get("icon"), is_private=bool(snap.get("is_private")),
     ))
-    space_admin.set_clickapps(space, snap.get("clickapps") or {})
     for t in snap.get("tags", []):
         db.add(Tag(space_id=space.id, name=t["name"][:64], fg_color=t["fg_color"], bg_color=t["bg_color"]))
     db.flush()

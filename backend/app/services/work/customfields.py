@@ -154,9 +154,6 @@ def create(db: Session, opened: Opened, kind: LocationKind, data: s.CustomFieldI
     if not opened.level.at_least(PermissionLevel.edit):
         raise Forbidden("You need edit access here to create custom fields")
     obj = opened.obj
-    from app.services.work import space_admin
-
-    space_admin.require(db, obj.id if kind == LocationKind.space else obj.space_id, "custom_fields")
     if any(f.name.lower() == data.name.lower() for f in available(db, obj)):
         raise Invalid(f"A field called {data.name} already exists here")
     ftype = FieldType(data.type)

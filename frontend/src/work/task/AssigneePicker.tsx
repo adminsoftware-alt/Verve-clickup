@@ -1,11 +1,12 @@
-// Who is on this task. Everyone in the workspace is offered, plus the Teams, the way ClickUp does
-// it: search, tick people, and anyone who cannot open the List yet is shared in as you pick them.
+// Who is on this task. Everyone in the workspace is offered, then the Teams: search, click people
+// on or off, and anyone who cannot open the List yet is shared in as you pick them.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Lock, Plus, Search, Users, X } from 'lucide-react';
+import { Check, Lock, Search } from 'lucide-react';
 
 import { useWork, useMe } from '../WorkContext';
 import { workApi, type PersonLoadRow, type UserRef } from '../api';
 import { Avatar, Portal, formatDuration, useEscapeToClose } from '../ui';
+import { PeopleTeamsSwitch, TeamRow, teamIsOn, useAssignTeams, type PickMode } from './PeopleTeams';
 
 interface Props {
   listId: string;
@@ -24,22 +25,24 @@ interface Props {
 export const AssigneePicker: React.FC<Props> = ({
   listId, assignees, assignable, editable, canShare, multiple, onChange, onShared,
 }) => {
-  const { members, teams, hierarchy, workspace } = useWork();
+  const { members, workspace } = useWork();
   const meId = useMe();
   const [open, setOpen] = useState(false);
   // Assigning is where overload gets created, and it is the one moment nobody can see it: you
   // are looking at a task, not at the other person's week. So bring the week to the picker.
   const [load, setLoad] = useState<Record<string, PersonLoadRow> | null>(null);
   const [query, setQuery] = useState('');
+  // People, or Teams: a Team picked here puts everyone in it on the task in one go.
+  const [mode, setMode] = useState<PickMode>('people');
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const panel = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
+  const trigger = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState<{ top: number; left: number }>({ top: 96, left: 0 });
   const openPanel = () => {
     const r = trigger.current?.getBoundingClientRect();
     if (r) {
-      const width = 320;
+      const width = 272;
       const below = r.bottom + 6;
       const height = 400;
       setAt({
@@ -54,10 +57,9 @@ export const AssigneePicker: React.FC<Props> = ({
   const chosen = useMemo(() => new Set(assignees.map((a) => a.id)), [assignees]);
   const allowed = useMemo(() => (assignable ? new Set(assignable.map((u) => u.id)) : null), [assignable]);
 
-  // Everyone in the firm is offered, as in ClickUp. It used to be only the people who could already
-  // open the List -- for an employee in the New task dialog that was nobody but themselves.
-  // Someone who cannot open the List yet is marked, and shared in when picked (where allowed).
-  const isAdmin = hierarchy?.role === 'owner' || hierarchy?.role === 'admin';
+  // Everyone in the firm is offered. It used to be only the people who could already open the
+  // List -- for an employee in the New task dialog that was nobody but themselves. Someone who
+  // cannot open the List yet is marked, and shared in when picked (where allowed).
 
   const people = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -71,12 +73,7 @@ export const AssigneePicker: React.FC<Props> = ({
       });
   }, [members, query, meId]);
 
-  const shownTeams = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return teams
-      .filter((t) => isAdmin || t.lead_ids.includes(meId))
-      .filter((t) => !q || t.name.toLowerCase().includes(q));
-  }, [teams, query, isAdmin, meId]);
+  const shownTeams = useAssignTeams(query);
 
   useEffect(() => {
     if (!open || !workspace || load) return;
@@ -99,7 +96,8 @@ export const AssigneePicker: React.FC<Props> = ({
       return { text: `${formatDuration(row.planned_total - row.capacity_total)} over this week`, tone: 'text-red-600' };
     }
     if (full > 0.85) return { text: `nearly full — ${formatDuration(left)} left this week`, tone: 'text-amber-600' };
-    return { text: `${formatDuration(left)} free this week`, tone: 'text-gray-400' };
+    // Room to spare says nothing worth reading beside a name.
+    return null;
   };
 
   /** Give work to someone, sharing the List with them first if they cannot open it yet. */
@@ -130,6 +128,11 @@ export const AssigneePicker: React.FC<Props> = ({
 
   const pickTeam = async (members: UserRef[]) => {
     if (!multiple) return;
+    if (members.length > 0 && members.every((u) => chosen.has(u.id))) {
+      const off = new Set(members.map((u) => u.id));
+      onChange([...chosen].filter((id) => !off.has(id)));
+      return;
+    }
     const next = new Set(chosen);
     for (const user of members) {
       if (next.has(user.id)) continue;
@@ -143,35 +146,29 @@ export const AssigneePicker: React.FC<Props> = ({
     onChange([...next]);
   };
 
-  const row = 'flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm hover:bg-gray-50';
+  const row = 'flex w-full items-center gap-2.5 rounded-md px-2 py-1 text-left text-sm text-gray-800 hover:bg-gray-100';
+  const toggleOpen = () => { if (open) setOpen(false); else openPanel(); setNote(null); };
   return (
-    <div className="px-2">
-      <div className="flex flex-wrap items-center gap-1.5">
-        {/* Photos, or initials where there is none ("HK"), as ClickUp shows them: the name is on
-            hover, and a small × appears there to take someone off. */}
+    <div className="px-1">
+      {/* The whole field opens the picker: the people on the task as small name chips, or
+          "Add people" when there is nobody yet. Someone comes off by clicking them in the list. */}
+      <div
+        ref={trigger}
+        role={editable ? 'button' : undefined}
+        tabIndex={editable ? 0 : undefined}
+        aria-label={editable ? 'Choose assignees' : undefined}
+        aria-expanded={editable ? open : undefined}
+        onClick={editable ? toggleOpen : undefined}
+        onKeyDown={editable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleOpen(); } } : undefined}
+        className={`flex min-h-7 w-full flex-wrap items-center gap-1.5 rounded-md px-1 ${editable ? 'cursor-pointer' : ''}`}
+      >
         {assignees.map((user) => (
-          <span key={user.id} title={user.display_name || user.email} className="group/chip relative rounded-full ring-2 ring-white">
-            <Avatar user={user} size={26} />
-            {editable && (
-              <button type="button" aria-label={`Remove ${user.display_name || user.email}`} onClick={() => onChange(assignees.filter((a) => a.id !== user.id).map((a) => a.id))}
-                className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-gray-700 text-white shadow group-hover/chip:flex focus:flex">
-                <X size={10} strokeWidth={3} />
-              </button>
-            )}
+          <span key={user.id} className="inline-flex items-center gap-1.5 rounded-full bg-[#F2F4F7] py-0.5 pl-0.5 pr-2.5 text-[13px] text-gray-800">
+            <Avatar user={user} size={22} />
+            {user.id === meId ? 'Me' : (user.display_name || user.email).split(' ')[0]}
           </span>
         ))}
-        {assignees.length === 0 && <span className="text-sm text-gray-400">Empty</span>}
-        {editable && (
-          <button
-            ref={trigger}
-            type="button"
-            onClick={() => { if (open) setOpen(false); else openPanel(); setNote(null); }}
-            aria-expanded={open}
-            className="flex items-center gap-1 rounded-full border border-dashed border-gray-300 px-2 py-1 text-xs text-gray-600 hover:border-gray-400 hover:text-gray-800"
-          >
-            <Plus size={12} /> Assign
-          </button>
-        )}
+        {assignees.length === 0 && <span className="text-sm text-gray-400">{editable ? 'Add people' : 'Empty'}</span>}
       </div>
 
       {open && (
@@ -183,64 +180,49 @@ export const AssigneePicker: React.FC<Props> = ({
               aria-label="Choose assignees"
               onMouseDown={(e) => e.stopPropagation()}
               style={{ top: at.top, left: at.left }}
-              className="absolute w-80 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl"
+              className="absolute w-[17rem] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg"
             >
               <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2">
-                <Search size={14} className="text-gray-400" />
+                <Search size={14} className="shrink-0 text-gray-400" />
                 <input
                   autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search or enter email…" aria-label="Search people and Teams"
-                  className="w-full text-sm focus:outline-none"
+                  className="w-full text-sm placeholder:text-gray-400 focus:outline-none"
                 />
               </div>
-              <div className="max-h-80 overflow-auto py-1">
-                {shownTeams.length > 0 && multiple && (
-                  <>
-                    <p className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Teams</p>
-                    {shownTeams.map((team) => (
-                      <button key={team.id} type="button" className={row} onClick={() => pickTeam(team.members)}>
-                        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gray-100 text-gray-500"><Users size={13} /></span>
-                        <span className="min-w-0 flex-1 truncate text-gray-800">{team.name}</span>
-                        <span className="text-xs text-gray-400">{team.members.length}</span>
-                      </button>
-                    ))}
-                  </>
-                )}
-                {(['Assignees', 'People'] as const).map((section) => {
-                  // Who is on it already, first; then everyone else, you at the top.
-                  const shown = people.filter((m) => (section === 'Assignees') === chosen.has(m.user.id));
-                  if (!shown.length) return null;
+              {multiple && <div className="border-b border-gray-100 px-2 py-1.5"><PeopleTeamsSwitch mode={mode} onChange={setMode} /></div>}
+              <div className="max-h-56 overflow-auto p-1.5">
+                {mode === 'people' && people.length > 0 && <p className="px-2 pb-0.5 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">People</p>}
+                {mode === 'people' && [...people].sort((a, b) => Number(chosen.has(b.user.id)) - Number(chosen.has(a.user.id))).map((m) => {
+                  const on = chosen.has(m.user.id);
+                  const blind = !!allowed && !allowed.has(m.user.id);
+                  const week = weekFor(m.user.id);
                   return (
-                    <React.Fragment key={section}>
-                      <p className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{section}</p>
-                      {shown.map((m) => {
-                        const on = chosen.has(m.user.id);
-                        const blind = !!allowed && !allowed.has(m.user.id);
-                        const week = weekFor(m.user.id);
-                        return (
-                          <button key={m.user.id} type="button" className={`${row} ${on ? 'bg-brand-50/60' : ''}`} onClick={() => pick(m.user)} disabled={busy === m.user.id}>
-                            <Avatar user={m.user} size={24} />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-gray-800">
-                                {m.user.id === meId ? 'Me' : (m.user.display_name || m.user.email)}
-                              </span>
-                              {(blind || week) && (
-                                <span className="block truncate text-xs text-gray-400">
-                                  {blind
-                                    ? (canShare ? 'Not on this List yet — picking them shares it' : "Can't open this List")
-                                    : week && <span className={week.tone}>{week.text}</span>}
-                                </span>
-                              )}
-                            </span>
-                            {blind && <Lock size={12} className="shrink-0 text-amber-500" />}
-                            {on && <X size={14} className="shrink-0 text-gray-400" aria-label="Remove" />}
-                          </button>
-                        );
-                      })}
-                    </React.Fragment>
+                    <button key={m.user.id} type="button" aria-pressed={on} className={`${row} ${on ? 'bg-gray-100' : ''}`} onClick={() => pick(m.user)} disabled={busy === m.user.id}>
+                      <span className={`shrink-0 rounded-full ${on ? 'ring-2 ring-brand-600 ring-offset-1' : ''}`}><Avatar user={m.user} size={22} /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{m.user.id === meId ? 'Me' : (m.user.display_name || m.user.email)}</span>
+                        {(blind || week) && (
+                          <span className="block truncate text-xs text-gray-400">
+                            {blind
+                              ? (canShare ? 'Not on this List yet — picking them shares it' : "Can't open this List")
+                              : week && <span className={week.tone}>{week.text}</span>}
+                          </span>
+                        )}
+                      </span>
+                      {blind && <Lock size={12} className="shrink-0 text-amber-500" />}
+                      {on && <Check size={14} className="shrink-0 text-brand-600" aria-label="Assigned" />}
+                    </button>
                   );
                 })}
-                {people.length === 0 && <p className="px-3 py-4 text-center text-sm text-gray-400">Nobody matches that.</p>}
+                {mode === 'people' && people.length === 0 && <p className="px-3 py-4 text-center text-sm text-gray-400">Nobody matches that.</p>}
+                {mode === 'teams' && (
+                  <>
+                    <p className="px-2 pb-0.5 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">Teams <span className="normal-case tracking-normal">— picks everyone in it</span></p>
+                    {shownTeams.length === 0 && <p className="px-3 py-4 text-center text-sm text-gray-400">No Teams to pick from.</p>}
+                    {shownTeams.map((team) => <TeamRow key={team.id} team={team} on={teamIsOn(team, chosen)} onPick={() => pickTeam(team.members)} compact />)}
+                  </>
+                )}
               </div>
               {note && <p className="border-t border-gray-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">{note}</p>}
             </div>

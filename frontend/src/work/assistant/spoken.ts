@@ -14,6 +14,10 @@ const DAY = 'today|tomorrow|tmrw|day after tomorrow|next|this|monday|tuesday|wed
 const LEVEL = 'normal|medium|high|low|urgent|critical|important';
 
 const RULES: [RegExp, string][] = [
+  // "add a tsk to ...": typed in a hurry. Only the word "task" itself, which every rule after this
+  // looks for; shorthand inside the work ("chk bank stmt") is the task's name and stays as written.
+  [/\btsk(s?)\b/gi, 'task$1'],
+
   // "end date", misheard. Only where a value follows ("in that as tomorrow"), because "in that"
   // and "and that" are ordinary words everywhere else.
   [/\b(?:in|and|end)\s+(?:that|date|data|it)\b(?=\s+(?:as|is|on|of|=|:)\s)/gi, 'end date'],

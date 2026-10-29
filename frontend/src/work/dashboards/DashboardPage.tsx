@@ -14,7 +14,8 @@ import { useWork } from '../WorkContext';
 import { TaskPanel } from '../TaskPanel';
 import { DownloadIcon, Menu, NameDialog } from '../ui';
 import { Check, ChevronDown } from 'lucide-react';
-import { dashApi, type Card, type CardData, type Dashboard, type Filters, type Insights, type Period } from './api';
+import { dashApi, lensIsOn, type Card, type CardData, type Dashboard, type Filters, type Insights, type Period, type ViewLens } from './api';
+import { notify } from '../../components/notify';
 import { InsightsPanel } from './InsightsPanel';
 import { CardBody } from './cards';
 import { PeriodBar, PeriodMenu, StatCard, followsPeriod, periodLabel } from './StatRow';
@@ -89,11 +90,11 @@ const RefreshButton: React.FC<{ onRefresh: () => unknown }> = ({ onRefresh }) =>
   return (
     <button type="button" onClick={click} aria-busy={state === 'busy'}
       className={`group/fresh flex items-center gap-1.5 rounded-full py-1 pl-1.5 pr-3 text-xs font-semibold ring-1 transition-colors duration-300 ${done
-        ? 'bg-green-50 text-green-700 ring-green-200'
+        ? 'bg-[#EEF2F8] text-[#1C3A70] ring-[#B3C3DF]'
         : 'bg-gray-50 text-gray-700 ring-gray-200 hover:bg-white hover:text-brand-700 hover:ring-brand-200'}`}>
       <span className="relative flex h-[18px] w-[18px] items-center justify-center">
         {done ? (
-          <span key="done" className="fresh-tick flex h-[18px] w-[18px] items-center justify-center rounded-full bg-green-600 text-white">
+          <span key="done" className="fresh-tick flex h-[18px] w-[18px] items-center justify-center rounded-full bg-[#234788] text-white">
             <Check size={11} strokeWidth={3} />
           </span>
         ) : (
@@ -138,7 +139,7 @@ const CardRefresh: React.FC<{ onRefresh: () => Promise<unknown>; busy?: boolean 
     <span className="relative flex">
       {state === 'done' ? (
         <span className="flex h-[21px] w-[21px] items-center justify-center">
-          <span className="fresh-tick flex h-3.5 w-3.5 items-center justify-center rounded-full bg-green-600 text-white"><Check size={9} strokeWidth={3.5} /></span>
+          <span className="fresh-tick flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#234788] text-white"><Check size={9} strokeWidth={3.5} /></span>
         </span>
       ) : (
         <button type="button" aria-label="Refresh card" aria-busy={state === 'busy'} onClick={click} className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
@@ -240,7 +241,7 @@ const ScopeMenu: React.FC<{
       </span>
     );
   }
-  const tick = (on: boolean) => (on ? <Check size={14} className="text-teal-600" /> : <span className="w-3.5" />);
+  const tick = (on: boolean) => (on ? <Check size={14} className="text-brand-600" /> : <span className="w-3.5" />);
   return (
     <Menu
       align="right"
@@ -269,7 +270,9 @@ export const DashboardPage: React.FC<{
   intro?: React.ReactNode;
   /** Opened from People: the bar above already says whose board this is and that it is view only. */
   viewing?: boolean;
-}> = ({ dashboardId, embedded, heading, intro, viewing }) => {
+  /** Whose board this is, when it is one person's: its time cards open their timesheet, not yours. */
+  personId?: string;
+}> = ({ dashboardId, embedded, heading, intro, viewing, personId }) => {
   const params = useParams();
   const id = dashboardId ?? params.id ?? '';
   const navigate = useNavigate();
@@ -282,6 +285,8 @@ export const DashboardPage: React.FC<{
   const [data, setData] = useState<Record<string, CardData>>(() => lastSeen(id).data);
   const [insights, setInsights] = useState<Insights | null>(() => lastSeen(id).insights);
   const [insightsError, setInsightsError] = useState<string | null>(null);
+  // The cards' data failed to arrive: each card shows Retry rather than loading for ever.
+  const [dataFailed, setDataFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [undo, setUndo] = useState<Layout[]>([]);
@@ -295,8 +300,60 @@ export const DashboardPage: React.FC<{
   const [dragging, setDragging] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
+  // A time card opens the timesheet of the people the board is about: one person's sheet on their
+  // board, everyone's sheets on a Team or Company board (for those who may see them), else yours.
+  const groupBoard = !!dash?.team || insights?.who === 'team' || insights?.who === 'everyone';
+  const timesheetPath = personId ? `/timesheets/people/${encodeURIComponent(personId)}`
+    : groupBoard && (isAdmin || led.length > 0) ? '/timesheets/all' : '/timesheets';
+
   const canEdit = dash?.your_level === 'edit' || dash?.your_level === 'full';
   const canDelete = dash?.your_level === 'full';
+
+  // Someone who may only view a board -- a Manager on one of their people's boards -- still filters
+  // it, the same way its owner does, but for themselves. Their filters live here, go with every
+  // read, and are never saved, so the owner's board stays exactly as the owner left it.
+  const lens = useRef<ViewLens>({ cards: {} });
+  const lensTitles = useRef<Record<string, string>>({});
+  const viewOnly = !!dash && !canEdit;
+  const viewOnlyRef = useRef(viewOnly);
+  viewOnlyRef.current = viewOnly;
+  /** The board as this viewer has filtered it: the saved board with their own filters laid on. */
+  const withLens = useCallback((d: Dashboard): Dashboard => (lensIsOn(lens.current) ? {
+    ...d,
+    filters: lens.current.filters ?? d.filters,
+    cards: d.cards.map((c) => {
+      const mine = lens.current.cards[c.id];
+      return mine ? { ...c, title: lensTitles.current[c.id] ?? c.title, config: { ...c.config, ...(mine.filters ? { filters: mine.filters } : {}), ...(mine.period ? { period: mine.period } : {}) } } : c;
+    }),
+  } : d), []);
+  const readAll = useCallback(() => (lensIsOn(lens.current) ? dashApi.viewData(id, lens.current) : dashApi.data(id)), [id]);
+  const readOne = (cardId: string) => (lensIsOn(lens.current)
+    ? dashApi.viewData(id, { ...lens.current, card_ids: [cardId] }).then((rows) => rows[0])
+    : dashApi.cardData(id, cardId));
+  /** Save a card's settings -- or, for a viewer, keep its filters and window for them alone. */
+  const saveCard = async (cardId: string, body: { title?: string; config: Card['config'] }): Promise<Card> => {
+    if (!viewOnlyRef.current) return dashApi.updateCard(id, cardId, body);
+    const card = latestCards.current.find((c) => c.id === cardId)!;
+    lens.current = { ...lens.current, cards: { ...lens.current.cards, [cardId]: { filters: body.config.filters, period: body.config.period } } };
+    if (body.title) lensTitles.current[cardId] = body.title;
+    return { ...card, ...body };
+  };
+  const saveBoardFilters = async (filters: Filters): Promise<Dashboard> => {
+    if (!viewOnlyRef.current) return dashApi.update(id, { filters });
+    lens.current = { ...lens.current, filters };
+    return { ...dash!, filters };
+  };
+  /** Clear all filters: the owner's are cleared on the board; a viewer's own simply go. */
+  const resetBoard = async (): Promise<Dashboard> => {
+    if (!viewOnlyRef.current) return dashApi.resetFilters(id);
+    lens.current = { cards: {} };
+    lensTitles.current = {};
+    return dashApi.get(id);
+  };
+  /** A custom range is set in the card editor, which only the board's owner can save. */
+  const openCustom = (card: Card) => (viewOnly
+    ? notify.info('Custom ranges are set by the board’s owner. Pick one of the listed periods.')
+    : setDialog({ type: 'card', card }));
 
   // A full read replaces every card's data at once, so a card someone re-scoped while the read
   // was in flight would be quietly overwritten with the old period. Each single-card update bumps
@@ -311,26 +368,30 @@ export const DashboardPage: React.FC<{
       .then((x) => { setInsights(x); setInsightsError(null); })
       .catch((e) => setInsightsError((e as Error).message));
     try {
-      const rows = await dashApi.data(id);
+      const rows = await readAll();
+      setDataFailed(false);
       setData((prev) => {
         const fresh = Object.fromEntries(rows.map((r) => [r.card_id, r]));
         if (at === edits.current) return fresh;
         // Something was re-scoped mid-flight: keep what we already hold for those cards.
         return Object.fromEntries(rows.map((r) => [r.card_id, prev[r.card_id] ?? r]));
       });
-    } catch (e) { setError((e as Error).message); }
-  }, [id]);
+    } catch (e) { setError((e as Error).message); setDataFailed(true); }
+  }, [id, readAll]);
 
   const load = useCallback(async () => {
     try {
       setError(null);
       // The board and its cards' data don't depend on each other, so both are asked for at once.
-      await Promise.all([dashApi.get(id).then(setDash), loadData()]);
+      await Promise.all([dashApi.get(id).then((d) => setDash(withLens(d))), loadData()]);
     } catch (e) { setError((e as Error).message); }
-  }, [id, loadData]);
+  }, [id, loadData, withLens]);
 
   useEffect(() => {
     const last = lastSeen(id);
+    // A viewer's own filters belong to the board they were set on.
+    lens.current = { cards: {} };
+    lensTitles.current = {};
     setDash(last.dash); setData(last.data); setInsights(last.insights);
     setEditMode(false); setUndo([]); load();
   }, [id, load]);
@@ -343,7 +404,7 @@ export const DashboardPage: React.FC<{
   const refreshCard = async (cardId: string) => {
     edits.current += 1;
     try {
-      const row = await dashApi.cardData(id, cardId);
+      const row = await readOne(cardId);
       setData((prev) => ({ ...prev, [cardId]: row }));
     } catch (e) { setError((e as Error).message); }
   };
@@ -427,7 +488,7 @@ export const DashboardPage: React.FC<{
   const [busyCards, setBusyCards] = useState<ReadonlySet<string>>(() => new Set());
   const markBusy = (cardId: string) => setBusyCards((prev) => new Set(prev).add(cardId));
   const reloadOne = async (cardId: string) => {
-    try { return await dashApi.cardData(id, cardId); } finally {
+    try { return await readOne(cardId); } finally {
       setBusyCards((prev) => { const next = new Set(prev); next.delete(cardId); return next; });
     }
   };
@@ -465,13 +526,13 @@ export const DashboardPage: React.FC<{
       ...(canEdit && isAdmin ? [{ section: '', label: 'Delete card', icon: <Trash2 size={13} />, danger: true, onClick: () => removeCard(card) }] : []),
     ];
   };
-  const saveFilters = (filters: Filters) => act(async () => { setDash(await dashApi.update(id, { filters })); setDialog(null); await loadData(); });
+  const saveFilters = (filters: Filters) => act(async () => { setDash(await saveBoardFilters(filters)); setDialog(null); await loadData(); });
 
   /** Anything narrowing the board: its own filter, or a card filtered past how it was built. */
   const filtered = !!dash && (plainFilters(dash.filters) !== '{}' || dash.cards.some(narrowed));
   const clearAllFilters = () => act(async () => {
     edits.current += 1;
-    setDash(await dashApi.resetFilters(id));
+    setDash(await resetBoard());
     await loadData();
   });
   /** Refresh starts the board over: every filter off, every card read again. */
@@ -490,7 +551,7 @@ export const DashboardPage: React.FC<{
       if (dialog || openTask || document.querySelector('[role="dialog"], [role="menu"]')) return;
       const k = e.key.toLowerCase();
       if (k === 'r') { e.preventDefault(); loadData(); }
-      else if (k === 'f' && canEdit) { e.preventDefault(); boardFilter.current?.querySelector('button')?.click(); }
+      else if (k === 'f') { e.preventDefault(); boardFilter.current?.querySelector('button')?.click(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -558,7 +619,7 @@ export const DashboardPage: React.FC<{
         // Only retitle the standard wording, so a card someone renamed keeps its name.
         const word = filters.done ? 'Done' : 'Due';
         const title = /^(Due|Done)\b/.test(card.title) ? `${word} ${label}` : card.title;
-        const saved = await dashApi.updateCard(id, card.id, { title, config: { ...card.config, period, filters } });
+        const saved = await saveCard(card.id, { title, config: { ...card.config, period, filters } });
         setDash((prev) => (prev ? { ...prev, cards: prev.cards.map((c) => (c.id === saved.id ? saved : c)) } : prev));
         const fresh = await reloadOne(card.id);
         setData((prev) => ({ ...prev, [card.id]: fresh }));
@@ -579,7 +640,7 @@ export const DashboardPage: React.FC<{
       else filters.due = (window ? 'period' : choice) as Filters['due'];
       const config = { ...card.config, filters, ...(window ? { period: { preset: choice as Period['preset'] } } : {}) };
       markBusy(card.id);
-      const saved = await dashApi.updateCard(id, card.id, { config });
+      const saved = await saveCard(card.id, { config });
       setDash((prev) => (prev ? { ...prev, cards: prev.cards.map((c) => (c.id === saved.id ? saved : c)) } : prev));
       const fresh = await reloadOne(card.id);
       setData((prev) => ({ ...prev, [card.id]: fresh }));
@@ -594,7 +655,7 @@ export const DashboardPage: React.FC<{
     const run = before.then(() => act(async () => {
       // No spinning here: stepping a week is not a filter, and the card's own dates already move.
       const latest = latestCards.current.find((c) => c.id === card.id) ?? card;
-      const saved = await dashApi.updateCard(id, card.id, { config: { ...latest.config, period } });
+      const saved = await saveCard(card.id, { config: { ...latest.config, period } });
       latestCards.current = latestCards.current.map((c) => (c.id === saved.id ? saved : c));
       setDash((prev) => (prev ? { ...prev, cards: prev.cards.map((c) => (c.id === saved.id ? saved : c)) } : prev));
       const fresh = await reloadOne(card.id);
@@ -616,7 +677,7 @@ export const DashboardPage: React.FC<{
     const run = before.then(() => act(async () => {
       markBusy(card.id);
       const latest = latestCards.current.find((c) => c.id === card.id) ?? card;
-      const saved = await dashApi.updateCard(id, card.id, { config: { ...latest.config, filters } });
+      const saved = await saveCard(card.id, { config: { ...latest.config, filters } });
       latestCards.current = latestCards.current.map((c) => (c.id === saved.id ? saved : c));
       setDash((prev) => (prev ? { ...prev, cards: prev.cards.map((c) => (c.id === saved.id ? saved : c)) } : prev));
       const fresh = await reloadOne(card.id);
@@ -641,7 +702,7 @@ export const DashboardPage: React.FC<{
         value: card.config.period?.preset ?? 'this_week',
         options: periodChoices(card).map(([value, label]) => ({ value, label })),
         onPick: (value: string) => setPeriod(card, value as Period['preset']),
-        onCustom: () => setDialog({ type: 'card', card }),
+        onCustom: () => openCustom(card),
       };
     }
     // Everything else is scoped by its due date, and all of those shapes are one field on the
@@ -656,16 +717,16 @@ export const DashboardPage: React.FC<{
         ...CARD_PERIODS.map(([value, label]) => ({ value, label: `Due ${label.toLowerCase()}` })),
       ],
       onPick: (value: string) => setDueScope(card, value),
-      onCustom: () => setDialog({ type: 'card', card }),
+      onCustom: () => openCustom(card),
     };
   };
 
   const setPeriod = (card: Card, preset: Period['preset']) => {
-    if (preset === 'custom') { setDialog({ type: 'card', card }); return; }
+    if (preset === 'custom') { openCustom(card); return; }
     edits.current += 1;
     act(async () => {
       markBusy(card.id);
-      const saved = await dashApi.updateCard(id, card.id, { config: { ...card.config, period: { preset } } });
+      const saved = await saveCard(card.id, { config: { ...card.config, period: { preset } } });
       setDash((prev) => (prev ? { ...prev, cards: prev.cards.map((c) => (c.id === saved.id ? saved : c)) } : prev));
       const fresh = await reloadOne(card.id);
       setData((prev) => ({ ...prev, [card.id]: fresh }));
@@ -762,15 +823,12 @@ export const DashboardPage: React.FC<{
         {/* Two small floating toolbars, not one bar across the page: filters on the left, the
             board's own actions on the right, each only as wide as what it holds. */}
         <div className="no-print mb-6 flex flex-wrap items-center gap-x-3 gap-y-2">
-          {(canEdit || (!viewing && RELATION_NOTE[dash.relation])) && (
           <div className="dash-pill flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
-            {canEdit && <>
             {/* One filter over the whole board, in the same two-step panel the cards use. It is
                 set on the Dashboard and applied on top of whatever each card already filters by. */}
             <span ref={boardFilter} className="contents">
               <CardFilterMenu
                 value={dash.filters ?? {}}
-                disabled={!canEdit}
                 triggerLabel="Filter all cards"
                 title="Filters for every card (F)"
                 onApply={saveFilters}
@@ -784,17 +842,15 @@ export const DashboardPage: React.FC<{
             <span className="relative">
               <button type="button" onClick={() => filtered && clearAllFilters()} aria-disabled={!filtered}
                 aria-label={filtered ? 'Clear all filters' : 'Clear all filters (no filters added)'}
-                title={filtered ? 'Removes the board’s filters and each card’s' : 'No filters to clear'}
+
                 className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-medium transition-colors ${filtered
                   ? 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100'
                   : 'cursor-default border-dashed border-gray-300 bg-transparent text-gray-400'}`}>
                 <FilterX size={13} /> Clear all filters
               </button>
             </span>
-            </>}
             {!viewing && RELATION_NOTE[dash.relation] && <span className="px-1 text-gray-400">{RELATION_NOTE[dash.relation]}</span>}
           </div>
-          )}
           <span className="flex-1" />
           <div className="dash-pill flex shrink-0 items-center gap-1">
             <RefreshButton onRefresh={refresh} />
@@ -809,7 +865,7 @@ export const DashboardPage: React.FC<{
                   { label: 'Download Excel', icon: <FileSpreadsheet size={14} />, onClick: downloadAll },
                   { label: 'Print / save as PDF', icon: <Printer size={14} />, onClick: () => { setEditMode(false); setTimeout(() => window.print(), 50); } },
                 ]}
-                trigger={<span title="Download" className="dash-dl flex rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-brand-700"><DownloadIcon /></span>}
+                trigger={<span aria-label="Download" className="dash-dl flex rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-brand-700"><DownloadIcon /></span>}
               />
             </span>
             {canEdit && (FEATURES.dashboardEditButton || editMode) && (
@@ -857,9 +913,9 @@ export const DashboardPage: React.FC<{
             <>
               <PeriodBar
                 value={rowPeriod}
-                canEdit={canEdit && statCards.some(followsPeriod)}
+                canEdit={statCards.some(followsPeriod)}
                 onPick={applyRowPeriod}
-                onCustom={() => { const card = statCards.find(followsPeriod); if (card) setDialog({ type: 'card', card }); }}
+                onCustom={() => { const card = statCards.find(followsPeriod); if (card) openCustom(card); }}
               />
               <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {statCards.map((card) => (
@@ -873,7 +929,6 @@ export const DashboardPage: React.FC<{
                         <CardFilterMenu
                           value={card.config.filters ?? {}}
                           base={card.config.base_filters}
-                          disabled={!canEdit}
                           compact
                           hideDue
                           onApply={(filters) => setCardFilters(card, filters)}
@@ -890,9 +945,9 @@ export const DashboardPage: React.FC<{
               key={card.id}
               card={card}
               data={data[card.id]}
-              canEdit={canEdit}
+              canEdit
               onSetPeriod={(period) => setPeriod(card, period.preset)}
-              onCustom={() => setDialog({ type: 'card', card })}
+              onCustom={() => openCustom(card)}
               onDrill={(label) => setDialog({ type: 'drill', cardId: card.id, title: `${card.title}: ${label}` })}
               onSetFilters={(filters) => setCardFilters(card, filters)}
             />
@@ -914,7 +969,7 @@ export const DashboardPage: React.FC<{
                   if (!e.currentTarget.contains(target)) return;
                   if (target.closest('button, a, input, select, textarea, label, [role="menu"], .recharts-wrapper')) return;
                   if (window.getSelection()?.toString()) return;
-                  if (OPENS_TIMESHEET.includes(card.type)) navigate('/timesheets');
+                  if (OPENS_TIMESHEET.includes(card.type)) navigate(timesheetPath);
                   else setDialog({ type: 'drill', cardId: card.id, title: card.title });
                 }}
                 className={`ui-card dash-card group relative flex min-w-0 flex-col ${!editMode && isClickable(card) ? 'is-clickable' : ''} ${dragging === card.id ? 'opacity-50' : ''} ${editMode ? '!border-dashed !border-brand-200' : ''}`}
@@ -924,7 +979,7 @@ export const DashboardPage: React.FC<{
                   {editMode && (
                     <span
                       draggable
-                      title="Drag to move"
+                      aria-label="Drag to move"
                       onDragStart={(e) => { e.dataTransfer.setData('text/plain', card.id); setDragging(card.id); }}
                       onDragEnd={() => setDragging(null)}
                       className="cursor-grab text-gray-300 hover:text-gray-500"
@@ -954,16 +1009,14 @@ export const DashboardPage: React.FC<{
                       label={CARD_PERIODS.find(([v]) => v === (card.config.period?.preset ?? 'this_week'))?.[1] ?? 'Custom'}
                       preset={card.config.period?.preset ?? 'this_week'}
                       choices={periodChoices(card)}
-                      disabled={!canEdit}
                       onPick={(period) => setPeriod(card, period.preset)}
-                      onCustom={() => setDialog({ type: 'card', card })}
+                      onCustom={() => openCustom(card)}
                     />
                   )}
                   {FILTERABLE.includes(card.type) && (
                     <CardFilterMenu
                       value={card.config.filters ?? {}}
                           base={card.config.base_filters}
-                      disabled={!canEdit}
                       hideDue={CAN_DROP_PERIOD.includes(card.type)}
                       peopleOnly={PEOPLE_ONLY_FILTERS.includes(card.type)}
                       // The server says so with the card's figures; until fresh figures are in (the
@@ -974,16 +1027,16 @@ export const DashboardPage: React.FC<{
                     />
                   )}
                   {FEATURES.dashboardCardScopeMenu && (card.type === 'bar' || card.type === 'pie') && (
-                    <ScopeMenu time={cardTime(card)} disabled={!canEdit} />
+                    <ScopeMenu time={cardTime(card)} />
                   )}
                   </span>
                   {!!data[card.id]?.hidden_sources && (
-                    <span className="text-[10px] text-amber-600" title="Some locations on this card are not shared with you and are left out">partial</span>
+                    <span className="text-[10px] text-amber-600">partial — some places not shared with you</span>
                   )}
                   <span className="no-print flex items-center gap-0.5">
                     <CardRefresh busy={busyCards.has(card.id)} onRefresh={() => refreshCard(card.id)} />
                     {FEATURES.dashboardCardFullScreen && (
-                      <button type="button" title="Full screen" onClick={() => setDialog({ type: 'expand', cardId: card.id })} className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Expand size={13} /></button>
+                      <button type="button" aria-label="Full screen" onClick={() => setDialog({ type: 'expand', cardId: card.id })} className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><Expand size={13} /></button>
                     )}
                     {cardMenu(card).length > 0 && (
                       <Menu
@@ -1006,11 +1059,12 @@ export const DashboardPage: React.FC<{
                     onOpenTask={setOpenTask}
                     onRefresh={() => refreshCard(card.id)}
                     onShift={(start, end) => setCardPeriod(card, { preset: 'custom', start, end })}
+                    failed={dataFailed}
                   />
                 </div>
                 {editMode && (
                   <span
-                    title="Drag to resize"
+                    aria-label="Drag to resize"
                     onPointerDown={(e) => startResize(e, card)}
                     className="absolute bottom-0.5 right-0.5 h-3.5 w-3.5 cursor-se-resize rounded-sm border-b-2 border-r-2 border-brand-300"
                   />
@@ -1054,7 +1108,7 @@ export const DashboardPage: React.FC<{
       )}
       {dialog?.type === 'filters' && <FiltersDialog value={dash.filters} teamDashboard={!!dash.team} onClose={() => setDialog(null)} onSave={saveFilters} />}
       {dialog?.type === 'drill' && (
-        <DrillDialog dashboardId={id} cardId={dialog.cardId} segment={dialog.segment} title={dialog.title} onClose={() => setDialog(null)}
+        <DrillDialog dashboardId={id} cardId={dialog.cardId} segment={dialog.segment} title={dialog.title} lens={lens.current} onClose={() => setDialog(null)}
           onOpenTask={(taskId) => { setDialog(null); setOpenTask(taskId); }} />
       )}
       {dialog?.type === 'expand' && (() => {

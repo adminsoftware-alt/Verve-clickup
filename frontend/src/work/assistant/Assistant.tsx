@@ -384,7 +384,10 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const askAi = useCallback(async (said: string): Promise<boolean | string> => {
     if (!workspace || aiOff.current) return false;
     try {
-      const { answer } = await aiApi.ask(workspace.id, said, aiHistory.current);
+      const { answer: raw } = await aiApi.ask(workspace.id, said, aiHistory.current);
+      // Told to write plain text, a model still slips into Markdown now and then; the thread shows
+      // text as it is, so "**Ganesh**" would arrive with its asterisks.
+      const answer = raw.replace(/\*\*(.+?)\*\*/g, '$1').replace(/`([^`\n]+)`/g, '$1').replace(/^#{1,6}\s+/gm, '');
       aiHistory.current = [...aiHistory.current, { role: 'user' as const, content: said }, { role: 'assistant' as const, content: answer }].slice(-10);
       say(said, answer);
       return true;
@@ -424,7 +427,7 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   // Where the keyboard goes on each screen: the big button on Home, the box in a chat.
   useEffect(() => {
-    if (view === 'home') startButton.current?.focus();
+    if (view === 'home') startButton.current?.focus({ preventScroll: true });
     if (view === 'chat') {
       const el = box.current;
       if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
@@ -613,6 +616,9 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
    */
   const autoCreate = useCallback(async (said: string): Promise<boolean> => {
     if (!workspace) return false;
+    // Anything asked as a question waits on a card, however much it reads like a task: a question
+    // made into a task on the spot is a task nobody wanted, in somebody's List, before they can stop it.
+    if (/\?\s*$/.test(said)) return false;
     const r = interpret(said.trim(), { people, me: me ?? undefined, hierarchy });
     if (r.kind !== 'create') return false;
     // Several places share the name they used, or the one named does not exist: a question, not
@@ -1053,7 +1059,7 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                       {/* Assumed values are drawn quieter than said ones, so "you, from
                           today" reads as a default that can be changed, not as heard. */}
                       {one.start_date && (
-                        <span className={p.assumed[i]?.start ? assumedChip : chip} title={p.assumed[i]?.start ? 'Not said, so from today' : undefined}>
+                        <span className={p.assumed[i]?.start ? assumedChip : chip} aria-label={p.assumed[i]?.start ? 'Not said, so from today' : undefined}>
                           Starts {compactDate(one.start_date)}
                         </span>
                       )}
@@ -1064,7 +1070,7 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                         const m = members.find((x) => x.user.id === id);
                         const mine = p.assumed[i]?.who && id === me;
                         return (
-                          <span key={id} className={mine ? assumedChip : chip} title={mine ? 'Not said, so yours' : undefined}>
+                          <span key={id} className={mine ? assumedChip : chip} aria-label={mine ? 'Not said, so yours' : undefined}>
                             {m && <Avatar user={m.user} size={14} />}{id === me ? 'You' : m ? m.user.display_name || m.user.email : id}
                           </span>
                         );
@@ -1411,29 +1417,29 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     <div className="fixed inset-0 z-[125] flex items-end justify-end sm:p-5" onMouseDown={onClose}>
       <div
         ref={dialog}
-        role="dialog" aria-modal="true" aria-label="Verve Assistant"
+        role="dialog" aria-modal="true" aria-label="Verveflow Assistant"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
-        className="ai-theme assistant-in flex h-[100dvh] w-full flex-col overflow-hidden bg-white sm:h-[min(42rem,calc(100dvh-2.5rem))] sm:max-w-[25rem] sm:rounded-2xl sm:border sm:border-gray-200 sm:shadow-2xl"
+        className="assistant-in flex h-[100dvh] w-full flex-col overflow-hidden bg-white sm:h-[min(42rem,calc(100dvh-2.5rem))] sm:max-w-[25rem] sm:rounded-2xl sm:border sm:border-gray-200 sm:shadow-2xl"
       >
         <header className="flex shrink-0 items-center gap-2 px-3 pb-2.5 pt-[max(0.75rem,env(safe-area-inset-top))]">
           {back && (
-            <button type="button" onClick={back} aria-label={view === 'chat' ? 'Back to Home' : 'Back to past chats'} title="Back" className={iconButton}>
+            <button type="button" onClick={back} aria-label={view === 'chat' ? 'Back to Home' : 'Back to past chats'} className={iconButton}>
               <ArrowLeft size={18} />
             </button>
           )}
           <Mark size={30} />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[15px] font-semibold leading-tight text-gray-900">Verve Assistant</p>
+            <p className="truncate text-[15px] font-semibold leading-tight text-gray-900">Verveflow Assistant</p>
             {view === 'pastOne' && opened && <p className="text-[11px] leading-tight text-gray-500">Past chat · {when(opened.startedAt)}</p>}
           </div>
           {view === 'chat' && entries.length > 0 && (
-            <button type="button" onClick={startNew} aria-label="New chat" title="New chat"
+            <button type="button" onClick={startNew} aria-label="New chat"
               className="tap flex shrink-0 items-center gap-1 rounded-lg px-2 text-[13px] font-medium text-brand-700 hover:bg-brand-50">
               <SquarePen size={16} /> New chat
             </button>
           )}
-          <button type="button" onClick={onClose} aria-label="Close (Esc)" title="Close (Esc)" className={iconButton}>
+          <button type="button" onClick={onClose} aria-label="Close (Esc)" className={iconButton}>
             <X size={18} />
           </button>
         </header>
@@ -1441,7 +1447,7 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         {(view === 'home' || view === 'past') && tabs}
 
         {view === 'home' && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-gradient-to-b from-brand-50/70 via-white to-white">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-white">
             <div className="px-5 pb-5 pt-7">
               <p className="text-[26px] font-semibold leading-tight tracking-tight text-gray-900">
                 Welcome{firstName ? ` ${firstName}` : ''} <span aria-hidden>👋</span>
@@ -1533,7 +1539,7 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               </button>
               {owner && (
                 <button
-                  type="button" aria-label="Delete this chat" title="Delete this chat"
+                  type="button" aria-label="Delete this chat"
                   onClick={() => { forget(owner, opened.id); setOpened(null); showPast(); }}
                   className="tap rounded-xl border border-gray-200 text-gray-500 hover:bg-red-50 hover:text-red-700"
                 >
@@ -1552,7 +1558,7 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 <Mark size={26} />
                 <div className="flex max-w-[85%] flex-col items-start">
                   <div className="rounded-2xl rounded-tl-md bg-white px-3.5 py-2 text-[14px] leading-snug text-gray-800 ring-1 ring-gray-200">
-                    Hi{firstName ? ` ${firstName}` : ''}, I’m your Verve assistant. Tell me what to do — create, change or finish
+                    Hi{firstName ? ` ${firstName}` : ''}, I’m your Verveflow assistant. Tell me what to do — create, change or finish
                     tasks, log time, or ask about your work. English, Hindi or both.
                   </div>
                   <p className="mt-1 text-[10px] text-gray-400">{when(startedAt)}</p>
@@ -1619,18 +1625,18 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 {voice.supported && (
                   <button
                     type="button" onClick={voice.listening ? voice.stop : voice.start}
-                    aria-label={voice.listening ? 'Stop listening' : 'Speak'} title={voice.listening ? 'Stop listening' : 'Speak'}
-                    className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white shadow-md transition-transform active:scale-95 ${
-                      voice.listening ? 'bg-gradient-to-br from-red-500 to-rose-600' : 'bg-gradient-to-br from-brand-500 to-brand-700 hover:scale-105'}`}
+                    aria-label={voice.listening ? 'Stop listening' : 'Speak'}
+                    className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white ${
+                      voice.listening ? 'bg-red-600' : 'bg-brand-600 hover:bg-brand-700'}`}
                   >
-                    {/* A voice assistant first: the mic is the big round button, and it breathes while it listens. */}
+                    {/* A voice assistant first: the mic is the big round button, and it pulses while it listens. */}
                     {voice.listening && <span className="absolute inset-0 animate-ping rounded-full bg-red-400/60 motion-reduce:animate-none" aria-hidden />}
                     {voice.listening ? <Square size={14} className="relative" fill="currentColor" /> : <AudioLines size={19} />}
                   </button>
                 )}
                 <button
                   type="button" onClick={() => void post(text)} disabled={!text.trim() || thinking}
-                  aria-label="Send" title="Send (Enter)"
+                  aria-label="Send"
                   className="tap flex shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white hover:bg-brand-700 disabled:bg-gray-200 disabled:text-gray-400"
                 >
                   {thinking ? <Loader2 size={16} className="animate-spin" /> : <SendHorizontal size={16} />}
@@ -1656,14 +1662,14 @@ export const Assistant: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   );
 };
 
-/** The assistant's mark: the same sparkle as the launcher, so the panel reads as what it opened. */
+/** The assistant's mark: the launcher's navy circle, so the panel reads as what it opened. */
 const Mark: React.FC<{ size: number }> = ({ size }) => (
   <span
     aria-hidden
     style={{ width: size, height: size }}
-    className="flex shrink-0 items-center justify-center rounded-full bg-[#14082e]"
+    className="flex shrink-0 items-center justify-center rounded-full bg-[#234788]"
   >
-    <ChatBubble className={size >= 30 ? 'h-5 w-5' : 'h-4 w-4'} blink={false} />
+    <ChatBubble className={size >= 30 ? 'h-5 w-5' : 'h-4 w-4'} />
   </span>
 );
 
@@ -1691,7 +1697,7 @@ const Reply: React.FC<{
     <div className={`min-w-0 max-w-full overflow-hidden rounded-2xl rounded-tl-md px-3.5 py-2 text-[14px] leading-snug ring-1 [overflow-wrap:anywhere] ${tone}`}>
       <p className="flex items-start gap-1.5">
         {result && !turn.failed && <Check size={15} className="mt-0.5 shrink-0" />}
-        <span>{turn.reply}</span>
+        <span className="whitespace-pre-line">{turn.reply}</span>
       </p>
       {turn.detail && <p className="mt-1 text-[12px] leading-relaxed opacity-75">{turn.detail}</p>}
       {!one && turn.tasks && turn.tasks.length > 0 && (
@@ -1740,7 +1746,7 @@ const Pick: React.FC<{ options: Task[]; chosen: Task | null; onPick: (t: Task) =
           >
             {chosen?.id === t.id ? <Check size={12} className="shrink-0" /> : <ListChecks size={12} className="shrink-0 text-gray-300" />}
             <span className="min-w-0 flex-1">
-              <span className="block truncate">{t.name}</span>
+              <span className="block [overflow-wrap:anywhere]">{t.name}</span>
               {listName(t.list_id) && <span className="block truncate text-[11px] font-normal text-gray-400">{listName(t.list_id)}</span>}
             </span>
             <StatusDot status={t.status} size={9} />
