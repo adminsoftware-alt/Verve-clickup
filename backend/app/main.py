@@ -5,6 +5,9 @@ from app.api import api_router
 from app.api.v2 import api_router as api_v2_router
 from app.api.v2.deps import work_error_handler
 from app.services.work.errors import WorkError
+from app.services.files import StorageError
+from fastapi.responses import JSONResponse
+import logging
 from contextlib import asynccontextmanager
 import os
 
@@ -56,6 +59,15 @@ app.include_router(api_router, prefix="/api/v1")
 # v2: Postgres-backed work hierarchy (spaces, folders, lists, tasks)
 app.include_router(api_v2_router, prefix="/api/v2")
 app.add_exception_handler(WorkError, work_error_handler)
+
+
+async def _storage_unavailable(request, exc):
+    # The file store (Supabase Storage) failed; say so plainly rather than answer a bare 500.
+    logging.getLogger(__name__).warning("File storage error: %s", exc)
+    return JSONResponse(status_code=503, content={"detail": "File storage is not available right now. Try again in a minute."})
+
+
+app.add_exception_handler(StorageError, _storage_unavailable)
 
 @app.get("/health")
 def health_check():

@@ -3,13 +3,12 @@
 Checklists: editing needs edit access to the task; an item's assignee can tick their own
 item with comment access, as in ClickUp's assigned checklist items.
 Attachments: anyone who can comment can attach; the uploader or someone with full access
-can delete. Files are stored under UPLOAD_DIR and only served to people who can see the task.
+can delete. Files are kept in file storage (app/services/files.py) and only served to people who can see the task.
 """
 
 import os
 import secrets
 import uuid
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func, select
@@ -18,20 +17,11 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models import Attachment, Checklist, ChecklistItem, ChecklistTemplate, PermissionLevel, Task, TaskComment, User, WorkspaceMember
 from app.schemas import work as s
+from app.services import files
 from app.services.work import events
 from app.services.work.access import Access, Opened, open_task
 from app.services.work.errors import Forbidden, Invalid, NotFound
 from app.services.work.permissions import can_manage_workspace
-
-BACKEND_DIR = Path(__file__).resolve().parents[3]
-
-
-def upload_dir() -> Path:
-    path = Path(settings.UPLOAD_DIR)
-    path = path if path.is_absolute() else BACKEND_DIR / path
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
 
 def _require(opened: Opened[Task], level: PermissionLevel, what: str) -> None:
     if not opened.level.at_least(level):
@@ -245,10 +235,11 @@ def add_attachment(
     if not data:
         raise Invalid("The file is empty")
     key = secrets.token_hex(16)
-    (upload_dir() / key).write_bytes(data)
+    safe_type = (content_type or "application/octet-stream")[:127]
+    files.put(files.ATTACHMENTS, key, data, safe_type)
     safe_name = os.path.basename(filename or "file")[:255] or "file"
     a = Attachment(task_id=opened.obj.id, user_id=opened.access.user_id, filename=safe_name,
-                   content_type=(content_type or "application/octet-stream")[:127], size=len(data), storage_key=key,
+                   content_type=safe_type, size=len(data), storage_key=key,
                    comment_id=comment.id if comment else None)
     db.add(a)
     db.flush()
@@ -257,24 +248,21 @@ def add_attachment(
     return a
 
 
-def open_attachment(db: Session, user_id: str, attachment_id: uuid.UUID) -> Tuple[Attachment, Opened[Task], Path]:
+def open_attachment(db: Session, user_id: str, attachment_id: uuid.UUID) -> Tuple[Attachment, Opened[Task]]:
     a = db.get(Attachment, attachment_id)
     if a is None:
         raise NotFound("Attachment not found")
     opened = open_task(db, user_id, a.task_id, PermissionLevel.view)
-    return a, opened, upload_dir() / a.storage_key
+    return a, opened
 
 
 def delete_attachment(db: Session, user_id: str, attachment_id: uuid.UUID) -> None:
-    a, opened, path = open_attachment(db, user_id, attachment_id)
+    a, opened = open_attachment(db, user_id, attachment_id)
     if a.user_id != user_id and opened.level != PermissionLevel.full:
         raise Forbidden("Only the uploader or someone with full access can delete this file")
     db.delete(a)
     db.flush()
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
+    files.remove(files.ATTACHMENTS, a.storage_key)
 
 
 def counts(db: Session, task_ids) -> Dict[uuid.UUID, int]:
@@ -294,11 +282,11 @@ def copy_attachments(db: Session, source: Task, target: Task) -> int:
     """
     made = 0
     for a in db.scalars(select(Attachment).where(Attachment.task_id == source.id).order_by(Attachment.created_at)):
-        src = upload_dir() / a.storage_key
-        if not src.exists():
+        data = files.get(files.ATTACHMENTS, a.storage_key)
+        if data is None:
             continue
         key = secrets.token_hex(16)
-        (upload_dir() / key).write_bytes(src.read_bytes())
+        files.put(files.ATTACHMENTS, key, data, a.content_type)
         db.add(Attachment(task_id=target.id, user_id=a.user_id, filename=a.filename,
                           content_type=a.content_type, size=a.size, storage_key=key))
         made += 1

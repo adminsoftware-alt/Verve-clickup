@@ -13,6 +13,14 @@ ClickUp-style work management + time tracking for Verve Advisory. See README.md 
 - Backend: `venv/Scripts/python -m uvicorn app.main:app --port 8000` (no `--reload`). Open the app at `localhost:5173`, not 127.0.0.1.
 - The app DB is Supabase; tests use the local 5433 DB (`TEST_DATABASE_URL`).
 
+## Hosting and speed (stay on free tiers until the Google Cloud move)
+- Render free (Singapore) + Supabase free, project `hirgcsugsyvjgfbsygdk` in Singapore (company account). The old Seoul project is a backup only (commented line in `backend/.env`).
+- Speed is set by sequential DB queries in the slowest request, not data size. Merging parallel requests made pages slower; cut queries instead. `memo(db)` in `app/db/session.py` caches reads for one request.
+- The Supabase pooler allows 15 connections in total: Render 7 + local 4 (`DB_POOL_SIZE`). Run scripts with `DB_POOL_SIZE=1`.
+- `backend/.env` rejects unknown keys, so add a setting to `app/core/config.py` before putting it in `.env`.
+- Uploads go through `app/services/files.py`: Supabase Storage when `SUPABASE_URL`/`SUPABASE_SECRET_KEY` are set, else `UPLOAD_DIR`. Render's disk is wiped on every deploy, so never write files to disk there.
+- New tables don't get Row Level Security automatically; after a migration, enable it on them in Supabase. The web-API roles (anon/authenticated) have no grants; keep it that way.
+
 ## Push
 - Push to the `verve` remote, branch `harish`:
   `git -c credential.https://github.com.helper= -c credential.helper=manager push verve harish`

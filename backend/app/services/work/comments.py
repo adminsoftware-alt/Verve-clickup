@@ -34,6 +34,7 @@ from app.db.models import (
 )
 from app.schemas import collab as c
 from app.schemas import work as s
+from app.services import files
 from app.services.work import events, extras
 from app.services.work.access import Opened, open_task
 from app.services.work.errors import Forbidden, Invalid, NotFound
@@ -209,13 +210,13 @@ def delete(db: Session, user_id: str, comment_id: uuid.UUID) -> None:
     comment, opened = _open_comment(db, user_id, comment_id)
     if comment.user_id != user_id and opened.level != PermissionLevel.full:
         raise Forbidden("Only the author or someone with full access can delete a comment")
-    # The rows go with the comment (and its replies); the bytes on disk have to be removed by hand.
+    # The rows go with the comment (and its replies); the stored files have to be removed by hand.
     thread = select(TaskComment.id).where((TaskComment.id == comment.id) | (TaskComment.parent_id == comment.id))
-    files = list(db.scalars(select(Attachment).where(Attachment.comment_id.in_(thread))))
+    stored = list(db.scalars(select(Attachment).where(Attachment.comment_id.in_(thread))))
     db.delete(comment)
     db.flush()
-    for a in files:
-        (extras.upload_dir() / a.storage_key).unlink(missing_ok=True)
+    for a in stored:
+        files.remove(files.ATTACHMENTS, a.storage_key)
 
 
 def add_file(db: Session, user_id: str, comment_id: uuid.UUID, filename: str, content_type: str, data: bytes) -> Attachment:

@@ -1,7 +1,6 @@
 """People administration: bulk import, offboarding, ownership, sign-in rules, email set-up, profile photos."""
 
 import logging
-import os
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -13,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models import BlockedEmail, Task, TaskAssignee, Team, TeamMember, User, Workspace, WorkspaceMember, WorkspaceRole
 from app.schemas import work as s
+from app.services import files
 from app.services.work import audit, events, onboarding
 from app.services.work.access import Access, access_problem, chain_for_task, sign_in_problem
 from app.services.work.errors import Forbidden, Invalid, NotFound
@@ -579,12 +579,6 @@ AVATAR_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
 MAX_AVATAR = 2 * 1024 * 1024
 
 
-def avatar_dir() -> str:
-    path = os.path.join(settings.UPLOAD_DIR, "avatars")
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
 def _looks_like(content: bytes, kind: str) -> bool:
     return (kind == "png" and content.startswith(b"\x89PNG")) or (kind == "jpg" and content.startswith(b"\xff\xd8")) or \
         (kind == "webp" and content[:4] == b"RIFF" and content[8:12] == b"WEBP")
@@ -602,15 +596,11 @@ def set_avatar(db: Session, access: Access, user_id: str, content: bytes, conten
         raise Invalid("The photo must be 2 MB or smaller")
     old = user.avatar_key
     key = f"{secrets.token_urlsafe(24)}.{kind}"
-    with open(os.path.join(avatar_dir(), key), "wb") as fh:
-        fh.write(content)
+    files.put(files.AVATARS, key, content, content_type)
     user.avatar_key = key
     db.flush()
     if old:
-        try:
-            os.remove(os.path.join(avatar_dir(), old))
-        except OSError:
-            pass
+        files.remove(files.AVATARS, old)
     return user
 
 
@@ -619,10 +609,7 @@ def remove_avatar(db: Session, access: Access, user_id: str) -> None:
         raise Forbidden("You can only change your own photo")
     _, user = _member(db, access, user_id)
     if user.avatar_key:
-        try:
-            os.remove(os.path.join(avatar_dir(), user.avatar_key))
-        except OSError:
-            pass
+        files.remove(files.AVATARS, user.avatar_key)
         user.avatar_key = None
         db.flush()
 

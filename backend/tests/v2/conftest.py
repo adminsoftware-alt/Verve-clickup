@@ -21,6 +21,7 @@ from app.core.config import settings
 
 settings.REPORTS_SCHEDULER_ENABLED = False  # tests call reports.run_due directly
 settings.REQUIRE_TASK_DETAILS = False  # test_tasks.py covers the rule; the rest create bare tasks
+settings.SUPABASE_SECRET_KEY = ""  # uploads go to a temporary folder, never the real file storage
 from app.db import session as db_session
 from app.db.base import Base
 from app.main import app

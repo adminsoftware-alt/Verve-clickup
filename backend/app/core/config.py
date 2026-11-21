@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # Task attachments are stored here (relative to the backend folder unless absolute).
     UPLOAD_DIR: str = "uploads"
     MAX_UPLOAD_MB: int = 25
+    # Supabase Storage for uploads (see app/services/files.py). Left empty, files stay in UPLOAD_DIR,
+    # which is fine locally but not on Render, whose disk is emptied on every restart.
+    SUPABASE_URL: str = ""
+    SUPABASE_SECRET_KEY: str = ""
+    STORAGE_BUCKET: str = "uploads"
     # Checks for due reports once a minute while the API runs.
     REPORTS_SCHEDULER_ENABLED: bool = True
     # Email that goes out on a timer rather than because somebody did something: the daily,

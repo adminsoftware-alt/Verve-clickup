@@ -1,13 +1,12 @@
 """People administration: import, offboarding, ownership, sign-in rules, email, photos, audit log, joiner checklist."""
 
-import os
 import re
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -16,6 +15,7 @@ from app.db.models import User
 from app.db.session import get_db
 from app.schemas import costs as cs
 from app.schemas import work as s
+from app.services import files
 from app.services.work import audit, costs, onboarding, people, people_admin, space_icons
 from app.services.work.access import Access
 from app.services.work.errors import Forbidden, Invalid, NotFound
@@ -207,10 +207,7 @@ def avatar(key: str):
     """Profile photos are served by an unguessable name, so an <img> can show them without signing in."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{20,64}\.(png|jpg|webp)", key):
         raise NotFound("Photo not found")
-    path = os.path.join(people_admin.avatar_dir(), key)
-    if not os.path.isfile(path):
-        raise NotFound("Photo not found")
-    return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    return _picture(files.AVATARS, key, "Photo not found")
 
 
 # --- a Space's picture -------------------------------------------------------------------------------------------------
@@ -239,10 +236,19 @@ def space_icon(key: str):
     """Served by an unguessable name, like profile photos, so the sidebar's <img> needs no sign-in."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{20,64}\.(png|jpg|webp)", key):
         raise NotFound("Picture not found")
-    path = os.path.join(space_icons.icon_dir(), key)
-    if not os.path.isfile(path):
-        raise NotFound("Picture not found")
-    return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    return _picture(files.SPACE_ICONS, key, "Picture not found")
+
+
+_PICTURE_TYPES = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
+
+
+def _picture(folder: str, key: str, missing: str) -> Response:
+    data = files.get(folder, key)
+    if data is None:
+        raise NotFound(missing)
+    # A picture's key changes whenever it is replaced, so browsers may keep it for good.
+    return Response(data, media_type=_PICTURE_TYPES[key.rsplit(".", 1)[1]],
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 # --- audit log ---------------------------------------------------------------------------------------------------------

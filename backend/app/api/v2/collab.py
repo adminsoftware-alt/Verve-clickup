@@ -4,7 +4,7 @@ import uuid
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
-from fastapi.responses import FileResponse
+from urllib.parse import quote
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.db.models import Checklist, PermissionLevel, TaskActivity, User, Worksp
 from app.db.session import get_db
 from app.schemas import collab as c
 from app.schemas import work as s
+from app.services import files
 from app.services.work import comments, events, extras, inbox
 from app.services.work.access import Access, chain_for_task, open_task
 from app.services.work.errors import Forbidden, Invalid, NotFound
@@ -335,10 +336,12 @@ async def upload_attachment(task_id: uuid.UUID, file: UploadFile = File(...), us
 
 @router.get("/attachments/{attachment_id}/download")
 def download_attachment(attachment_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    a, _, path = extras.open_attachment(db, user.id, attachment_id)
-    if not path.exists():
+    a, _ = extras.open_attachment(db, user.id, attachment_id)
+    data = files.get(files.ATTACHMENTS, a.storage_key)
+    if data is None:
         raise NotFound("The file is missing from storage")
-    return FileResponse(path, media_type=a.content_type, filename=a.filename)
+    return Response(data, media_type=a.content_type,
+                    headers={"Content-Disposition": f"attachment; filename*=utf-8''{quote(a.filename)}"})
 
 
 @router.delete("/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)

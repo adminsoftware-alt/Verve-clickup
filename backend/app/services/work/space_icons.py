@@ -1,17 +1,16 @@
 """A Space's own picture as its icon, uploaded by an admin.
 
-The file is stored under UPLOAD_DIR/space-icons/<key>, with a random key so its URL can be public,
+The file is kept in file storage (app/services/files.py) under space-icons/<key>, with a random key so its URL can be public,
 and the Space's `icon` holds "img:<key>" -- the same field that otherwise holds an emoji -- so no
 other part of the hierarchy has to change to carry it.
 """
-import os
 import secrets
 import uuid
 
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.db.models import Space
+from app.services import files
 from app.services.work.access import Access
 from app.services.work.errors import Forbidden, Invalid, NotFound
 from app.services.work.people_admin import AVATAR_TYPES, _looks_like
@@ -19,12 +18,6 @@ from app.services.work.permissions import can_manage_workspace
 
 MAX_ICON = 1 * 1024 * 1024
 PREFIX = "img:"
-
-
-def icon_dir() -> str:
-    path = os.path.join(settings.UPLOAD_DIR, "space-icons")
-    os.makedirs(path, exist_ok=True)
-    return path
 
 
 def _space(db: Session, access: Access, space_id: uuid.UUID) -> Space:
@@ -38,10 +31,7 @@ def _space(db: Session, access: Access, space_id: uuid.UUID) -> Space:
 
 def _drop_file(icon: str | None) -> None:
     if icon and icon.startswith(PREFIX):
-        try:
-            os.remove(os.path.join(icon_dir(), icon[len(PREFIX):]))
-        except OSError:
-            pass
+        files.remove(files.SPACE_ICONS, icon[len(PREFIX):])
 
 
 def set_icon(db: Session, access: Access, space_id: uuid.UUID, content: bytes, content_type: str) -> Space:
@@ -52,8 +42,7 @@ def set_icon(db: Session, access: Access, space_id: uuid.UUID, content: bytes, c
     if len(content) > MAX_ICON:
         raise Invalid("The picture must be 1 MB or smaller")
     key = f"{secrets.token_urlsafe(24)}.{kind}"
-    with open(os.path.join(icon_dir(), key), "wb") as fh:
-        fh.write(content)
+    files.put(files.SPACE_ICONS, key, content, content_type)
     old = space.icon
     space.icon = PREFIX + key
     db.flush()
