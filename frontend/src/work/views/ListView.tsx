@@ -649,6 +649,7 @@ export const ListView: React.FC<{
                 {canAddIn(group.key) && (
                   adding === group.key && inlineAdd ? (
                     <InlineComposer status={group.status} people={people}
+                      grid={phone ? undefined : { template, columns: shown.map((c) => c.key), extra: fields.length }}
                       onSave={(name, input) => onCreate(name, group.key, input)}
                       onCancel={() => setAdding(null)} />
                   ) : adding === group.key ? (

@@ -76,6 +76,7 @@ function describe(item: InboxItem): string {
         : `${d.person} left your team ${d.team}`;
     case 'chat_mention': return `mentioned you in ${d.view ?? 'a chat'}: “${d.body ?? ''}”`;
     case 'shared': {
+      if (d.assigned) return `assigned you the List “${d.name ?? 'untitled'}”`;
       const what = d.what === 'list' ? 'List' : d.what === 'space' ? 'Space' : d.what === 'folder' ? 'Folder' : 'task';
       const level = d.level === 'full' ? 'full access' : d.level === 'edit' ? 'edit access' : d.level === 'comment' ? 'comment access' : 'view access';
       return `shared the ${what} “${d.name ?? 'untitled'}” with ${d.team ? `your Team ${d.team}` : 'you'} (${level})`;

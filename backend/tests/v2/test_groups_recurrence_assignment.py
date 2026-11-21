@@ -237,6 +237,21 @@ def test_a_manager_hands_a_list_to_someone_in_their_team(api, org):
     assert ok(api.get(f"/tasks/{t['id']}/time", "lead"))["total_seconds"] == HOUR  # the lead sees their team's time
 
 
+def test_assigning_a_list_tells_the_person_in_their_inbox(api, org):
+    inbox = lambda who: ok(api.get(f"/workspaces/{org['ws']}/inbox", who, params={"tab": "primary"}))
+    assigned = lambda who: [i for i in inbox(who) if i["kind"] == "shared" and i["data"].get("assigned")]
+    # Made with an assignee, as the "+ List" dialog does it.
+    lst = ok(api.post(f"/folders/{org['folder']['id']}/lists", "lead", {"name": "Skills", "assignees": ["member"]}), 201)
+    got = assigned("member")
+    assert [(i["data"]["name"], i["data"]["id"]) for i in got] == [("Skills", lst["id"])]
+    assert assigned("lead") == []  # not the person who assigned it
+    # Saving the same assignee again is not news; adding someone is, to them only.
+    ok(api.put(f"/lists/{lst['id']}/assignee", "lead", {"user_ids": ["member", "lead"]}))
+    assert len(assigned("member")) == 1 and assigned("lead") == []
+    ok(api.put(f"/lists/{org['other']['id']}/assignee", "admin", {"user_id": "member2"}))
+    assert [i["data"]["name"] for i in assigned("member2")] == ["Elsewhere"]
+
+
 def test_admins_assign_to_anyone_and_taking_it_back_removes_access(api, org):
     out = ok(api.put(f"/lists/{org['other']['id']}/assignee", "admin", {"user_id": "member2"}))
     assert out["assignee_id"] == "member2"

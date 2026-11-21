@@ -112,6 +112,15 @@ def assign_list(db: Session, opened: Opened[TaskList], data: s.ListAssign) -> Ta
     ]
     lst.assignee_id = wanted[0]  # the first of them, for anything that reads a single owner
     db.flush()
+    # Tell the people it was just handed to. The access above is granted directly rather than
+    # through sharing, so without this a List assigned to someone never reached their Inbox.
+    # It is a "shared" item, so muting "shared with me" mutes it too; `assigned` changes the wording.
+    from app.services.work import events
+
+    events.notify(
+        db, access.workspace_id, [u for u in wanted if u not in before], access.user_id, "shared", "primary",
+        data={"what": "list", "name": lst.name, "level": PermissionLevel.full.value, "id": str(lst.id), "team": None, "assigned": True},
+    )
     return lst
 
 

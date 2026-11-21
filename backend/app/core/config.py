@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_SECRET_KEY: str = ""
     STORAGE_BUCKET: str = "uploads"
+    # For the planned move from Firebase to Supabase Auth. Nothing reads them yet; they are declared
+    # so .env can hold them without the settings refusing to load.
+    SUPABASE_PUBLISHABLE_KEY: str = ""
+    SUPABASE_JWKS_URL: str = ""
     # Checks for due reports once a minute while the API runs.
     REPORTS_SCHEDULER_ENABLED: bool = True
     # Email that goes out on a timer rather than because somebody did something: the daily,

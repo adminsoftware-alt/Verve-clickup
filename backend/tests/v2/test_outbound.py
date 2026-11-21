@@ -233,6 +233,10 @@ def test_the_friday_recap_says_what_went_right_and_stays_quiet_otherwise(api, wo
     now = datetime.now(timezone.utc)
     ok(api.put(f"/workspaces/{ws}/delivery", "member", {"timezone": "Asia/Kolkata"}))
     friday = _next(4, now).replace(hour=11, minute=30)  # 17:00 in India
+    # The recap counts work finished since that week's Monday, and the task below is closed now.
+    # On a Saturday or Sunday the next Friday is in the following week, so use this week's.
+    if now.weekday() >= 5:
+        friday -= timedelta(days=7)
 
     # A week with nothing closed and no hours is a week this email should not comment on.
     run(outbound.run_friday_recaps, friday)

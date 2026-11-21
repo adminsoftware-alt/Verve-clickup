@@ -11,11 +11,13 @@ import { FEATURES } from '../config/features';
 export const MyTasksNav: React.FC = () => {
   const { workspace, hierarchy, teams, me } = useWork();
   const { pathname } = useLocation();
+  // Before the early return: hooks must run in the same order on every render, and the first
+  // render (no workspace yet) used to stop before this one.
+  const [adminOpen, setAdminOpen] = useState(false);
 
   if (!workspace) return null;
   const isAdmin = hierarchy?.role === 'owner' || hierarchy?.role === 'admin';
   const looksAfterOthers = isAdmin || teams.some((t) => t.lead_ids.includes(me));
-  const [adminOpen, setAdminOpen] = useState(false);
 
   const rowClass = (active: boolean) =>
     `side-row flex w-full items-center gap-2 no-underline ${active ? 'is-active bg-brand-50 text-brand-700' : 'text-gray-700'}`;
